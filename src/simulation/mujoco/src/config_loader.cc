@@ -34,6 +34,27 @@ bool ConfigLoader::LoadConfig() {
       }
     }
 
+    // 加载接触点可视化配置
+    if (config["contact_visualization"]) {
+      YAML::Node contact_viz = config["contact_visualization"];
+      
+      if (contact_viz["position_offset"]) {
+        contact_position_offset_ = contact_viz["position_offset"].as<double>();
+      }
+      
+      if (contact_viz["marker_size"]) {
+        contact_marker_size_ = contact_viz["marker_size"].as<double>();
+      }
+      
+      if (contact_viz["force_scale"]) {
+        contact_force_scale_ = contact_viz["force_scale"].as<double>();
+      }
+      
+      if (contact_viz["enabled"]) {
+        contact_visualization_enabled_ = contact_viz["enabled"].as<bool>();
+      }
+    }
+
     return true;
   } catch (const std::exception& e) {
     std::cerr << "Error loading config file: " << e.what() << std::endl;

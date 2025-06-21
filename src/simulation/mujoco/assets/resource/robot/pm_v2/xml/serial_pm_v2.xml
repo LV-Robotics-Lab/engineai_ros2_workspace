@@ -1,6 +1,16 @@
 <mujoco model="engineai_robotics">
     <compiler angle="radian" discardvisual="false" autolimits="true" eulerseq="zyx"/>
-    <option timestep="0.002" tolerance="1e-10"/>
+    <option timestep="0.0001" tolerance="1e-10"/>
+
+    <!-- 添加可视化设置 -->
+    <visual>
+        <!-- 接触点显示设置 -->
+        <!-- contactpoint: RGBA颜色 (红, 绿, 蓝, 透明度) -->
+        <!-- contactwidth: 接触点宽度 -->
+        <!-- contactheight: 接触点高度 -->
+        <rgba contactpoint="1.0 0.0 0.0 1.0" contactforce="0.8 0.36 0.36 1" contactfriction="0.8 0.36 0.36 1" contacttorque="0.8 0.36 0.36 1" contactgap="0.8 0.36 0.36 1"/>
+        <scale contactwidth="0.003" contactheight="0.005" forcewidth="0.02"/>
+    </visual>
 
     <default>
         <default class="biped">

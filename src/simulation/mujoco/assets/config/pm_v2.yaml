@@ -1,14 +1,30 @@
-urdf: serial_pm_v2.urdf
-xml: pm_v2.xml
-
+actuator:
+  joint_command_topic: /hardware/joint_command
+  joint_state_topic: /hardware/joint_state
+contact_visualization:
+  enabled: true
+  force_scale: 0.01
+  marker_size: 0.1
+  position_offset: 0.0
+imu_topic: /hardware/imu_info
+joint_state_topic: /hardware/joint_state
 model_param:
-  num_total_joints: 24
   num_contacts: 4
   num_single_contact_dimensions: 2
-
+  num_total_joints: 24
+physics:
+  contact_damping: 0.005
+  contact_stiffness: 0.0001
+  friction: 0.8
+  gravity:
+  - 0.0
+  - 0.0
+  - -9.81
 sensor:
   imu_topic: /hardware/imu_info
-
-actuator:
-  joint_state_topic: /hardware/joint_state
-  joint_command_topic: /hardware/joint_command
+simulation:
+  max_iterations: 100
+  timestep: 0.002
+  tolerance: 1e-10
+urdf: serial_pm_v2.urdf
+xml: pm_v2.xml

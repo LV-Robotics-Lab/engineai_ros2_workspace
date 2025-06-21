@@ -25,6 +25,12 @@ class ConfigLoader {
   std::string GetJointStateTopic() const { return joint_state_topic_; }
   std::string GetJointCommandTopic() const { return joint_command_topic_; }
 
+  // 接触点可视化配置
+  double GetContactPositionOffset() const { return contact_position_offset_; }
+  double GetContactMarkerSize() const { return contact_marker_size_; }
+  double GetContactForceScale() const { return contact_force_scale_; }
+  bool IsContactVisualizationEnabled() const { return contact_visualization_enabled_; }
+
   // Asset path related methods
   std::string GetModelFilePath() const;
   std::string GetResourceDir() const;
@@ -45,6 +51,12 @@ class ConfigLoader {
   std::string imu_topic_;
   std::string joint_state_topic_;
   std::string joint_command_topic_;
+
+  // 接触点可视化配置
+  double contact_position_offset_ = 0.0;
+  double contact_marker_size_ = 0.03;
+  double contact_force_scale_ = 0.01;
+  bool contact_visualization_enabled_ = true;
 };
 
 #endif  // CONFIG_LOADER_H_

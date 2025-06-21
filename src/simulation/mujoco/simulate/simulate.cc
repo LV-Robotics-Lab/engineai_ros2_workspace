@@ -2347,6 +2347,11 @@ void Simulate::Render() {
     pending_.ui_update_ctrl = false;
   }
 
+  // 设置接触点可视化选项 - 在每次渲染时都确保设置
+  this->opt.flags[mjVIS_CONTACTPOINT] = 1;  // 显示接触点
+  this->opt.flags[mjVIS_CONTACTFORCE] = 1;  // 显示接触力
+  this->opt.flags[mjVIS_CONTACTSPLIT] = 1;  // 显示接触分离
+
   // render scene
   mjr_render(rect, &this->scn, &this->platform_ui->mjr_context());
 

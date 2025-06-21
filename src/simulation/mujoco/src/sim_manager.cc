@@ -132,6 +132,15 @@ bool SimManager::Initialize() {
 
   mjvOption opt;
   mjv_defaultOption(&opt);
+  
+  // 启用接触点可视化 - 这是关键设置
+  opt.flags[mjVIS_CONTACTPOINT] = 1;  // 显示接触点
+  opt.flags[mjVIS_CONTACTFORCE] = 1;  // 显示接触力
+  opt.flags[mjVIS_CONTACTSPLIT] = 1;  // 显示接触分离
+  
+  // 添加调试信息
+  RCLCPP_INFO(logger, "Contact visualization enabled: CONTACTPOINT=%d, CONTACTFORCE=%d, CONTACTSPLIT=%d", 
+              opt.flags[mjVIS_CONTACTPOINT], opt.flags[mjVIS_CONTACTFORCE], opt.flags[mjVIS_CONTACTSPLIT]);
 
   mjvPerturb pert;
   mjv_defaultPerturb(&pert);
@@ -397,6 +406,12 @@ void SimManager::PhysicsThread(std::string_view filename) {
     if (d_) {
       sim_->Load(m_, d_, filename.data());
       const std::unique_lock<std::recursive_mutex> lock(sim_->mtx);
+
+      // 设置可视化选项 - 在模型加载后设置
+      sim_->opt.flags[mjVIS_CONTACTPOINT] = 1;  // 显示接触点
+      sim_->opt.flags[mjVIS_CONTACTFORCE] = 1;  // 显示接触力
+      sim_->opt.flags[mjVIS_CONTACTSPLIT] = 1;  // 显示接触分离
+      RCLCPP_INFO(logger, "Contact visualization flags set in sim_->opt");
 
       RCLCPP_INFO(logger, "Performing initial mj_forward calculation...");
       mj_forward(m_, d_);

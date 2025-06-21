@@ -1,4 +1,16 @@
 #!/bin/bash
+
+# Initialize conda in the script
+source ~/anaconda3/etc/profile.d/conda.sh
+
+# 简洁的conda环境处理
+if [[ -n "$CONDA_DEFAULT_ENV" ]]; then
+    echo "Conda environment '$CONDA_DEFAULT_ENV' detected."
+    echo "Deactivating conda environment..."
+    conda deactivate
+    echo "Conda environment deactivated."
+fi
+
 # Gets the source directory
 root_dir="$(realpath -s $(cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" &> /dev/null && pwd)/..)"
 
