@@ -9,7 +9,7 @@ using namespace std::chrono_literals;
 
 namespace {
 // Constants Default
-constexpr double kControlFrequency = 500.0;                 // Control frequency in Hz
+constexpr double kControlFrequency = 1000.0;                // Control frequency in Hz - 从500Hz改为1000Hz
 constexpr double kControlPeriod = 1.0 / kControlFrequency;  // Control period in seconds
 }  // namespace
 

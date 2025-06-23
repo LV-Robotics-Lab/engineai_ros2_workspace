@@ -31,6 +31,10 @@ class ConfigLoader {
   double GetContactForceScale() const { return contact_force_scale_; }
   bool IsContactVisualizationEnabled() const { return contact_visualization_enabled_; }
 
+  // 碰撞模型配置
+  bool UseSimplifiedGeometry() const { return use_simplified_geometry_; }
+  std::string GetCollisionModelCondition() const;
+
   // Asset path related methods
   std::string GetModelFilePath() const;
   std::string GetResourceDir() const;
@@ -57,6 +61,9 @@ class ConfigLoader {
   double contact_marker_size_ = 0.03;
   double contact_force_scale_ = 0.01;
   bool contact_visualization_enabled_ = true;
+
+  // 碰撞模型配置
+  bool use_simplified_geometry_ = false;
 };
 
 #endif  // CONFIG_LOADER_H_

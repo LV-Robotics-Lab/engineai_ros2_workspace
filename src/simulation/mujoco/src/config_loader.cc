@@ -1,6 +1,8 @@
 #include "config_loader.h"
 #include <fstream>
 #include <iostream>
+#include <string>
+#include <exception>
 
 ConfigLoader::ConfigLoader(const std::string& config_file) : config_file_(config_file) {}
 
@@ -55,6 +57,15 @@ bool ConfigLoader::LoadConfig() {
       }
     }
 
+    // 加载碰撞模型配置
+    if (config["collision_model"]) {
+      YAML::Node collision_model = config["collision_model"];
+      
+      if (collision_model["use_simplified_geometry"]) {
+        use_simplified_geometry_ = collision_model["use_simplified_geometry"].as<bool>();
+      }
+    }
+
     return true;
   } catch (const std::exception& e) {
     std::cerr << "Error loading config file: " << e.what() << std::endl;
@@ -65,3 +76,13 @@ bool ConfigLoader::LoadConfig() {
 std::string ConfigLoader::GetModelFilePath() const { return assets_path_ + "/resource/" + xml_filename_; }
 
 std::string ConfigLoader::GetResourceDir() const { return assets_path_ + "/resource"; }
+
+// 获取碰撞模型条件字符串
+std::string ConfigLoader::GetCollisionModelCondition() const {
+  return use_simplified_geometry_ ? "simplified" : "mesh";
+}
+
+// 获取碰撞模型标志位
+bool ConfigLoader::UseSimplifiedGeometry() const {
+  return use_simplified_geometry_;
+}

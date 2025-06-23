@@ -189,7 +189,30 @@ mjModel* SimManager::LoadModel(std::string_view file) {
       RCLCPP_ERROR(logger, "Could not load binary model");
     }
   } else {
-    mnew = mj_loadXML(filename, nullptr, mj_load_error_.data(), mj_load_error_.size());
+    // 获取碰撞模型条件
+    std::string collision_condition = "simplified";  // 默认值
+    if (config_loader_) {
+      collision_condition = config_loader_->GetCollisionModelCondition();
+    }
+    
+    RCLCPP_INFO(logger, "Loading XML with collision condition: %s", collision_condition.c_str());
+    
+    // 设置编译条件
+    mjVFS vfs;
+    mj_defaultVFS(&vfs);
+    
+    // 创建编译选项
+    mjOption opt;
+    mj_defaultOption(&opt);
+    
+    // 设置条件编译标志
+    if (collision_condition == "simplified") {
+      opt.compiler.condition = mjCOND_SIMPLIFIED;
+    } else if (collision_condition == "mesh") {
+      opt.compiler.condition = mjCOND_MESH;
+    }
+    
+    mnew = mj_loadXML(filename, &vfs, mj_load_error_.data(), mj_load_error_.size());
     if (mj_load_error_[0]) {
       size_t error_length = std::strlen(mj_load_error_.data());
       if (mj_load_error_[error_length - 1] == '\n') {
