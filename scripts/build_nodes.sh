@@ -7,7 +7,7 @@ source ~/anaconda3/etc/profile.d/conda.sh
 if [[ -n "$CONDA_DEFAULT_ENV" ]]; then
     echo "Conda environment '$CONDA_DEFAULT_ENV' detected."
     echo "Deactivating conda environment..."
-    conda deactivate
+  conda deactivate
     echo "Conda environment deactivated."
 fi
 
