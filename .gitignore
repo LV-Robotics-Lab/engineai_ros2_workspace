@@ -14,10 +14,15 @@ logs/*.png
 logs/*.jpg
 logs/*.jpeg
 
+# 忽略编译文件
+log/
+install/
+build/  
+
 # 忽略分析结果图片
-*.png
-*.jpg
-*.jpeg
+logs/*.png
+logs/*.jpg
+logs/*.jpeg
 
 # 保留logs目录但忽略数据文件
 !logs/.gitkeep
