@@ -205,12 +205,9 @@ mjModel* SimManager::LoadModel(std::string_view file) {
     mjOption opt;
     mj_defaultOption(&opt);
     
-    // 设置条件编译标志
-    if (collision_condition == "simplified") {
-      opt.compiler.condition = mjCOND_SIMPLIFIED;
-    } else if (collision_condition == "mesh") {
-      opt.compiler.condition = mjCOND_MESH;
-    }
+    // 注意：MuJoCo的碰撞模型选择应该在XML文件中配置
+    // 这里我们直接加载模型，让MuJoCo使用默认的编译设置
+    // 如果需要特定的碰撞模型，应该在XML文件中使用不同的几何体定义
     
     mnew = mj_loadXML(filename, &vfs, mj_load_error_.data(), mj_load_error_.size());
     if (mj_load_error_[0]) {

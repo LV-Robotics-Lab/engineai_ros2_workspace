@@ -82,7 +82,3 @@ std::string ConfigLoader::GetCollisionModelCondition() const {
   return use_simplified_geometry_ ? "simplified" : "mesh";
 }
 
-// 获取碰撞模型标志位
-bool ConfigLoader::UseSimplifiedGeometry() const {
-  return use_simplified_geometry_;
-}
