@@ -9,6 +9,7 @@
 __pycache__/
 *.pyc
 
+
 # 忽略CSV数据文件
 logs/contact_data_*.csv
 logs/*.png
