@@ -3,6 +3,7 @@
 .cache/
 /install/
 /build/
+/venv/
 /log/
 /rosbag2_*/
 __pycache__/
