@@ -82,16 +82,19 @@ Joystick Control is the simplest mode with which the user can enjoy the default 
 ```bash
 # in host
 # terminal 1
+source venv/bin/activate
 ./src/third_party/install.sh
 ./scripts/build_nodes.sh sim
 source install/setup.bash
 # ros2 launch mujoco_simulator mujoco_simulator.launch.py
+
+source venv/bin/activate
 ros2 launch mujoco_simulator mujoco_simulator.launch.py save_contact_csv:=true csv_save_frequency:=1
 
 # terminal 2
 # choose mesh or geometry: in src/simulation/mujoco/assets/config/pm_v2.yaml
 # change "use_simplified_geometry: true"
-python3 scripts/analyze_contact_forces.py logs/contact_data_20250701_163233.csv
+python3 scripts/analyze_contact_forces.py logs/contact_data_20250723_023314.csv
 
 # terminal 2
 # ros2 launch interface_example contact_viz.launch.py

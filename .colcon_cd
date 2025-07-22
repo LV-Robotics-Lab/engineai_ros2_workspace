@@ -1,0 +1,3 @@
+# Exclude virtual environment from colcon scanning
+exclude:
+  - "venv/" 

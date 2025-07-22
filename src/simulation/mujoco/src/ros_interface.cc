@@ -247,6 +247,62 @@ void RosInterface::PublishContactForces(const mjModel* m, mjData* d) {
   frame_count++;
   if (frame_count % 100 == 0) {
     RCLCPP_INFO(node_->get_logger(), "Current contacts: %d", ncon);
+    
+    // 统计所有接触的力大小
+    double total_force_magnitude = 0.0;
+    double max_force_magnitude = 0.0;
+    int contacts_with_force = 0;
+    
+    // 计算所有接触的合力
+    mjtNum total_world_force[3] = {0.0, 0.0, 0.0};
+    mjtNum total_world_torque[3] = {0.0, 0.0, 0.0};
+    
+    for (int i = 0; i < ncon; ++i) {
+      const mjContact& contact = d->contact[i];
+      mjtNum contact_force[6] = {0.0, 0.0, 0.0, 0.0, 0.0, 0.0};
+      mj_contactForce(m, d, i, contact_force);
+      
+      // 转换到世界坐标系
+      mjtNum world_force[3] = {0.0, 0.0, 0.0};
+      mjtNum world_torque[3] = {0.0, 0.0, 0.0};
+      
+      for (int j = 0; j < 3; j++) {
+        world_force[j] = contact.frame[j*3 + 0] * contact_force[0] + 
+                         contact.frame[j*3 + 1] * contact_force[1] + 
+                         contact.frame[j*3 + 2] * contact_force[2];
+        
+        world_torque[j] = contact.frame[j*3 + 0] * contact_force[3] + 
+                          contact.frame[j*3 + 1] * contact_force[4] + 
+                          contact.frame[j*3 + 2] * contact_force[5];
+      }
+      
+      // 累加到合力
+      for (int j = 0; j < 3; j++) {
+        total_world_force[j] += world_force[j];
+        total_world_torque[j] += world_torque[j];
+      }
+      
+      double force_magnitude = sqrt(contact_force[0]*contact_force[0] + 
+                                   contact_force[1]*contact_force[1] + 
+                                   contact_force[2]*contact_force[2]);
+      
+      if (force_magnitude > 0.1) {  // 只统计有意义的力
+        contacts_with_force++;
+        total_force_magnitude += force_magnitude;
+        if (force_magnitude > max_force_magnitude) {
+          max_force_magnitude = force_magnitude;
+        }
+      }
+    }
+    
+    double total_force_magnitude_world = sqrt(total_world_force[0]*total_world_force[0] + 
+                                             total_world_force[1]*total_world_force[1] + 
+                                             total_world_force[2]*total_world_force[2]);
+    
+    RCLCPP_INFO(node_->get_logger(), 
+                "Force stats: total=%.3f, max=%.3f, contacts_with_force=%d/%d, total_world_force=(%.3f,%.3f,%.3f), magnitude=%.3f", 
+                total_force_magnitude, max_force_magnitude, contacts_with_force, ncon,
+                total_world_force[0], total_world_force[1], total_world_force[2], total_force_magnitude_world);
   }
   
   if (ncon == 0) {
@@ -269,6 +325,10 @@ void RosInterface::PublishContactForces(const mjModel* m, mjData* d) {
   contact_msg->contact_gaps.resize(ncon);
   contact_msg->contact_bodies_1.resize(ncon);
   contact_msg->contact_bodies_2.resize(ncon);
+
+  // 计算所有接触的合力
+  mjtNum total_world_force[3] = {0.0, 0.0, 0.0};
+  mjtNum total_world_torque[3] = {0.0, 0.0, 0.0};
 
   // Fill contact data
   for (int i = 0; i < ncon; ++i) {
@@ -308,23 +368,45 @@ void RosInterface::PublishContactForces(const mjModel* m, mjData* d) {
     contact_msg->contact_positions_y[i] = pos[1];
     contact_msg->contact_positions_z[i] = pos[2];
 
-    // Contact force - 从efc_force获取（如果接触被包含在约束中）
-    if (contact.efc_address >= 0 && contact.efc_address < d->nefc) {
-      // 法向力在efc_force中
-      contact_msg->contact_forces_x[i] = contact.frame[0] * d->efc_force[contact.efc_address];
-      contact_msg->contact_forces_y[i] = contact.frame[1] * d->efc_force[contact.efc_address];
-      contact_msg->contact_forces_z[i] = contact.frame[2] * d->efc_force[contact.efc_address];
-    } else {
-      // 接触未被包含在约束中，设置为0
-      contact_msg->contact_forces_x[i] = 0.0;
-      contact_msg->contact_forces_y[i] = 0.0;
-      contact_msg->contact_forces_z[i] = 0.0;
+    // 使用mj_contactForce获取完整的6D接触力
+    mjtNum contact_force[6] = {0.0, 0.0, 0.0, 0.0, 0.0, 0.0};
+    mj_contactForce(m, d, i, contact_force);
+    
+    // 将接触坐标系下的力转换为世界坐标系
+    // contact_force[0:2] 是力，contact_force[3:5] 是力矩
+    mjtNum world_force[3] = {0.0, 0.0, 0.0};
+    mjtNum world_torque[3] = {0.0, 0.0, 0.0};
+    
+    // 正确的坐标系转换
+    // contact.frame 在MuJoCo中存储为转置形式，轴在行中
+    // frame[0-2]: X轴 (法向量)
+    // frame[3-5]: Y轴 (第一个切向量)  
+    // frame[6-8]: Z轴 (第二个切向量)
+    for (int j = 0; j < 3; j++) {
+      // 转换力：world_force = frame^T * contact_force
+      world_force[j] = contact.frame[j*3 + 0] * contact_force[0] + 
+                       contact.frame[j*3 + 1] * contact_force[1] + 
+                       contact.frame[j*3 + 2] * contact_force[2];
+      
+      // 转换力矩：world_torque = frame^T * contact_torque
+      world_torque[j] = contact.frame[j*3 + 0] * contact_force[3] + 
+                        contact.frame[j*3 + 1] * contact_force[4] + 
+                        contact.frame[j*3 + 2] * contact_force[5];
     }
-
-    // Contact torque - 暂时设置为0，因为需要更复杂的计算
-    contact_msg->contact_torques_x[i] = 0.0;
-    contact_msg->contact_torques_y[i] = 0.0;
-    contact_msg->contact_torques_z[i] = 0.0;
+    
+    // 累加到合力
+    for (int j = 0; j < 3; j++) {
+      total_world_force[j] += world_force[j];
+      total_world_torque[j] += world_torque[j];
+    }
+    
+    contact_msg->contact_forces_x[i] = world_force[0];
+    contact_msg->contact_forces_y[i] = world_force[1];
+    contact_msg->contact_forces_z[i] = world_force[2];
+    
+    contact_msg->contact_torques_x[i] = world_torque[0];
+    contact_msg->contact_torques_y[i] = world_torque[1];
+    contact_msg->contact_torques_z[i] = world_torque[2];
 
     // Contact gap (distance)
     contact_msg->contact_gaps[i] = contact.dist;
@@ -332,6 +414,18 @@ void RosInterface::PublishContactForces(const mjModel* m, mjData* d) {
     // Contact body indices
     contact_msg->contact_bodies_1[i] = m->geom_bodyid[contact.geom[0]];
     contact_msg->contact_bodies_2[i] = m->geom_bodyid[contact.geom[1]];
+  }
+
+  // 添加合力信息到消息中（如果有接触的话）
+  if (ncon > 0) {
+    // 可以在这里添加合力字段，如果消息类型支持的话
+    // 或者通过其他方式发布合力信息
+    RCLCPP_INFO(node_->get_logger(), 
+                "Total contact force: (%.3f, %.3f, %.3f), magnitude: %.3f", 
+                total_world_force[0], total_world_force[1], total_world_force[2],
+                sqrt(total_world_force[0]*total_world_force[0] + 
+                     total_world_force[1]*total_world_force[1] + 
+                     total_world_force[2]*total_world_force[2]));
   }
 
   // Publish contact force message
@@ -350,6 +444,51 @@ void RosInterface::PublishContactForces(const mjModel* m, mjData* d) {
       // 使用MuJoCo仿真时间而不是ROS时间
       double sim_time = d->time;
       
+      // 计算所有接触的合力
+      mjtNum total_world_force[3] = {0.0, 0.0, 0.0};
+      mjtNum total_world_torque[3] = {0.0, 0.0, 0.0};
+      
+      for (int i = 0; i < ncon; ++i) {
+        const mjContact& contact = d->contact[i];
+        mjtNum contact_force[6] = {0.0, 0.0, 0.0, 0.0, 0.0, 0.0};
+        mj_contactForce(m, d, i, contact_force);
+        
+        // 转换到世界坐标系
+        mjtNum world_force[3] = {0.0, 0.0, 0.0};
+        mjtNum world_torque[3] = {0.0, 0.0, 0.0};
+        
+        for (int j = 0; j < 3; j++) {
+          world_force[j] = contact.frame[j*3 + 0] * contact_force[0] + 
+                           contact.frame[j*3 + 1] * contact_force[1] + 
+                           contact.frame[j*3 + 2] * contact_force[2];
+          
+          world_torque[j] = contact.frame[j*3 + 0] * contact_force[3] + 
+                            contact.frame[j*3 + 1] * contact_force[4] + 
+                            contact.frame[j*3 + 2] * contact_force[5];
+        }
+        
+        // 累加到合力
+        for (int j = 0; j < 3; j++) {
+          total_world_force[j] += world_force[j];
+          total_world_torque[j] += world_torque[j];
+        }
+      }
+      
+      // 首先写入合力行
+      csv_file_ << std::fixed << std::setprecision(6)
+                << sim_time << ","
+                << "TOTAL" << ","  // contact_id = "TOTAL"
+                << "\"TOTAL_FORCE\"," << "\"TOTAL_FORCE\","  // geom names
+                << "0.0,0.0,0.0,"  // 合力位置设为0
+                << total_world_force[0] << ","
+                << total_world_force[1] << ","
+                << total_world_force[2] << ","
+                << total_world_torque[0] << ","
+                << total_world_torque[1] << ","
+                << total_world_torque[2] << ","
+                << "0.0,"  // 合力距离设为0
+                << "-1,-1\n";  // 合力body_id设为-1
+      
       // 为每个接触点写入一行数据
       for (int i = 0; i < ncon; ++i) {
         const mjContact& contact = d->contact[i];
@@ -367,12 +506,29 @@ void RosInterface::PublishContactForces(const mjModel* m, mjData* d) {
         pos[1] = contact.pos[1] + normal[1] * position_offset;
         pos[2] = contact.pos[2] + normal[2] * position_offset;
         
-        // 计算接触力
-        double force_x = 0.0, force_y = 0.0, force_z = 0.0;
-        if (contact.efc_address >= 0 && contact.efc_address < d->nefc) {
-          force_x = contact.frame[0] * d->efc_force[contact.efc_address];
-          force_y = contact.frame[1] * d->efc_force[contact.efc_address];
-          force_z = contact.frame[2] * d->efc_force[contact.efc_address];
+        // 使用mj_contactForce获取完整的6D接触力
+        mjtNum contact_force[6] = {0.0, 0.0, 0.0, 0.0, 0.0, 0.0};
+        mj_contactForce(m, d, i, contact_force);
+        
+        // 将接触坐标系下的力转换为世界坐标系
+        mjtNum world_force[3] = {0.0, 0.0, 0.0};
+        mjtNum world_torque[3] = {0.0, 0.0, 0.0};
+        
+        // 正确的坐标系转换
+        // contact.frame 在MuJoCo中存储为转置形式，轴在行中
+        // frame[0-2]: X轴 (法向量)
+        // frame[3-5]: Y轴 (第一个切向量)  
+        // frame[6-8]: Z轴 (第二个切向量)
+        for (int j = 0; j < 3; j++) {
+          // 转换力：world_force = frame^T * contact_force
+          world_force[j] = contact.frame[j*3 + 0] * contact_force[0] + 
+                           contact.frame[j*3 + 1] * contact_force[1] + 
+                           contact.frame[j*3 + 2] * contact_force[2];
+          
+          // 转换力矩：world_torque = frame^T * contact_torque
+          world_torque[j] = contact.frame[j*3 + 0] * contact_force[3] + 
+                            contact.frame[j*3 + 1] * contact_force[4] + 
+                            contact.frame[j*3 + 2] * contact_force[5];
         }
         
         // 写入CSV行
@@ -384,10 +540,12 @@ void RosInterface::PublishContactForces(const mjModel* m, mjData* d) {
                   << pos[0] << ","
                   << pos[1] << ","
                   << pos[2] << ","
-                  << force_x << ","
-                  << force_y << ","
-                  << force_z << ","
-                  << "0.0,0.0,0.0,"  // 扭矩暂时设为0
+                  << world_force[0] << ","
+                  << world_force[1] << ","
+                  << world_force[2] << ","
+                  << world_torque[0] << ","
+                  << world_torque[1] << ","
+                  << world_torque[2] << ","
                   << contact.dist << ","
                   << m->geom_bodyid[contact.geom[0]] << ","
                   << m->geom_bodyid[contact.geom[1]] << "\n";
