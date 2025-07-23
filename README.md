@@ -93,7 +93,10 @@ ros2 launch mujoco_simulator mujoco_simulator.launch.py save_contact_csv:=true c
 # choose mesh or geometry: in src/simulation/mujoco/assets/config/pm_v2.yaml
 # change "use_simplified_geometry: true"
 source venv/bin/activate
+# plot contact force max
 python3 scripts/analyze_contact_forces.py /home/wang22/engineai/engineai_ros2_workspace/logs/contact_data_20250723_155151.csv
+# plot contact point with force
+python3 scripts/mujoco_urdf_contact_display.py logs/contact_data_20250723_155151.csv
 
 git push origin bench
 

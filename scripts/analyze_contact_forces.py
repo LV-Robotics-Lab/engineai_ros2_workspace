@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-Contact Force Analysis Script with URDF Coordinate 3D Heatmap
-Specialized for analyzing contact force data and creating 3D heatmaps based on URDF coordinates
+Contact Force Analysis Script
+Specialized for analyzing contact force data from CSV files
 """
 
 import pandas as pd
@@ -11,11 +11,6 @@ import sys
 import os
 from datetime import datetime
 import seaborn as sns
-from mpl_toolkits.mplot3d import Axes3D
-from scipy.interpolate import griddata
-import plotly.graph_objects as go
-import plotly.express as px
-from plotly.subplots import make_subplots
 
 # Set English font
 plt.rcParams['font.sans-serif'] = ['DejaVu Sans', 'Arial']
@@ -128,121 +123,6 @@ def plot_total_force_analysis(df, save_path=None):
         print(f"Total force plot saved to: {save_path}")
     
     plt.show()
-
-def create_3d_heatmap_urdf(df, save_path=None):
-    """Create 3D heatmap based on URDF coordinates"""
-    print("\nGenerating 3D heatmap based on URDF coordinates...")
-    
-    # Check if URDF coordinates are available
-    urdf_columns = [col for col in df.columns if 'urdf' in col.lower()]
-    if not urdf_columns:
-        print("Warning: No URDF coordinate columns found. Skipping 3D heatmap.")
-        return
-    
-    # Use body1 coordinates if available, otherwise use body2
-    if 'urdf_x_body1' in df.columns and 'urdf_y_body1' in df.columns and 'urdf_z_body1' in df.columns:
-        x_col, y_col, z_col = 'urdf_x_body1', 'urdf_y_body1', 'urdf_z_body1'
-        title_suffix = " (Body1)"
-    elif 'urdf_x_body2' in df.columns and 'urdf_y_body2' in df.columns and 'urdf_z_body2' in df.columns:
-        x_col, y_col, z_col = 'urdf_x_body2', 'urdf_y_body2', 'urdf_z_body2'
-        title_suffix = " (Body2)"
-    else:
-        print("Warning: No complete URDF coordinate sets found. Skipping 3D heatmap.")
-        return
-    
-    # Filter out invalid coordinates
-    valid_mask = (df[x_col].notna() & df[y_col].notna() & df[z_col].notna() & 
-                  np.isfinite(df[x_col]) & np.isfinite(df[y_col]) & np.isfinite(df[z_col]))
-    
-    if not valid_mask.any():
-        print("Warning: No valid URDF coordinates found. Skipping 3D heatmap.")
-        return
-    
-    df_valid = df[valid_mask].copy()
-    
-    print(f"Using {len(df_valid)} valid data points for 3D heatmap")
-    
-    # Create 3D scatter plot with color based on force magnitude
-    fig = plt.figure(figsize=(16, 12))
-    ax = fig.add_subplot(111, projection='3d')
-    
-    scatter = ax.scatter(df_valid[x_col], df_valid[y_col], df_valid[z_col], 
-                        c=df_valid['force_magnitude'], cmap='viridis', 
-                        s=20, alpha=0.7)
-    
-    ax.set_xlabel(f'URDF X{title_suffix}')
-    ax.set_ylabel(f'URDF Y{title_suffix}')
-    ax.set_zlabel(f'URDF Z{title_suffix}')
-    ax.set_title(f'3D Contact Force Heatmap{title_suffix}')
-    
-    plt.colorbar(scatter, ax=ax, label='Force Magnitude (N)')
-    
-    # Add statistics text
-    stats_text = f'Mean Force: {df_valid["force_magnitude"].mean():.2f} N\n'
-    stats_text += f'Max Force: {df_valid["force_magnitude"].max():.2f} N\n'
-    stats_text += f'Points: {len(df_valid)}'
-    ax.text2D(0.02, 0.98, stats_text, transform=ax.transAxes, 
-              bbox=dict(boxstyle="round,pad=0.3", facecolor="white", alpha=0.8),
-              verticalalignment='top')
-    
-    plt.tight_layout()
-    
-    if save_path:
-        heatmap_path = save_path.replace('.png', '_3d_heatmap.png')
-        plt.savefig(heatmap_path, dpi=300, bbox_inches='tight')
-        print(f"3D heatmap saved to: {heatmap_path}")
-    
-    plt.show()
-    
-    # Create interactive 3D plot using plotly (if available)
-    try:
-        create_interactive_3d_plot(df_valid, x_col, y_col, z_col, title_suffix, save_path)
-    except ImportError:
-        print("Plotly not available, skipping interactive 3D plot")
-
-def create_interactive_3d_plot(df, x_col, y_col, z_col, title_suffix, save_path):
-    """Create interactive 3D plot using plotly"""
-    print("Creating interactive 3D plot...")
-    
-    fig = go.Figure(data=[go.Scatter3d(
-        x=df[x_col],
-        y=df[y_col],
-        z=df[z_col],
-        mode='markers',
-        marker=dict(
-            size=5,
-            color=df['force_magnitude'],
-            colorscale='Viridis',
-            opacity=0.8,
-            colorbar=dict(title="Force Magnitude (N)")
-        ),
-        text=[f'Force: {f:.2f} N<br>Position: ({x:.3f}, {y:.3f}, {z:.3f})' 
-              for f, x, y, z in zip(df['force_magnitude'], df[x_col], df[y_col], df[z_col])],
-        hovertemplate='<b>Contact Point</b><br>' +
-                     'Force: %{marker.color:.2f} N<br>' +
-                     'Position: (%{x:.3f}, %{y:.3f}, %{z:.3f})<br>' +
-                     '<extra></extra>'
-    )])
-    
-    fig.update_layout(
-        title=f'Interactive 3D Contact Force Heatmap{title_suffix}',
-        scene=dict(
-            xaxis_title=f'URDF X{title_suffix}',
-            yaxis_title=f'URDF Y{title_suffix}',
-            zaxis_title=f'URDF Z{title_suffix}'
-        ),
-        width=800,
-        height=600
-    )
-    
-    # Save interactive plot
-    if save_path:
-        interactive_path = save_path.replace('.png', '_interactive_3d.html')
-        fig.write_html(interactive_path)
-        print(f"Interactive 3D plot saved to: {interactive_path}")
-    
-    # Show plot
-    fig.show()
 
 def create_time_evolution_heatmap(df, save_path=None):
     """Create time evolution heatmap showing force changes over time and space"""
@@ -442,9 +322,6 @@ def analyze_csv_file(csv_file):
     # Generate plots
     plot_file = csv_file.replace('.csv', '_total_force_analysis.png')
     plot_total_force_analysis(df, plot_file)
-    
-    # Create 3D heatmap
-    create_3d_heatmap_urdf(df, plot_file)
     
     # Create time evolution heatmap
     create_time_evolution_heatmap(df, plot_file)
