@@ -61,11 +61,16 @@ logs/contact_data_YYYYMMDD_HHMMSS.csv
 ## CSV文件格式
 
 ```csv
-timestamp,contact_id,geom1_name,geom2_name,pos_x,pos_y,pos_z,force_x,force_y,force_z,torque_x,torque_y,torque_z,distance,body1_id,body2_id
-0.000000,0,"LINK_FOOT_L","ground",0.123456,0.234567,0.000000,0.000000,0.000000,10.500000,0.000000,0.000000,0.000000,0.000000,15,0
-0.000100,0,"LINK_FOOT_L","ground",0.123456,0.234567,0.000000,0.000000,0.000000,10.500000,0.000000,0.000000,0.000000,0.000000,15,0
+timestamp,contact_id,geom1_name,geom2_name,pos_x,pos_y,pos_z,force_x,force_y,force_z,force_magnitude,torque_x,torque_y,torque_z,distance,body1_id,body2_id
+0.000000,0,"LINK_FOOT_L","ground",0.123456,0.234567,0.000000,0.000000,0.000000,10.500000,10.500000,0.000000,0.000000,0.000000,0.000000,15,0
+0.000100,0,"LINK_FOOT_L","ground",0.123456,0.234567,0.000000,0.000000,0.000000,10.500000,10.500000,0.000000,0.000000,0.000000,0.000000,15,0
 ...
 ```
+
+### 字段说明
+
+- **force_magnitude**: 单个接触点的三轴合力大小 = √(force_x² + force_y² + force_z²)
+- **注意**: CSV文件只保存单个接触点数据，不包含合力行
 
 ## 性能考虑
 

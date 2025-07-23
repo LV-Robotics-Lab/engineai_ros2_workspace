@@ -71,7 +71,7 @@ bool RosInterface::Initialize() {
     csv_file_.open(csv_file_path_, std::ios::out);
     if (csv_file_.is_open()) {
       // 写入CSV头部
-      csv_file_ << "timestamp,contact_id,geom1_name,geom2_name,pos_x,pos_y,pos_z,force_x,force_y,force_z,torque_x,torque_y,torque_z,gap,body1_id,body2_id\n";
+      csv_file_ << "timestamp,contact_id,geom1_name,geom2_name,pos_x,pos_y,pos_z,force_x,force_y,force_z,force_magnitude,torque_x,torque_y,torque_z,gap,body1_id,body2_id\n";
       csv_file_.flush();
       RCLCPP_INFO(node_->get_logger(), "Contact data will be saved to: %s", csv_file_path_.c_str());
     } else {
@@ -474,20 +474,17 @@ void RosInterface::PublishContactForces(const mjModel* m, mjData* d) {
         }
       }
       
-      // 首先写入合力行
-      csv_file_ << std::fixed << std::setprecision(6)
-                << sim_time << ","
-                << "TOTAL" << ","  // contact_id = "TOTAL"
-                << "\"TOTAL_FORCE\"," << "\"TOTAL_FORCE\","  // geom names
-                << "0.0,0.0,0.0,"  // 合力位置设为0
-                << total_world_force[0] << ","
-                << total_world_force[1] << ","
-                << total_world_force[2] << ","
-                << total_world_torque[0] << ","
-                << total_world_torque[1] << ","
-                << total_world_torque[2] << ","
-                << "0.0,"  // 合力距离设为0
-                << "-1,-1\n";  // 合力body_id设为-1
+      // 计算总合力大小（仅用于日志输出，不写入CSV）
+      double total_force_magnitude = sqrt(total_world_force[0]*total_world_force[0] + 
+                                         total_world_force[1]*total_world_force[1] + 
+                                         total_world_force[2]*total_world_force[2]);
+      
+      // 输出合力信息到日志（可选）
+      if (frame_counter % 1000 == 0) {  // 每1000帧输出一次
+        RCLCPP_INFO(node_->get_logger(), 
+                    "Total contact force: (%.3f, %.3f, %.3f), magnitude: %.3f", 
+                    total_world_force[0], total_world_force[1], total_world_force[2], total_force_magnitude);
+      }
       
       // 为每个接触点写入一行数据
       for (int i = 0; i < ncon; ++i) {
@@ -531,6 +528,11 @@ void RosInterface::PublishContactForces(const mjModel* m, mjData* d) {
                             contact.frame[j*3 + 2] * contact_force[5];
         }
         
+        // 计算单个接触点的合力大小
+        double contact_force_magnitude = sqrt(world_force[0]*world_force[0] + 
+                                             world_force[1]*world_force[1] + 
+                                             world_force[2]*world_force[2]);
+        
         // 写入CSV行
         csv_file_ << std::fixed << std::setprecision(6)
                   << sim_time << ","
@@ -543,6 +545,7 @@ void RosInterface::PublishContactForces(const mjModel* m, mjData* d) {
                   << world_force[0] << ","
                   << world_force[1] << ","
                   << world_force[2] << ","
+                  << contact_force_magnitude << ","  // 单个接触点合力大小
                   << world_torque[0] << ","
                   << world_torque[1] << ","
                   << world_torque[2] << ","
