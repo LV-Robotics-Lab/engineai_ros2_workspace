@@ -71,7 +71,7 @@ bool RosInterface::Initialize() {
     csv_file_.open(csv_file_path_, std::ios::out);
     if (csv_file_.is_open()) {
       // 写入CSV头部
-      csv_file_ << "timestamp,contact_id,geom1_name,geom2_name,pos_x,pos_y,pos_z,force_x,force_y,force_z,force_magnitude,torque_x,torque_y,torque_z,gap,body1_id,body2_id\n";
+      csv_file_ << "timestamp,contact_id,geom1_name,geom2_name,pos_x,pos_y,pos_z,urdf_x_body1,urdf_y_body1,urdf_z_body1,urdf_x_body2,urdf_y_body2,urdf_z_body2,force_x,force_y,force_z,force_magnitude,torque_x,torque_y,torque_z,gap,body1_id,body2_id\n";
       csv_file_.flush();
       RCLCPP_INFO(node_->get_logger(), "Contact data will be saved to: %s", csv_file_path_.c_str());
     } else {
@@ -533,6 +533,26 @@ void RosInterface::PublishContactForces(const mjModel* m, mjData* d) {
                                              world_force[1]*world_force[1] + 
                                              world_force[2]*world_force[2]);
         
+        // 获取body的pose信息并计算URDF坐标系中的位置
+        int body1_id = m->geom_bodyid[contact.geom[0]];
+        int body2_id = m->geom_bodyid[contact.geom[1]];
+        
+        // 获取body1的pose
+        mjtNum body1_pos[3] = {d->xpos[body1_id*3], d->xpos[body1_id*3+1], d->xpos[body1_id*3+2]};
+        mjtNum body1_quat[4] = {d->xquat[body1_id*4], d->xquat[body1_id*4+1], d->xquat[body1_id*4+2], d->xquat[body1_id*4+3]};
+        
+        // 获取body2的pose
+        mjtNum body2_pos[3] = {d->xpos[body2_id*3], d->xpos[body2_id*3+1], d->xpos[body2_id*3+2]};
+        mjtNum body2_quat[4] = {d->xquat[body2_id*4], d->xquat[body2_id*4+1], d->xquat[body2_id*4+2], d->xquat[body2_id*4+3]};
+        
+        // 计算URDF坐标系中的位置（相对于body1）
+        mjtNum urdf_pos_body1[3];
+        mju_trnVecPose(urdf_pos_body1, body1_pos, body1_quat, pos);
+        
+        // 计算URDF坐标系中的位置（相对于body2）
+        mjtNum urdf_pos_body2[3];
+        mju_trnVecPose(urdf_pos_body2, body2_pos, body2_quat, pos);
+        
         // 写入CSV行
         csv_file_ << std::fixed << std::setprecision(6)
                   << sim_time << ","
@@ -542,6 +562,12 @@ void RosInterface::PublishContactForces(const mjModel* m, mjData* d) {
                   << pos[0] << ","
                   << pos[1] << ","
                   << pos[2] << ","
+                  << urdf_pos_body1[0] << ","
+                  << urdf_pos_body1[1] << ","
+                  << urdf_pos_body1[2] << ","
+                  << urdf_pos_body2[0] << ","
+                  << urdf_pos_body2[1] << ","
+                  << urdf_pos_body2[2] << ","
                   << world_force[0] << ","
                   << world_force[1] << ","
                   << world_force[2] << ","
@@ -550,8 +576,8 @@ void RosInterface::PublishContactForces(const mjModel* m, mjData* d) {
                   << world_torque[1] << ","
                   << world_torque[2] << ","
                   << contact.dist << ","
-                  << m->geom_bodyid[contact.geom[0]] << ","
-                  << m->geom_bodyid[contact.geom[1]] << "\n";
+                  << body1_id << ","
+                  << body2_id << "\n";
       }
       
       // 每帧都刷新文件缓冲区（10kHz频率）

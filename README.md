@@ -93,7 +93,9 @@ ros2 launch mujoco_simulator mujoco_simulator.launch.py save_contact_csv:=true c
 # choose mesh or geometry: in src/simulation/mujoco/assets/config/pm_v2.yaml
 # change "use_simplified_geometry: true"
 source venv/bin/activate
-python3 scripts/analyze_contact_forces.py /home/wang22/engineai/engineai_ros2_workspace/logs/contact_data_20250723_142252.csv
+python3 scripts/analyze_contact_forces.py /home/wang22/engineai/engineai_ros2_workspace/logs/contact_data_20250723_155151.csv
+
+git push origin bench
 
 # terminal 2
 # ros2 launch interface_example contact_viz.launch.py

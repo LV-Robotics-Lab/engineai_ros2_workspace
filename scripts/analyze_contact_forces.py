@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-Contact Force Curve Analysis Script
-Specialized for analyzing and visualizing contact force data from CSV files
+Contact Force Analysis Script with URDF Coordinate 3D Heatmap
+Specialized for analyzing contact force data and creating 3D heatmaps based on URDF coordinates
 """
 
 import pandas as pd
@@ -11,6 +11,11 @@ import sys
 import os
 from datetime import datetime
 import seaborn as sns
+from mpl_toolkits.mplot3d import Axes3D
+from scipy.interpolate import griddata
+import plotly.graph_objects as go
+import plotly.express as px
+from plotly.subplots import make_subplots
 
 # Set English font
 plt.rcParams['font.sans-serif'] = ['DejaVu Sans', 'Arial']
@@ -24,6 +29,13 @@ def load_and_clean_data(csv_file):
         df = pd.read_csv(csv_file)
         print(f"Successfully loaded {len(df)} rows")
         
+        # Check if URDF coordinates are available
+        urdf_columns = [col for col in df.columns if 'urdf' in col.lower()]
+        if urdf_columns:
+            print(f"Found URDF coordinate columns: {urdf_columns}")
+        else:
+            print("Warning: No URDF coordinate columns found")
+        
         # Basic data check
         print(f"Time range: {df['timestamp'].min():.3f} - {df['timestamp'].max():.3f} seconds")
         print(f"Number of contact points: {df['contact_id'].nunique()}")
@@ -34,107 +46,53 @@ def load_and_clean_data(csv_file):
         print(f"Failed to load data: {e}")
         return None
 
-def analyze_contact_forces(df):
-    """Analyze contact force data"""
-    print("\n=== Contact Force Statistical Analysis ===")
+def analyze_total_force(df):
+    """Analyze total force magnitude only"""
+    print("\n=== Total Force Magnitude Analysis ===")
     
-    # Calculate force magnitude
-    df['force_magnitude'] = np.sqrt(df['force_x']**2 + df['force_y']**2 + df['force_z']**2)
+    # Calculate force magnitude if not already present
+    if 'force_magnitude' not in df.columns:
+        df['force_magnitude'] = np.sqrt(df['force_x']**2 + df['force_y']**2 + df['force_z']**2)
     
-    # Statistics for each component
-    force_cols = ['force_x', 'force_y', 'force_z', 'force_magnitude']
-    for col in force_cols:
-        if col in df.columns:
-            print(f"{col}:")
-            print(f"  Mean: {df[col].mean():.3f} N")
-            print(f"  Max: {df[col].max():.3f} N")
-            print(f"  Min: {df[col].min():.3f} N")
-            print(f"  Std: {df[col].std():.3f} N")
+    # Statistics for total force magnitude
+    print(f"Total Force Magnitude Statistics:")
+    print(f"  Mean: {df['force_magnitude'].mean():.3f} N")
+    print(f"  Max: {df['force_magnitude'].max():.3f} N")
+    print(f"  Min: {df['force_magnitude'].min():.3f} N")
+    print(f"  Std: {df['force_magnitude'].std():.3f} N")
+    print(f"  Median: {df['force_magnitude'].median():.3f} N")
+    
+    # Time-based statistics
+    print(f"\nTime-based Force Statistics:")
+    time_stats = df.groupby('timestamp')['force_magnitude'].agg(['mean', 'max', 'sum'])
+    print(f"  Average force per frame: {time_stats['mean'].mean():.3f} N")
+    print(f"  Maximum force per frame: {time_stats['max'].max():.3f} N")
+    print(f"  Total force over time: {time_stats['sum'].sum():.3f} N")
     
     return df
 
-def plot_contact_force_curves(df, save_path=None):
-    """Plot contact force curves"""
-    print("\nGenerating contact force curve plots...")
+def plot_total_force_analysis(df, save_path=None):
+    """Plot total force analysis"""
+    print("\nGenerating total force analysis plots...")
     
     # Create figure
     fig, axes = plt.subplots(2, 2, figsize=(16, 12))
-    fig.suptitle('Contact Force Curve Analysis', fontsize=16, fontweight='bold')
+    fig.suptitle('Total Force Magnitude Analysis', fontsize=16, fontweight='bold')
     
-    # 1. Time series - components
+    # 1. Time series - total force magnitude
     ax1 = axes[0, 0]
-    ax1.plot(df['timestamp'], df['force_x'], label='Fx', alpha=0.8, linewidth=1)
-    ax1.plot(df['timestamp'], df['force_y'], label='Fy', alpha=0.8, linewidth=1)
-    ax1.plot(df['timestamp'], df['force_z'], label='Fz', alpha=0.8, linewidth=1)
+    ax1.plot(df['timestamp'], df['force_magnitude'], color='red', alpha=0.8, linewidth=1.5)
     ax1.set_xlabel('Time (seconds)')
-    ax1.set_ylabel('Contact Force (N)')
-    ax1.set_title('Contact Force Components Time Series')
-    ax1.legend()
+    ax1.set_ylabel('Total Force Magnitude (N)')
+    ax1.set_title('Total Force Magnitude Time Series')
     ax1.grid(True, alpha=0.3)
     
-    # 2. Time series - force magnitude
+    # 2. Force distribution histogram
     ax2 = axes[0, 1]
-    ax2.plot(df['timestamp'], df['force_magnitude'], color='red', alpha=0.8, linewidth=1.5)
-    ax2.set_xlabel('Time (seconds)')
-    ax2.set_ylabel('Force Magnitude (N)')
-    ax2.set_title('Contact Force Magnitude Time Series')
-    ax2.grid(True, alpha=0.3)
-    
-    # 3. Force distribution histogram
-    ax3 = axes[1, 0]
-    ax3.hist(df['force_magnitude'], bins=50, alpha=0.7, edgecolor='black', color='skyblue')
-    ax3.set_xlabel('Force Magnitude (N)')
-    ax3.set_ylabel('Frequency')
-    ax3.set_title('Contact Force Magnitude Distribution')
-    ax3.grid(True, alpha=0.3)
-    
-    # 4. Component distribution comparison
-    ax4 = axes[1, 1]
-    force_data = [df['force_x'], df['force_y'], df['force_z']]
-    labels = ['Fx', 'Fy', 'Fz']
-    colors = ['blue', 'green', 'red']
-    
-    ax4.boxplot(force_data, labels=labels, patch_artist=True)
-    for patch, color in zip(ax4.artists, colors):
-        patch.set_facecolor(color)
-        patch.set_alpha(0.7)
-    ax4.set_ylabel('Contact Force (N)')
-    ax4.set_title('Force Component Distribution Comparison')
-    ax4.grid(True, alpha=0.3)
-    
-    plt.tight_layout()
-    
-    if save_path:
-        plt.savefig(save_path, dpi=300, bbox_inches='tight')
-        print(f"Plot saved to: {save_path}")
-    
-    plt.show()
-
-def plot_contact_analysis(df, save_path=None):
-    """Plot contact point analysis"""
-    print("\nGenerating contact point analysis plots...")
-    
-    fig, axes = plt.subplots(2, 2, figsize=(16, 12))
-    fig.suptitle('Contact Point Analysis', fontsize=16, fontweight='bold')
-    
-    # 1. Contact point count time series
-    ax1 = axes[0, 0]
-    contact_counts = df.groupby('timestamp')['contact_id'].count()
-    ax1.plot(contact_counts.index, contact_counts.values, color='purple', alpha=0.8)
-    ax1.set_xlabel('Time (seconds)')
-    ax1.set_ylabel('Number of Contact Points')
-    ax1.set_title('Contact Points per Frame')
-    ax1.grid(True, alpha=0.3)
-    
-    # 2. Geometry contact frequency
-    ax2 = axes[0, 1]
-    geom_counts = df['geom1_name'].value_counts().head(10)
-    bars = ax2.bar(range(len(geom_counts)), geom_counts.values, color='orange', alpha=0.7)
-    ax2.set_xlabel('Geometry')
-    ax2.set_ylabel('Contact Count')
-    ax2.set_title('Geometry Contact Frequency (Top 10)')
-    ax2.set_xticks(range(len(geom_counts)))
-    ax2.set_xticklabels(geom_counts.index, rotation=45, ha='right')
+    ax2.hist(df['force_magnitude'], bins=50, alpha=0.7, edgecolor='black', color='skyblue')
+    ax2.set_xlabel('Total Force Magnitude (N)')
+    ax2.set_ylabel('Frequency')
+    ax2.set_title('Total Force Magnitude Distribution')
     ax2.grid(True, alpha=0.3)
     
     # 3. Force vs time scatter plot
@@ -142,14 +100,13 @@ def plot_contact_analysis(df, save_path=None):
     scatter = ax3.scatter(df['timestamp'], df['force_magnitude'], 
                          c=df['force_magnitude'], cmap='viridis', alpha=0.6, s=10)
     ax3.set_xlabel('Time (seconds)')
-    ax3.set_ylabel('Force Magnitude (N)')
-    ax3.set_title('Contact Force vs Time Scatter Plot')
+    ax3.set_ylabel('Total Force Magnitude (N)')
+    ax3.set_title('Total Force vs Time Scatter Plot')
     plt.colorbar(scatter, ax=ax3, label='Force Magnitude (N)')
     ax3.grid(True, alpha=0.3)
     
-    # 4. Force distribution heatmap
+    # 4. Force distribution heatmap (time vs force)
     ax4 = axes[1, 1]
-    # Create 2D histogram of time vs force
     time_bins = np.linspace(df['timestamp'].min(), df['timestamp'].max(), 50)
     force_bins = np.linspace(0, df['force_magnitude'].max(), 30)
     
@@ -160,23 +117,248 @@ def plot_contact_analysis(df, save_path=None):
                     extent=[xedges[0], xedges[-1], yedges[0], yedges[-1]], 
                     cmap='hot')
     ax4.set_xlabel('Time (seconds)')
-    ax4.set_ylabel('Force Magnitude (N)')
-    ax4.set_title('Contact Force-Time Distribution Heatmap')
+    ax4.set_ylabel('Total Force Magnitude (N)')
+    ax4.set_title('Total Force-Time Distribution Heatmap')
     plt.colorbar(im, ax=ax4, label='Frequency')
     
     plt.tight_layout()
     
     if save_path:
-        save_path_analysis = save_path.replace('.png', '_analysis.png')
-        plt.savefig(save_path_analysis, dpi=300, bbox_inches='tight')
-        print(f"Analysis plot saved to: {save_path_analysis}")
+        plt.savefig(save_path, dpi=300, bbox_inches='tight')
+        print(f"Total force plot saved to: {save_path}")
+    
+    plt.show()
+
+def create_3d_heatmap_urdf(df, save_path=None):
+    """Create 3D heatmap based on URDF coordinates"""
+    print("\nGenerating 3D heatmap based on URDF coordinates...")
+    
+    # Check if URDF coordinates are available
+    urdf_columns = [col for col in df.columns if 'urdf' in col.lower()]
+    if not urdf_columns:
+        print("Warning: No URDF coordinate columns found. Skipping 3D heatmap.")
+        return
+    
+    # Use body1 coordinates if available, otherwise use body2
+    if 'urdf_x_body1' in df.columns and 'urdf_y_body1' in df.columns and 'urdf_z_body1' in df.columns:
+        x_col, y_col, z_col = 'urdf_x_body1', 'urdf_y_body1', 'urdf_z_body1'
+        title_suffix = " (Body1)"
+    elif 'urdf_x_body2' in df.columns and 'urdf_y_body2' in df.columns and 'urdf_z_body2' in df.columns:
+        x_col, y_col, z_col = 'urdf_x_body2', 'urdf_y_body2', 'urdf_z_body2'
+        title_suffix = " (Body2)"
+    else:
+        print("Warning: No complete URDF coordinate sets found. Skipping 3D heatmap.")
+        return
+    
+    # Filter out invalid coordinates
+    valid_mask = (df[x_col].notna() & df[y_col].notna() & df[z_col].notna() & 
+                  np.isfinite(df[x_col]) & np.isfinite(df[y_col]) & np.isfinite(df[z_col]))
+    
+    if not valid_mask.any():
+        print("Warning: No valid URDF coordinates found. Skipping 3D heatmap.")
+        return
+    
+    df_valid = df[valid_mask].copy()
+    
+    print(f"Using {len(df_valid)} valid data points for 3D heatmap")
+    
+    # Create 3D scatter plot with color based on force magnitude
+    fig = plt.figure(figsize=(16, 12))
+    ax = fig.add_subplot(111, projection='3d')
+    
+    scatter = ax.scatter(df_valid[x_col], df_valid[y_col], df_valid[z_col], 
+                        c=df_valid['force_magnitude'], cmap='viridis', 
+                        s=20, alpha=0.7)
+    
+    ax.set_xlabel(f'URDF X{title_suffix}')
+    ax.set_ylabel(f'URDF Y{title_suffix}')
+    ax.set_zlabel(f'URDF Z{title_suffix}')
+    ax.set_title(f'3D Contact Force Heatmap{title_suffix}')
+    
+    plt.colorbar(scatter, ax=ax, label='Force Magnitude (N)')
+    
+    # Add statistics text
+    stats_text = f'Mean Force: {df_valid["force_magnitude"].mean():.2f} N\n'
+    stats_text += f'Max Force: {df_valid["force_magnitude"].max():.2f} N\n'
+    stats_text += f'Points: {len(df_valid)}'
+    ax.text2D(0.02, 0.98, stats_text, transform=ax.transAxes, 
+              bbox=dict(boxstyle="round,pad=0.3", facecolor="white", alpha=0.8),
+              verticalalignment='top')
+    
+    plt.tight_layout()
+    
+    if save_path:
+        heatmap_path = save_path.replace('.png', '_3d_heatmap.png')
+        plt.savefig(heatmap_path, dpi=300, bbox_inches='tight')
+        print(f"3D heatmap saved to: {heatmap_path}")
+    
+    plt.show()
+    
+    # Create interactive 3D plot using plotly (if available)
+    try:
+        create_interactive_3d_plot(df_valid, x_col, y_col, z_col, title_suffix, save_path)
+    except ImportError:
+        print("Plotly not available, skipping interactive 3D plot")
+
+def create_interactive_3d_plot(df, x_col, y_col, z_col, title_suffix, save_path):
+    """Create interactive 3D plot using plotly"""
+    print("Creating interactive 3D plot...")
+    
+    fig = go.Figure(data=[go.Scatter3d(
+        x=df[x_col],
+        y=df[y_col],
+        z=df[z_col],
+        mode='markers',
+        marker=dict(
+            size=5,
+            color=df['force_magnitude'],
+            colorscale='Viridis',
+            opacity=0.8,
+            colorbar=dict(title="Force Magnitude (N)")
+        ),
+        text=[f'Force: {f:.2f} N<br>Position: ({x:.3f}, {y:.3f}, {z:.3f})' 
+              for f, x, y, z in zip(df['force_magnitude'], df[x_col], df[y_col], df[z_col])],
+        hovertemplate='<b>Contact Point</b><br>' +
+                     'Force: %{marker.color:.2f} N<br>' +
+                     'Position: (%{x:.3f}, %{y:.3f}, %{z:.3f})<br>' +
+                     '<extra></extra>'
+    )])
+    
+    fig.update_layout(
+        title=f'Interactive 3D Contact Force Heatmap{title_suffix}',
+        scene=dict(
+            xaxis_title=f'URDF X{title_suffix}',
+            yaxis_title=f'URDF Y{title_suffix}',
+            zaxis_title=f'URDF Z{title_suffix}'
+        ),
+        width=800,
+        height=600
+    )
+    
+    # Save interactive plot
+    if save_path:
+        interactive_path = save_path.replace('.png', '_interactive_3d.html')
+        fig.write_html(interactive_path)
+        print(f"Interactive 3D plot saved to: {interactive_path}")
+    
+    # Show plot
+    fig.show()
+
+def create_time_evolution_heatmap(df, save_path=None):
+    """Create time evolution heatmap showing force changes over time and space"""
+    print("\nGenerating time evolution heatmap...")
+    
+    # Check if URDF coordinates are available
+    urdf_columns = [col for col in df.columns if 'urdf' in col.lower()]
+    if not urdf_columns:
+        print("Warning: No URDF coordinate columns found. Skipping time evolution heatmap.")
+        return
+    
+    # Use body1 coordinates
+    if 'urdf_x_body1' in df.columns and 'urdf_y_body1' in df.columns:
+        x_col, y_col = 'urdf_x_body1', 'urdf_y_body1'
+    elif 'urdf_x_body2' in df.columns and 'urdf_y_body2' in df.columns:
+        x_col, y_col = 'urdf_x_body2', 'urdf_y_body2'
+    else:
+        print("Warning: No 2D URDF coordinates found. Skipping time evolution heatmap.")
+        return
+    
+    # Filter valid data
+    valid_mask = (df[x_col].notna() & df[y_col].notna() & 
+                  np.isfinite(df[x_col]) & np.isfinite(df[y_col]))
+    df_valid = df[valid_mask].copy()
+    
+    if len(df_valid) == 0:
+        print("Warning: No valid data for time evolution heatmap.")
+        return
+    
+    # Create 2D histogram
+    fig, axes = plt.subplots(2, 2, figsize=(16, 12))
+    fig.suptitle('Contact Force Time Evolution Analysis', fontsize=16, fontweight='bold')
+    
+    # 1. Spatial force distribution (2D heatmap)
+    ax1 = axes[0, 0]
+    x_bins = np.linspace(df_valid[x_col].min(), df_valid[x_col].max(), 30)
+    y_bins = np.linspace(df_valid[y_col].min(), df_valid[y_col].max(), 30)
+    
+    hist, xedges, yedges = np.histogram2d(df_valid[x_col], df_valid[y_col], 
+                                         bins=[x_bins, y_bins], 
+                                         weights=df_valid['force_magnitude'])
+    counts, _, _ = np.histogram2d(df_valid[x_col], df_valid[y_col], 
+                                 bins=[x_bins, y_bins])
+    
+    # Average force per bin
+    avg_force = np.divide(hist, counts, out=np.zeros_like(hist), where=counts>0)
+    
+    im1 = ax1.imshow(avg_force.T, origin='lower', aspect='auto',
+                     extent=[xedges[0], xedges[-1], yedges[0], yedges[-1]], 
+                     cmap='hot')
+    ax1.set_xlabel(f'URDF X')
+    ax1.set_ylabel(f'URDF Y')
+    ax1.set_title('Average Force Distribution (2D)')
+    plt.colorbar(im1, ax=ax1, label='Average Force (N)')
+    
+    # 2. Time vs position heatmap
+    ax2 = axes[0, 1]
+    time_bins = np.linspace(df_valid['timestamp'].min(), df_valid['timestamp'].max(), 50)
+    pos_bins = np.linspace(df_valid[x_col].min(), df_valid[x_col].max(), 30)
+    
+    hist2, xedges2, yedges2 = np.histogram2d(df_valid['timestamp'], df_valid[x_col], 
+                                             bins=[time_bins, pos_bins],
+                                             weights=df_valid['force_magnitude'])
+    counts2, _, _ = np.histogram2d(df_valid['timestamp'], df_valid[x_col], 
+                                  bins=[time_bins, pos_bins])
+    
+    avg_force2 = np.divide(hist2, counts2, out=np.zeros_like(hist2), where=counts2>0)
+    
+    im2 = ax2.imshow(avg_force2.T, origin='lower', aspect='auto',
+                     extent=[xedges2[0], xedges2[-1], yedges2[0], yedges2[-1]], 
+                     cmap='viridis')
+    ax2.set_xlabel('Time (seconds)')
+    ax2.set_ylabel(f'URDF X Position')
+    ax2.set_title('Force Evolution Over Time')
+    plt.colorbar(im2, ax=ax2, label='Average Force (N)')
+    
+    # 3. Force magnitude distribution over time
+    ax3 = axes[1, 0]
+    time_groups = df_valid.groupby(pd.cut(df_valid['timestamp'], bins=20))
+    time_means = time_groups['force_magnitude'].mean()
+    time_stds = time_groups['force_magnitude'].std()
+    
+    ax3.errorbar(time_means.index.astype(str), time_means.values, 
+                yerr=time_stds.values, fmt='o-', capsize=5)
+    ax3.set_xlabel('Time Bins')
+    ax3.set_ylabel('Average Force Magnitude (N)')
+    ax3.set_title('Force Magnitude Evolution Over Time')
+    ax3.tick_params(axis='x', rotation=45)
+    ax3.grid(True, alpha=0.3)
+    
+    # 4. Contact point density
+    ax4 = axes[1, 1]
+    hist_density, _, _ = np.histogram2d(df_valid[x_col], df_valid[y_col], 
+                                       bins=[x_bins, y_bins])
+    
+    im4 = ax4.imshow(hist_density.T, origin='lower', aspect='auto',
+                     extent=[xedges[0], xedges[-1], yedges[0], yedges[-1]], 
+                     cmap='Blues')
+    ax4.set_xlabel(f'URDF X')
+    ax4.set_ylabel(f'URDF Y')
+    ax4.set_title('Contact Point Density')
+    plt.colorbar(im4, ax=ax4, label='Contact Count')
+    
+    plt.tight_layout()
+    
+    if save_path:
+        evolution_path = save_path.replace('.png', '_time_evolution.png')
+        plt.savefig(evolution_path, dpi=300, bbox_inches='tight')
+        print(f"Time evolution heatmap saved to: {evolution_path}")
     
     plt.show()
 
 def generate_summary_report(df, csv_file):
-    """Generate analysis report"""
+    """Generate analysis report focusing on total force"""
     print("\n" + "="*60)
-    print("Contact Force Data Analysis Report")
+    print("Contact Force Analysis Report (Total Force Focus)")
     print("="*60)
     
     # Basic statistics
@@ -186,26 +368,32 @@ def generate_summary_report(df, csv_file):
     print(f"Time range: {df['timestamp'].min():.3f} - {df['timestamp'].max():.3f} seconds")
     print(f"Total duration: {df['timestamp'].max() - df['timestamp'].min():.3f} seconds")
     
-    # Contact force statistics
-    df['force_magnitude'] = np.sqrt(df['force_x']**2 + df['force_y']**2 + df['force_z']**2)
-    print(f"\nContact Force Statistics:")
+    # Total force statistics
+    if 'force_magnitude' not in df.columns:
+        df['force_magnitude'] = np.sqrt(df['force_x']**2 + df['force_y']**2 + df['force_z']**2)
+    
+    print(f"\nTotal Force Statistics:")
     print(f"Average force magnitude: {df['force_magnitude'].mean():.3f} N")
     print(f"Maximum force magnitude: {df['force_magnitude'].max():.3f} N")
     print(f"Minimum force magnitude: {df['force_magnitude'].min():.3f} N")
     print(f"Force magnitude std dev: {df['force_magnitude'].std():.3f} N")
+    print(f"Median force magnitude: {df['force_magnitude'].median():.3f} N")
     
-    # Contact point statistics
-    print(f"\nContact Point Statistics:")
-    print(f"Total contact points: {df['contact_id'].nunique()}")
-    print(f"Number of geometries: {df['geom1_name'].nunique()}")
-    print(f"Average contacts per frame: {df.groupby('timestamp')['contact_id'].count().mean():.2f}")
+    # Time-based statistics
+    time_stats = df.groupby('timestamp')['force_magnitude'].agg(['mean', 'max', 'sum'])
+    print(f"\nTime-based Statistics:")
+    print(f"Average force per frame: {time_stats['mean'].mean():.3f} N")
+    print(f"Maximum force per frame: {time_stats['max'].max():.3f} N")
+    print(f"Total force over time: {time_stats['sum'].sum():.3f} N")
     
-    # Main geometries
-    print(f"\nMain Contact Geometries:")
-    geom_counts = df['geom1_name'].value_counts().head(5)
-    for geom, count in geom_counts.items():
-        percentage = (count / len(df)) * 100
-        print(f"  {geom}: {count} times ({percentage:.1f}%)")
+    # URDF coordinate statistics
+    urdf_columns = [col for col in df.columns if 'urdf' in col.lower()]
+    if urdf_columns:
+        print(f"\nURDF Coordinate Analysis:")
+        for col in urdf_columns:
+            if col in df.columns and df[col].notna().any():
+                valid_data = df[col].dropna()
+                print(f"  {col}: range [{valid_data.min():.3f}, {valid_data.max():.3f}]")
     
     print("="*60)
 
@@ -248,14 +436,18 @@ def analyze_csv_file(csv_file):
     # Generate report
     generate_summary_report(df, csv_file)
     
-    # Analyze contact forces
-    df = analyze_contact_forces(df)
+    # Analyze total force
+    df = analyze_total_force(df)
     
     # Generate plots
-    plot_file = csv_file.replace('.csv', '_force_curves.png')
-    plot_contact_force_curves(df, plot_file)
+    plot_file = csv_file.replace('.csv', '_total_force_analysis.png')
+    plot_total_force_analysis(df, plot_file)
     
-    plot_contact_analysis(df, plot_file)
+    # Create 3D heatmap
+    create_3d_heatmap_urdf(df, plot_file)
+    
+    # Create time evolution heatmap
+    create_time_evolution_heatmap(df, plot_file)
     
     print("\nAnalysis completed!")
 
