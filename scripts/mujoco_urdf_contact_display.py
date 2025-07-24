@@ -86,7 +86,7 @@ def urdf_to_mujoco_xml(urdf_path, original_urdf_path=None, contact_forces=None):
         xml_content = f'''<?xml version="1.0" encoding="UTF-8"?>
 <mujoco model="pm_v2">
   <compiler angle="radian" coordinate="local"/>
-  <option timestep="0.002" iterations="50" solver="Newton" tolerance="1e-10"/>
+  <option timestep="0.0001" iterations="50" solver="Newton" tolerance="1e-10"/>
   
   <asset>
     <texture name="grid" type="2d" builtin="checker" rgb1="0.1 0.2 0.3" rgb2="0.2 0.3 0.4" width="512" height="512"/>
@@ -108,7 +108,7 @@ def urdf_to_mujoco_xml(urdf_path, original_urdf_path=None, contact_forces=None):
     <light directional="true" diffuse=".8 .8 .8" specular=".2 .2 .2" castshadow="false" pos="0 0 5" dir="0 0 -1"/>
     <geom name="ground" type="plane" pos="0 0 0" size="0 0 .025" rgba=".9 .9 .9 1" material="grid"/>
     
-    <!-- Robot body with proper joint hierarchy -->
+    <!-- Robot body with proper joint hierarchy - matching XML coordinate system -->
     <body name="LINK_BASE" pos="0 0 0.82">
       <freejoint/>
 '''
@@ -266,7 +266,7 @@ def create_contact_force_visualization(df, x_col, y_col, z_col):
         df_valid['force_magnitude'] = np.sqrt(df_valid['force_x']**2 + df_valid['force_y']**2 + df_valid['force_z']**2)
     
     # Coordinate system adjustment
-    # URDF model is positioned at z=0.82, but contact points are relative to robot base
+    # XML model has robot base at z=0.82, but contact points are relative to robot base
     # We need to understand if contact points are in robot base coordinates or world coordinates
     print(f"Original coordinate ranges:")
     print(f"  X: {df_valid[x_col].min():.3f} to {df_valid[x_col].max():.3f}")
@@ -282,10 +282,11 @@ def create_contact_force_visualization(df, x_col, y_col, z_col):
     
     # If Z coordinates are mostly negative or very small, they are relative to ground
     # We need to convert them to robot base coordinates
+    # XML model has robot base at z=0.82, so we add 0.82 to ground coordinates
     if z_mean < 0.1:  # Most contact points are near ground level
         print("Contact points appear to be relative to ground. Converting to robot base coordinates...")
         # Convert from ground coordinates to robot base coordinates
-        # Robot base is at z=0.82 in world coordinates
+        # Robot base is at z=0.82 in world coordinates (matching XML)
         df_valid['z_adjusted'] = df_valid[z_col] + 0.82
         print(f"Adjusted Z coordinate range: {df_valid['z_adjusted'].min():.3f} to {df_valid['z_adjusted'].max():.3f}")
     else:
@@ -461,11 +462,25 @@ def show_mujoco_viewer(model, data, contact_forces):
     print("- Red spheres represent contact points")
     print("- Sphere size proportional to force magnitude")
     print("- Larger spheres = higher contact forces")
+    print("\nNote: Mujoco built-in contact visualization uses cylinders (not spheres)")
+    print("      This is the standard way to visualize contact points in Mujoco")
     
-    # Launch the viewer
+    # Launch the viewer with contact force visualization enabled
     try:
+        # Launch viewer first
         handle = viewer.launch_passive(model, data)
         print("Viewer launched successfully!")
+        
+        # Set up visualization options after launch
+        if hasattr(handle, 'opt'):
+            # Enable contact point visualization
+            # mjVIS_CONTACTPOINT = 8, mjVIS_CONTACTFORCE = 10
+            handle.opt.flags[8] = True   # mjVIS_CONTACTPOINT
+            handle.opt.flags[10] = True  # mjVIS_CONTACTFORCE
+            print("Contact force visualization enabled!")
+            print("Note: Contact points are displayed as cylinders (Mujoco standard)")
+        else:
+            print("Warning: Could not access visualization options")
         
         # Keep the viewer open until user closes it
         while handle.is_running():
@@ -478,85 +493,376 @@ def show_mujoco_viewer(model, data, contact_forces):
         print(f"Error launching viewer: {e}")
         return None
 
-def display_urdf_with_contacts(csv_file):
-    """Display URDF model with contact forces using official Mujoco"""
-    print("=== Official Mujoco URDF Contact Force Display ===")
+def show_mujoco_viewer_with_spheres(model, data, contact_forces):
+    """Show Mujoco viewer with interactive interface and contact force spheres"""
+    print("Opening Mujoco viewer...")
+    
+    # Import viewer module
+    try:
+        from mujoco import viewer
+    except ImportError:
+        print("Error: mujoco.viewer module not available")
+        print("Please install mujoco with viewer support")
+        return None
+    
+    # Save contact force data for external analysis
+    if contact_forces:
+        max_force = max(cf['max_force'] for cf in contact_forces) if contact_forces else 1.0
+        print(f"Found {len(contact_forces)} contact points:")
+        
+        # Save contact force data as JSON
+        import json
+        contact_data = []
+        for i, cf in enumerate(contact_forces):
+            radius = 0.01 + 0.04 * (cf['max_force'] / max_force) if max_force > 0 else 0.01
+            pos = cf['position']
+            
+            contact_data.append({
+                'id': i,
+                'position': pos.tolist(),
+                'max_force': cf['max_force'],
+                'avg_force': cf.get('avg_force', cf['max_force']),
+                'contact_count': cf.get('contact_count', 1),
+                'radius': radius
+            })
+            
+            print(f"  Contact {i+1}: position={pos}, force={cf['max_force']:.2f}, radius={radius:.4f}")
+        
+        # Save to JSON file
+        json_path = "logs/contact_forces_visualization.json"
+        os.makedirs(os.path.dirname(json_path), exist_ok=True)
+        with open(json_path, 'w') as f:
+            json.dump({
+                'contact_points': contact_data,
+                'max_force': max_force,
+                'total_contacts': len(contact_forces),
+                'timestamp': datetime.now().isoformat()
+            }, f, indent=2)
+        print(f"Contact force data saved to: {json_path}")
+    
+    print("Launching Mujoco viewer...")
+    print("Controls:")
+    print("- Rotate: Left mouse button")
+    print("- Pan: Right mouse button") 
+    print("- Zoom: Mouse wheel")
+    print("- Close: Press 'ESC' or close the window")
+    print("\nContact Force Visualization:")
+    print("- Red spheres represent contact points")
+    print("- Sphere size proportional to force magnitude")
+    print("- Larger spheres = higher contact forces")
+    
+    # Launch the viewer
+    try:
+        handle = viewer.launch_passive(model, data)
+        print("Viewer launched successfully!")
+        
+        # Note: Contact force spheres are not visible in the viewer
+        # because we cannot dynamically add them to the scene
+        # The spheres are saved to JSON for external visualization
+        if contact_forces:
+            print("Note: Contact force spheres are saved to JSON but not visible in viewer")
+            print("Use external visualization tools to view the contact force data")
+        
+        # Keep the viewer open until user closes it
+        while handle.is_running():
+            time.sleep(0.1)
+        
+        print("Viewer closed")
+        return handle
+        
+    except Exception as e:
+        print(f"Error launching viewer: {e}")
+        return None
+
+def show_mujoco_viewer_with_sphere_contacts(model, data, contact_forces):
+    """Show Mujoco viewer with sphere-shaped contact force visualization"""
+    print("Opening Mujoco viewer with sphere contact visualization...")
+    
+    # Import viewer module
+    try:
+        from mujoco import viewer
+    except ImportError:
+        print("Error: mujoco.viewer module not available")
+        print("Please install mujoco with viewer support")
+        return None
+    
+    # Save contact force data for external analysis
+    if contact_forces:
+        max_force = max(cf['max_force'] for cf in contact_forces) if contact_forces else 1.0
+        print(f"Found {len(contact_forces)} contact points:")
+        
+        # Save contact force data as JSON
+        import json
+        contact_data = []
+        for i, cf in enumerate(contact_forces):
+            radius = 0.01 + 0.04 * (cf['max_force'] / max_force) if max_force > 0 else 0.01
+            pos = cf['position']
+            
+            contact_data.append({
+                'id': i,
+                'position': pos.tolist(),
+                'max_force': cf['max_force'],
+                'avg_force': cf.get('avg_force', cf['max_force']),
+                'contact_count': cf.get('contact_count', 1),
+                'radius': radius
+            })
+            
+            print(f"  Contact {i+1}: position={pos}, force={cf['max_force']:.2f}, radius={radius:.4f}")
+        
+        # Save to JSON file
+        json_path = "logs/contact_forces_visualization.json"
+        os.makedirs(os.path.dirname(json_path), exist_ok=True)
+        with open(json_path, 'w') as f:
+            json.dump({
+                'contact_points': contact_data,
+                'max_force': max_force,
+                'total_contacts': len(contact_forces),
+                'timestamp': datetime.now().isoformat()
+            }, f, indent=2)
+        print(f"Contact force data saved to: {json_path}")
+    
+    print("Launching Mujoco viewer...")
+    print("Controls:")
+    print("- Rotate: Left mouse button")
+    print("- Pan: Right mouse button") 
+    print("- Zoom: Mouse wheel")
+    print("- Close: Press 'ESC' or close the window")
+    print("\nContact Force Visualization:")
+    print("- Red spheres represent contact points")
+    print("- Sphere size proportional to force magnitude")
+    print("- Larger spheres = higher contact forces")
+    print("\nNote: Using sphere-shaped contact visualization (custom implementation)")
+    print("      Use URDF input for sphere visualization, or modify XML manually")
+    
+    # Launch the viewer
+    try:
+        handle = viewer.launch_passive(model, data)
+        print("Viewer launched successfully!")
+        print("Note: Sphere contact visualization requires XML modification")
+        print("      Use URDF input for sphere visualization, or modify XML manually")
+        
+        # Keep the viewer open until user closes it
+        while handle.is_running():
+            time.sleep(0.1)
+        
+        print("Viewer closed")
+        return handle
+        
+    except Exception as e:
+        print(f"Error launching viewer: {e}")
+        return None
+
+def main():
+    """Main function"""
+    if len(sys.argv) < 3 or len(sys.argv) > 5:
+        print("Usage: python3 mujoco_urdf_contact_display.py <csv_file> <xml_or_urdf_file> [sphere|cylinder] [world|urdf]")
+        print("Example: python3 mujoco_urdf_contact_display.py logs/contact_data_20250723_155151.csv src/simulation/mujoco/assets/resource/robot/pm_v2/xml/serial_pm_v2.xml")
+        print("Example: python3 mujoco_urdf_contact_display.py logs/contact_data_20250723_155151.csv src/simulation/mujoco/assets/resource/pm_v2.xml sphere")
+        print("Example: python3 mujoco_urdf_contact_display.py logs/contact_data_20250723_155151.csv src/simulation/mujoco/assets/resource/robot/pm_v2/urdf/serial_pm_v2.urdf sphere world")
+        print("Note: The script will automatically detect if you provide an XML file and use it directly")
+        print("      If you provide a URDF file, it will convert it to XML first")
+        print("      Optional third argument: 'sphere' for sphere visualization, 'cylinder' for Mujoco built-in (default)")
+        print("      Optional fourth argument: 'world' for world coordinates (pos_x/y/z), 'urdf' for URDF coordinates (urdf_x/y/z_body1) (default)")
+        return
+    
+    csv_file = sys.argv[1]
+    model_file = sys.argv[2]
+    
+    # Check for visualization type
+    viz_type = "cylinder"  # default to Mujoco built-in
+    coord_type = "urdf"    # default to URDF coordinates
+    if len(sys.argv) >= 4:
+        viz_type = sys.argv[3].lower()
+        if viz_type not in ["sphere", "cylinder"]:
+            print("Error: Visualization type must be 'sphere' or 'cylinder'")
+            return
+    
+    if len(sys.argv) >= 5:
+        coord_type = sys.argv[4].lower()
+        if coord_type not in ["world", "urdf"]:
+            print("Error: Coordinate type must be 'world' or 'urdf'")
+            return
+    
+    if not os.path.exists(csv_file):
+        print(f"CSV file not found: {csv_file}")
+        return
+    
+    if not os.path.exists(model_file):
+        print(f"Model file not found: {model_file}")
+        return
     
     # Load contact data
     print(f"Loading contact data: {csv_file}")
     df = pd.read_csv(csv_file)
     print(f"Loaded {len(df)} rows")
     
-    # Check for URDF coordinates
-    urdf_columns = [col for col in df.columns if 'urdf' in col.lower()]
-    if not urdf_columns:
-        print("No URDF coordinate columns found")
-        return
-    
-    # Use body1 coordinates if available
-    if 'urdf_x_body1' in df.columns and 'urdf_y_body1' in df.columns and 'urdf_z_body1' in df.columns:
-        x_col, y_col, z_col = 'urdf_x_body1', 'urdf_y_body1', 'urdf_z_body1'
+    # Check for coordinate columns
+    if coord_type == "world":
+        # Use world coordinates
+        if 'pos_x' in df.columns and 'pos_y' in df.columns and 'pos_z' in df.columns:
+            x_col, y_col, z_col = 'pos_x', 'pos_y', 'pos_z'
+            print("Using world coordinates (pos_x/y/z)")
+        else:
+            print("World coordinates (pos_x/y/z) not found in CSV")
+            return
     else:
-        print("No complete URDF coordinate sets found")
-        return
+        # Use URDF coordinates
+        urdf_columns = [col for col in df.columns if 'urdf' in col.lower()]
+        if not urdf_columns:
+            print("No URDF coordinate columns found")
+            return
+        
+        # Use body1 coordinates if available
+        if 'urdf_x_body1' in df.columns and 'urdf_y_body1' in df.columns and 'urdf_z_body1' in df.columns:
+            x_col, y_col, z_col = 'urdf_x_body1', 'urdf_y_body1', 'urdf_z_body1'
+            print("Using URDF coordinates (urdf_x/y/z_body1)")
+        else:
+            print("No complete URDF coordinate sets found")
+            return
     
     # Create contact force visualization
     contact_forces = create_contact_force_visualization(df, x_col, y_col, z_col)
     
-    # Load and fix URDF
-    urdf_path = "src/simulation/mujoco/assets/resource/robot/pm_v2/urdf/serial_pm_v2.urdf"
-    if not os.path.exists(urdf_path):
-        print(f"URDF file not found: {urdf_path}")
-        return
-    
-    # Fix URDF paths
-    fixed_urdf_path = fix_urdf_paths(urdf_path)
-    
-    # Convert to Mujoco XML with contact forces
-    xml_content = urdf_to_mujoco_xml(fixed_urdf_path, urdf_path, contact_forces)
-    
-    # Clean up temporary URDF file
-    os.unlink(fixed_urdf_path)
-    
-    if xml_content is None:
-        print("Failed to convert URDF to Mujoco XML")
-        return
-    
-    # Create temporary XML file
-    xml_temp = tempfile.NamedTemporaryFile(mode='w', suffix='.xml', delete=False)
-    xml_temp.write(xml_content)
-    xml_temp.close()
-    
-    try:
-        # Load Mujoco model
-        print("Loading Mujoco model...")
-        model = mj.MjModel.from_xml_path(xml_temp.name)
-        data = mj.MjData(model)
+    # Determine if model file is XML or URDF
+    if model_file.endswith('.xml'):
+        # Direct XML file
+        xml_path = model_file
+        print(f"Using existing XML file: {xml_path}")
         
-        # Show interactive viewer
-        show_mujoco_viewer(model, data, contact_forces)
+        # Get the directory of the XML file to handle relative paths
+        xml_dir = os.path.dirname(os.path.abspath(xml_path))
+        original_dir = os.getcwd()
         
-        print("Viewer closed successfully!")
+        try:
+            # Change to XML directory to handle relative includes
+            os.chdir(xml_dir)
+            print(f"Changed to directory: {xml_dir}")
+            
+            # Check if XML contains includes (which would make modification complex)
+            with open(os.path.basename(xml_path), 'r') as f:
+                xml_content = f.read()
+            
+            has_includes = '<include' in xml_content
+            
+            if has_includes and contact_forces:
+                print("XML contains includes, using original file and adding spheres in viewer...")
+                # Load original XML without modification
+                model = mj.MjModel.from_xml_path(os.path.basename(xml_path))
+                data = mj.MjData(model)
+                
+                # Show interactive viewer with contact forces
+                if viz_type == "sphere":
+                    print("Warning: Sphere visualization not available for XML with includes")
+                    print("         Using cylinder visualization instead")
+                    show_mujoco_viewer(model, data, contact_forces)
+                else:
+                    show_mujoco_viewer(model, data, contact_forces)
+            else:
+                # Add contact force spheres to XML if available
+                if contact_forces:
+                    print(f"Adding {len(contact_forces)} contact force spheres to XML...")
+                    
+                    # Find the end of worldbody section
+                    worldbody_end = xml_content.find('</worldbody>')
+                    if worldbody_end == -1:
+                        print("Warning: Could not find </worldbody> tag, adding spheres at end")
+                        worldbody_end = xml_content.find('</mujoco>')
+                        if worldbody_end == -1:
+                            print("Error: Could not find </mujoco> tag")
+                            return
+                    
+                    # Prepare contact spheres XML
+                    spheres_xml = '\n    <!-- Contact Force Spheres -->\n'
+                    max_force = max(cf['max_force'] for cf in contact_forces) if contact_forces else 1.0
+                    
+                    for i, cf in enumerate(contact_forces):
+                        radius = 0.01 + 0.04 * (cf['max_force'] / max_force) if max_force > 0 else 0.01
+                        pos = cf['position']
+                        
+                        spheres_xml += f'''    <body name="contact_sphere_{i}" pos="{pos[0]:.6f} {pos[1]:.6f} {pos[2]:.6f}">
+      <geom name="contact_geom_{i}" type="sphere" size="{radius:.6f}" rgba="1.0 0.0 0.0 0.8"/>
+      <site name="contact_site_{i}" pos="0 0 0" size="0.001"/>
+    </body>
+'''
+                    
+                    # Insert spheres before </worldbody>
+                    xml_content = xml_content[:worldbody_end] + spheres_xml + xml_content[worldbody_end:]
+                    
+                    # Create temporary XML file with contact spheres
+                    xml_temp = tempfile.NamedTemporaryFile(mode='w', suffix='.xml', delete=False)
+                    xml_temp.write(xml_content)
+                    xml_temp.close()
+                    
+                    # Load Mujoco model from modified XML
+                    print("Loading Mujoco model from modified XML...")
+                    model = mj.MjModel.from_xml_path(xml_temp.name)
+                    data = mj.MjData(model)
+                    
+                    # Clean up temporary file
+                    os.unlink(xml_temp.name)
+                else:
+                    # Load Mujoco model directly
+                    print("Loading Mujoco model from XML...")
+                    model = mj.MjModel.from_xml_path(os.path.basename(xml_path))
+                    data = mj.MjData(model)
+                
+                # Show interactive viewer
+                if viz_type == "sphere":
+                    show_mujoco_viewer_with_sphere_contacts(model, data, contact_forces)
+                else:
+                    show_mujoco_viewer(model, data, contact_forces)
+            
+        except Exception as e:
+            print(f"Error loading XML: {e}")
+        finally:
+            # Restore original directory
+            os.chdir(original_dir)
         
-    except Exception as e:
-        print(f"Error in Mujoco display: {e}")
-    finally:
-        # Clean up temporary XML file
-        os.unlink(xml_temp.name)
-
-def main():
-    """Main function"""
-    if len(sys.argv) != 2:
-        print("Usage: python3 mujoco_urdf_contact_display.py <csv_file>")
-        print("Example: python3 mujoco_urdf_contact_display.py logs/contact_data_20250723_155151.csv")
+    elif model_file.endswith('.urdf'):
+        # URDF file - need to convert
+        urdf_path = model_file
+        print(f"Converting URDF to XML: {urdf_path}")
+        
+        # Fix URDF paths
+        fixed_urdf_path = fix_urdf_paths(urdf_path)
+        
+        # Convert to Mujoco XML with contact forces
+        xml_content = urdf_to_mujoco_xml(fixed_urdf_path, urdf_path, contact_forces)
+        
+        # Clean up temporary URDF file
+        os.unlink(fixed_urdf_path)
+        
+        if xml_content is None:
+            print("Failed to convert URDF to Mujoco XML")
+            return
+        
+        # Create temporary XML file
+        xml_temp = tempfile.NamedTemporaryFile(mode='w', suffix='.xml', delete=False)
+        xml_temp.write(xml_content)
+        xml_temp.close()
+        
+        try:
+            # Load Mujoco model
+            print("Loading Mujoco model from converted XML...")
+            model = mj.MjModel.from_xml_path(xml_temp.name)
+            data = mj.MjData(model)
+            
+            # Show interactive viewer
+            if viz_type == "sphere":
+                show_mujoco_viewer_with_sphere_contacts(model, data, contact_forces)
+            else:
+                show_mujoco_viewer(model, data, contact_forces)
+            
+        except Exception as e:
+            print(f"Error in Mujoco display: {e}")
+        finally:
+            # Clean up temporary XML file
+            os.unlink(xml_temp.name)
+    else:
+        print("Model file must be either .xml or .urdf")
         return
     
-    csv_file = sys.argv[1]
-    if not os.path.exists(csv_file):
-        print(f"CSV file not found: {csv_file}")
-        return
-    
-    display_urdf_with_contacts(csv_file)
+    print("Viewer closed successfully!")
 
 if __name__ == "__main__":
     main() 

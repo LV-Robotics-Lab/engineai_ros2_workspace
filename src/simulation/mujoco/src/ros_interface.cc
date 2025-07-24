@@ -242,10 +242,10 @@ void RosInterface::PublishContactForces(const mjModel* m, mjData* d) {
   // Get number of contacts
   int ncon = d->ncon;
   
-  // 添加调试信息，每100帧打印一次
+  // 添加调试信息，每1000帧打印一次（在10kHz频率下约每0.1秒一次）
   static int frame_count = 0;
   frame_count++;
-  if (frame_count % 100 == 0) {
+  if (frame_count % 1000 == 0) {
     RCLCPP_INFO(node_->get_logger(), "Current contacts: %d", ncon);
     
     // 统计所有接触的力大小
@@ -444,48 +444,6 @@ void RosInterface::PublishContactForces(const mjModel* m, mjData* d) {
       // 使用MuJoCo仿真时间而不是ROS时间
       double sim_time = d->time;
       
-      // 计算所有接触的合力
-      mjtNum total_world_force[3] = {0.0, 0.0, 0.0};
-      mjtNum total_world_torque[3] = {0.0, 0.0, 0.0};
-      
-      for (int i = 0; i < ncon; ++i) {
-        const mjContact& contact = d->contact[i];
-        mjtNum contact_force[6] = {0.0, 0.0, 0.0, 0.0, 0.0, 0.0};
-        mj_contactForce(m, d, i, contact_force);
-        
-        // 转换到世界坐标系
-        mjtNum world_force[3] = {0.0, 0.0, 0.0};
-        mjtNum world_torque[3] = {0.0, 0.0, 0.0};
-        
-        for (int j = 0; j < 3; j++) {
-          world_force[j] = contact.frame[j*3 + 0] * contact_force[0] + 
-                           contact.frame[j*3 + 1] * contact_force[1] + 
-                           contact.frame[j*3 + 2] * contact_force[2];
-          
-          world_torque[j] = contact.frame[j*3 + 0] * contact_force[3] + 
-                            contact.frame[j*3 + 1] * contact_force[4] + 
-                            contact.frame[j*3 + 2] * contact_force[5];
-        }
-        
-        // 累加到合力
-        for (int j = 0; j < 3; j++) {
-          total_world_force[j] += world_force[j];
-          total_world_torque[j] += world_torque[j];
-        }
-      }
-      
-      // 计算总合力大小（仅用于日志输出，不写入CSV）
-      double total_force_magnitude = sqrt(total_world_force[0]*total_world_force[0] + 
-                                         total_world_force[1]*total_world_force[1] + 
-                                         total_world_force[2]*total_world_force[2]);
-      
-      // 输出合力信息到日志（可选）
-      if (frame_counter % 1000 == 0) {  // 每1000帧输出一次
-        RCLCPP_INFO(node_->get_logger(), 
-                    "Total contact force: (%.3f, %.3f, %.3f), magnitude: %.3f", 
-                    total_world_force[0], total_world_force[1], total_world_force[2], total_force_magnitude);
-      }
-      
       // 为每个接触点写入一行数据
       for (int i = 0; i < ncon; ++i) {
         const mjContact& contact = d->contact[i];
@@ -546,12 +504,25 @@ void RosInterface::PublishContactForces(const mjModel* m, mjData* d) {
         mjtNum body2_quat[4] = {d->xquat[body2_id*4], d->xquat[body2_id*4+1], d->xquat[body2_id*4+2], d->xquat[body2_id*4+3]};
         
         // 计算URDF坐标系中的位置（相对于body1）
+        // 将世界坐标中的接触点位置转换到body1的局部坐标系
         mjtNum urdf_pos_body1[3];
-        mju_trnVecPose(urdf_pos_body1, body1_pos, body1_quat, pos);
+        // 计算从body1到接触点的相对位置
+        mjtNum relative_pos[3] = {pos[0] - body1_pos[0], pos[1] - body1_pos[1], pos[2] - body1_pos[2]};
+        // 将相对位置从世界坐标系转换到body1的局部坐标系
+        // 需要先计算四元数的共轭（逆），然后旋转
+        mjtNum body1_quat_conj[4];
+        mju_negQuat(body1_quat_conj, body1_quat);
+        mju_rotVecQuat(urdf_pos_body1, relative_pos, body1_quat_conj);
         
         // 计算URDF坐标系中的位置（相对于body2）
         mjtNum urdf_pos_body2[3];
-        mju_trnVecPose(urdf_pos_body2, body2_pos, body2_quat, pos);
+        // 计算从body2到接触点的相对位置
+        mjtNum relative_pos2[3] = {pos[0] - body2_pos[0], pos[1] - body2_pos[1], pos[2] - body2_pos[2]};
+        // 将相对位置从世界坐标系转换到body2的局部坐标系
+        // 需要先计算四元数的共轭（逆），然后旋转
+        mjtNum body2_quat_conj[4];
+        mju_negQuat(body2_quat_conj, body2_quat);
+        mju_rotVecQuat(urdf_pos_body2, relative_pos2, body2_quat_conj);
         
         // 写入CSV行
         csv_file_ << std::fixed << std::setprecision(6)
