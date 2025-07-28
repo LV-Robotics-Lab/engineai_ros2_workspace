@@ -5,6 +5,7 @@ import mujoco
 import mujoco.viewer
 import numpy as np
 import matplotlib.pyplot as plt
+from mpl_toolkits.mplot3d import Axes3D
 import pandas as pd
 import os
 import xml.etree.ElementTree as ET
@@ -61,19 +62,93 @@ def read_xml_parameters(xml_path):
     
     return params
 
+# 创建传感器位置映射
+def create_sensor_positions():
+    """创建传感器位置映射，返回位置字典和传感器名称列表"""
+    positions = {}
+    sensor_names = []
+    
+    # 中心传感器
+    positions['center'] = (0, 0)
+    sensor_names.append('center')
+    
+    # 北方向传感器 (y轴正方向)
+    for i in range(1, 6):
+        name = f'n{i}'
+        positions[name] = (0, i * 0.01)
+        sensor_names.append(name)
+    
+    # 南方向传感器 (y轴负方向)
+    for i in range(1, 6):
+        name = f's{i}'
+        positions[name] = (0, -i * 0.01)
+        sensor_names.append(name)
+    
+    # 东方向传感器 (x轴正方向)
+    for i in range(1, 6):
+        name = f'e{i}'
+        positions[name] = (i * 0.01, 0)
+        sensor_names.append(name)
+    
+    # 西方向传感器 (x轴负方向)
+    for i in range(1, 6):
+        name = f'w{i}'
+        positions[name] = (-i * 0.01, 0)
+        sensor_names.append(name)
+    
+    # 东北方向传感器
+    for i in range(1, 6):
+        name = f'ne{i}'
+        positions[name] = (i * 0.01, i * 0.01)
+        sensor_names.append(name)
+    
+    # 西北方向传感器
+    for i in range(1, 6):
+        name = f'nw{i}'
+        positions[name] = (-i * 0.01, i * 0.01)
+        sensor_names.append(name)
+    
+    # 东南方向传感器
+    for i in range(1, 6):
+        name = f'se{i}'
+        positions[name] = (i * 0.01, -i * 0.01)
+        sensor_names.append(name)
+    
+    # 西南方向传感器
+    for i in range(1, 6):
+        name = f'sw{i}'
+        positions[name] = (-i * 0.01, -i * 0.01)
+        sensor_names.append(name)
+    
+    # 填充其他位置的传感器
+    for i in range(1, 65):
+        name = f'{i:02d}'
+        # 根据编号计算位置
+        row = (i - 1) // 8
+        col = (i - 1) % 8
+        x = (col - 3.5) * 0.01
+        y = (row - 3.5) * 0.01
+        positions[name] = (x, y)
+        sensor_names.append(name)
+    
+    return positions, sensor_names
+
+# 创建传感器位置映射
+sensor_positions, sensor_names = create_sensor_positions()
+num_sensors = len(sensor_names)
+
 # 调试信息：检查传感器配置
 print(f"传感器数量: {model.nsensor}")
-print(f"传感器名称: {[model.sensor(i).name for i in range(model.nsensor)]}")
-print(f"传感器类型: {[model.sensor(i).type for i in range(model.nsensor)]}")
+print(f"传感器名称: {[model.sensor(i).name for i in range(min(10, model.nsensor))]}...")
+print(f"传感器类型: {[model.sensor(i).type for i in range(min(10, model.nsensor))]}...")
 
 # 模拟参数
 timesteps = 200000  # 模拟总步数 (增加步数以适应更小的时间步长)
 dt = model.opt.timestep
 force_log = []
 
-# 传感器阵列参数
-sensor_names = ["center", "n", "s", "e", "w", "ne", "nw", "se", "sw"]
-num_sensors = len(sensor_names)
+# 记录每个传感器的最大力
+max_forces = {name: 0.0 for name in sensor_names}
 
 impact_started = False
 impact_start_time = None
@@ -83,6 +158,8 @@ impact_end_time = None
 print("开始运行模拟...")
 print(f"时间步长: {dt} 秒")
 print(f"总模拟时间: {timesteps * dt} 秒")
+print(f"传感器数量: {num_sensors}")
+
 # 运行模拟
 for i in range(timesteps):
     mujoco.mj_step(model, data)
@@ -93,10 +170,15 @@ for i in range(timesteps):
     max_force = max(sensor_data)    # 最大单个传感器力
     t = i * dt
     
+    # 更新每个传感器的最大力
+    for j, name in enumerate(sensor_names):
+        if j < len(sensor_data):
+            max_forces[name] = max(max_forces[name], sensor_data[j])
+    
     # 调试：打印传感器数据
-    if i % 100 == 0:
+    if i % 1000 == 0:
         print(f"Step {i}, Time {t:.4f}s")
-        print(f"传感器数据: {[f'{f:.4f}' for f in sensor_data]}")
+        print(f"传感器数据: {[f'{f:.4f}' for f in sensor_data[:10]]}...")
         print(f"总冲击力: {total_force:.4f} N")
         print(f"最大传感器力: {max_force:.4f} N")
         print(f"传感器数据形状: {data.sensordata.shape}")
@@ -195,10 +277,10 @@ if impact_start_time is not None and impact_end_time is not None:
     print(f"总冲击时间: {total_impact_time*1000000:.0f} 微秒")
     
     # 绘图
-    plt.figure(figsize=(12, 8))
+    plt.figure(figsize=(15, 6))
     
     # 子图1：总冲击力
-    plt.subplot(2, 1, 1)
+    plt.subplot(1, 2, 1)
     plt.plot(df["time"], df["total_force"], label="Total Force", linewidth=2, color='red')
     plt.axvline(impact_start_time, color="red", linestyle="--", label="Contact Start")
     plt.axvline(impact_end_time, color="green", linestyle="--", label="Contact End")
@@ -208,22 +290,53 @@ if impact_start_time is not None and impact_end_time is not None:
     plt.legend()
     plt.grid(True)
     
-    # 子图2：各传感器力
-    plt.subplot(2, 1, 2)
+    # 子图2：3D图显示各传感器力的最大值
+    ax3d = plt.subplot(1, 2, 2, projection='3d')
+    
+    # 准备3D数据
+    x_coords = []
+    y_coords = []
+    z_coords = []
+    
     for name in sensor_names:
-        plt.plot(df["time"], df[f"force_{name}"], label=f"Sensor {name.upper()}", alpha=0.7)
-    plt.xlabel("Time (s)")
-    plt.ylabel("Individual Sensor Force (N)")
-    plt.legend()
-    plt.grid(True)
+        if name in sensor_positions:
+            x, y = sensor_positions[name]
+            x_coords.append(x)
+            y_coords.append(y)
+            z_coords.append(max_forces[name])
+    
+    # 创建3D散点图
+    scatter = ax3d.scatter(x_coords, y_coords, z_coords, 
+                           c=z_coords, cmap='viridis', s=50, alpha=0.8)
+    
+    ax3d.set_xlabel('X Position (m)')
+    ax3d.set_ylabel('Y Position (m)')
+    ax3d.set_zlabel('Max Force (N)')
+    ax3d.set_title('3D Sensor Force Distribution')
+    
+    # 添加颜色条
+    plt.colorbar(scatter, ax=ax3d, label='Max Force (N)')
     
     plt.tight_layout()
     
     # 保存图片到XML文件所在目录
     plot_path = os.path.join(xml_dir, "Free_Fall_Impact_Force_log.png")
-    plt.savefig(plot_path)
+    plt.savefig(plot_path, dpi=300, bbox_inches='tight')
     print(f"已保存冲击力图表为 {plot_path}")
     plt.show()
+    
+    # 保存3D数据
+    sensor_data_3d = {
+        'sensor_name': sensor_names,
+        'x_position': [sensor_positions[name][0] for name in sensor_names],
+        'y_position': [sensor_positions[name][1] for name in sensor_names],
+        'max_force': [max_forces[name] for name in sensor_names]
+    }
+    
+    df_3d = pd.DataFrame(sensor_data_3d)
+    csv_3d_path = os.path.join(xml_dir, "sensor_3d_data.csv")
+    df_3d.to_csv(csv_3d_path, index=False)
+    print(f"已保存3D传感器数据为 {csv_3d_path}")
 
 else:
     print("\n 未检测到有效冲击，可能原因：")
