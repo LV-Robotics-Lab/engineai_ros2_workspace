@@ -1,91 +1,181 @@
 <mujoco model="iron_ball_drop">
     <!-- ========================================== -->
-    <!-- Iron Ball Free Fall Impact Force Analysis -->
+    <!-- 铁球自由落体冲击力分析模型 -->
     <!-- ========================================== -->
     
-    <!-- Compiler settings -->
+    <!-- 编译器设置 -->
     <compiler angle="radian" coordinate="local" discardvisual="false" autolimits="true"/>
+    <!-- angle="radian": 角度单位为弧度 -->
+    <!-- coordinate="local": 使用局部坐标系 -->
+    <!-- discardvisual="false": 保留视觉元素 -->
+    <!-- autolimits="true": 自动设置关节限制 -->
     
-    <!-- Simulation options -->
+    <!-- 仿真选项 -->
     <option gravity="0 0 -9.81" integrator="RK4" timestep="0.00001" tolerance="1e-12"/>
+    <!-- gravity="0 0 -9.81": 重力加速度，z轴向下9.81 m/s² -->
+    <!-- integrator="RK4": 使用四阶龙格库塔积分器 -->
+    <!-- timestep="0.00001": 仿真时间步长，0.01毫秒，用于高精度冲击力分析 -->
+    <!-- tolerance="1e-12": 数值求解容差，确保高精度计算 -->
     
-    <!-- Visualization settings -->
+    <!-- 可视化设置 -->
     <visual>
-        <!-- Contact visualization settings -->
+        <!-- 接触点可视化设置 -->
         <rgba contactpoint="1.0 0.0 0.0 1.0" contactforce="0.8 0.36 0.36 1" 
                contactfriction="0.8 0.36 0.36 1" contacttorque="0.8 0.36 0.36 1" 
                contactgap="0.8 0.36 0.36 1" haze="0.15 0.25 0.35 1"/>
-        <scale contactwidth="0.003" contactheight="0.005" forcewidth="0.02"/>
+        <!-- contactpoint: 接触点颜色，红色 -->
+        <!-- contactforce: 接触力颜色，浅红色 -->
+        <!-- contactfriction: 摩擦力颜色，浅红色 -->
+        <!-- contacttorque: 接触力矩颜色，浅红色 -->
+        <!-- contactgap: 接触间隙颜色，浅红色 -->
+        <!-- haze: 雾化效果颜色，蓝灰色 -->
         
-        <!-- Lighting and rendering settings -->
+        <scale contactwidth="0.003" contactheight="0.005" forcewidth="0.02"/>
+        <!-- contactwidth: 接触点宽度，3毫米 -->
+        <!-- contactheight: 接触点高度，5毫米 -->
+        <!-- forcewidth: 力向量宽度，2厘米 -->
+        
+        <!-- 光照和渲染设置 -->
         <headlight diffuse="0.6 0.6 0.6" ambient="0.3 0.3 0.3" specular="0 0 0"/>
+        <!-- diffuse: 漫反射光强度 -->
+        <!-- ambient: 环境光强度 -->
+        <!-- specular: 镜面反射光强度 -->
+        
         <global azimuth="150" elevation="-20"/>
+        <!-- azimuth: 方位角，150度 -->
+        <!-- elevation: 仰角，-20度（向下看） -->
+        
         <quality shadowsize="0"/>
+        <!-- shadowsize: 阴影大小，0表示无阴影 -->
     </visual>
 
-    <!-- Asset definitions -->
+    <!-- 资源定义 -->
     <asset>
-        <!-- Material definitions -->
+        <!-- 材料定义 -->
         <material name="iron" rgba="0.4 0.4 0.4 1" specular="0.3" reflectance="0.1"/>
-        <material name="ground_material" rgba="0.7 0.7 0.7 1" specular="0.5" reflectance="0.2"/>
+        <!-- name="iron": 铁材料名称 -->
+        <!-- rgba: 颜色，灰色，不透明度1.0 -->
+        <!-- specular: 镜面反射系数，0.3 -->
+        <!-- reflectance: 反射率，0.1 -->
         
-        <!-- Texture for ground plane -->
+        <!-- 地面纹理 -->
         <texture type="2d" name="groundplane" builtin="checker" mark="edge" 
                  rgb1="0.2 0.3 0.4" rgb2="0.1 0.2 0.3" markrgb="0.8 0.8 0.8" 
                  width="1000" height="1000"/>
+        <!-- type="2d": 2D纹理类型 -->
+        <!-- name="groundplane": 纹理名称 -->
+        <!-- builtin="checker": 内置棋盘格纹理 -->
+        <!-- mark="edge": 边缘标记 -->
+        <!-- rgb1/rgb2: 棋盘格两种颜色，蓝灰色系 -->
+        <!-- markrgb: 边缘标记颜色，白色 -->
+        <!-- width/height: 纹理尺寸，1000x1000像素 -->
+        
         <material name="groundplane" texture="groundplane" texuniform="true" 
                   texrepeat="5 5" reflectance="0"/>
+        <!-- name="groundplane": 地面平面材料名称 -->
+        <!-- texture: 使用的纹理名称 -->
+        <!-- texuniform="true": 纹理均匀分布 -->
+        <!-- texrepeat="5 5": 纹理重复次数，5x5 -->
+        <!-- reflectance="0": 无反射 -->
     </asset>
 
-    <!-- Default settings for geometries and joints -->
+    <!-- 几何体和关节的默认设置 -->
     <default>
-        <!-- Default settings for iron objects -->
+        <!-- 铁质物体的默认设置 -->
         <default class="iron_object">
             <geom density="7860" friction="0.5 0.005 0.0001" condim="6" 
                    solimp="0.9 0.95" solref="0.001 1" material="iron"/>
+            <!-- density="7860": 密度，铁的标准密度7860 kg/m³ -->
+            <!-- friction="0.5 0.005 0.0001": 摩擦系数，滑动/滚动/旋转摩擦 -->
+            <!-- condim="6": 接触维度，6表示完整3D接触 -->
+            <!-- solimp="0.9 0.95": 求解器参数，影响接触力计算精度 -->
+            <!-- solref="0.001 1": 求解器参考参数，时间步长和阻尼 -->
+            <!-- material="iron": 使用铁材料 -->
         </default>
         
-        <!-- Default settings for ground objects -->
+        <!-- 地面物体的默认设置 -->
         <default class="ground_object">
-            <geom material="iron" conaffinity="7" condim="6" friction="1"/>
+            <geom density="7860" friction="0.5 0.005 0.0001" condim="6" 
+                   solimp="0.9 0.95" solref="0.001 1" material="iron"/>
+            <!-- density="7860": 密度，铁的标准密度7860 kg/m³ -->
+            <!-- friction="0.5 0.005 0.0001": 摩擦系数，滑动/滚动/旋转摩擦 -->
+            <!-- condim="6": 接触维度，6表示完整3D接触 -->
+            <!-- solimp="0.9 0.95": 求解器参数，影响接触力计算精度 -->
+            <!-- solref="0.001 1": 求解器参考参数，时间步长和阻尼 -->
+            <!-- material="iron": 使用铁材料 -->
         </default>
         
-        <!-- Default settings for joints -->
-        <default class="free_joint">
-            <joint type="free"/>
-        </default>
+
     </default>
 
-    <!-- World body - main simulation environment -->
+    <!-- 世界体 - 主仿真环境 -->
     <worldbody>
-        <!-- Lighting -->
+        <!-- 光照 -->
         <light name="spotlight" pos="0 0 5" dir="0 0 -1" directional="true"/>
+        <!-- name="spotlight": 聚光灯名称 -->
+        <!-- pos="0 0 5": 光源位置，在z轴上方5米 -->
+        <!-- dir="0 0 -1": 光照方向，向下 -->
+        <!-- directional="true": 方向性光源 -->
         
-        <!-- Ground plane -->
-        <geom name="ground" type="plane" size="1 1 0.1" material="groundplane" 
+        <!-- 地面平面 -->
+        <geom name="ground" type="plane" size="1 1 0.3" material="groundplane" 
                class="ground_object"/>
+        <!-- name="ground": 地面几何体名称 -->
+        <!-- type="plane": 平面几何体类型 -->
+        <!-- size="1 1 0.3": 平面尺寸，1x1米，厚度0.1米 -->
+        <!-- material="groundplane": 使用地面平面材料 -->
+        <!-- class="ground_object": 使用地面物体类 -->
         
-        <!-- Ground reference site for force measurement -->
-        <site name="ground_site" pos="0 0 0" size="0.001" rgba="0 1 0 1"/>
+        <!-- 地面传感器阵列 - 3x3网格覆盖 -->
+        <site name="ground_contact_center" pos="0 0 0" size="0.02" rgba="1 0 0 1"/>
+        <site name="ground_contact_n" pos="0 0.3 0" size="0.02" rgba="1 0 0 1"/>
+        <site name="ground_contact_s" pos="0 -0.3 0" size="0.02" rgba="1 0 0 1"/>
+        <site name="ground_contact_e" pos="0.3 0 0" size="0.02" rgba="1 0 0 1"/>
+        <site name="ground_contact_w" pos="-0.3 0 0" size="0.02" rgba="1 0 0 1"/>
+        <site name="ground_contact_ne" pos="0.3 0.3 0" size="0.02" rgba="1 0 0 1"/>
+        <site name="ground_contact_nw" pos="-0.3 0.3 0" size="0.02" rgba="1 0 0 1"/>
+        <site name="ground_contact_se" pos="0.3 -0.3 0" size="0.02" rgba="1 0 0 1"/>
+        <site name="ground_contact_sw" pos="-0.3 -0.3 0" size="0.02" rgba="1 0 0 1"/>
+        <!-- 传感器阵列覆盖整个地面区域 -->
+        <!-- 每个传感器大小2厘米，间距30厘米 -->
+        <!-- 覆盖范围：-0.3到0.3米，总共9个传感器 -->
         
-        <!-- Iron ball body -->
+        <!-- 铁球体 -->
         <body name="iron_ball" pos="0 0 1.0">
-            <!-- Free joint for 6-DOF motion -->
-            <joint type="free"/>
+            <!-- name="iron_ball": 铁球体名称 -->
+            <!-- pos="0 0 1.0": 初始位置，在z轴上方1米 -->
             
-            <!-- Ball geometry - 5kg iron ball (radius: 0.0534m) -->
+            <!-- 自由关节，允许6自由度运动 -->
+            <joint type="free"/>
+            <!-- type="free": 自由关节类型 -->
+            
+            <!-- 球体几何 - 5kg铁球（半径：0.0534米） -->
             <geom name="ball_geom" type="sphere" size="0.0534" class="iron_object" 
                    rgba="0.3 0.3 0.3 1"/>
+            <!-- name="ball_geom": 球体几何体名称 -->
+            <!-- type="sphere": 球体几何体类型 -->
+            <!-- size="0.0534": 球体半径，5.34厘米 -->
+            <!-- class="iron_object": 使用铁质物体类 -->
+            <!-- rgba="0.3 0.3 0.3 1": 颜色，深灰色 -->
             
-            <!-- Contact sensor site at bottom of ball -->
-            <site name="ball_contact" pos="0 0 -0.0534" size="0.005" rgba="1 0 0 1"/>
+
         </body>
     </worldbody>
 
-    <!-- Sensor definitions -->
+    <!-- 传感器定义 -->
     <sensor>
-        <!-- Touch sensor for measuring contact force between ball and ground -->
-        <touch name="ball_touch" site="ball_contact"/>
+        <!-- 地面传感器阵列 - 9个触摸传感器 -->
+        <touch name="touch_center" site="ground_contact_center"/>
+        <touch name="touch_n" site="ground_contact_n"/>
+        <touch name="touch_s" site="ground_contact_s"/>
+        <touch name="touch_e" site="ground_contact_e"/>
+        <touch name="touch_w" site="ground_contact_w"/>
+        <touch name="touch_ne" site="ground_contact_ne"/>
+        <touch name="touch_nw" site="ground_contact_nw"/>
+        <touch name="touch_se" site="ground_contact_se"/>
+        <touch name="touch_sw" site="ground_contact_sw"/>
+        <!-- 传感器阵列覆盖整个地面区域 -->
+        <!-- 可以检测铁球在任何位置的冲击力 -->
     </sensor>
 
 </mujoco>

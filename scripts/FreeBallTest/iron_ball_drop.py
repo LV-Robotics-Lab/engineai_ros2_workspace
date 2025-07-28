@@ -71,6 +71,10 @@ timesteps = 200000  # 模拟总步数 (增加步数以适应更小的时间步�
 dt = model.opt.timestep
 force_log = []
 
+# 传感器阵列参数
+sensor_names = ["center", "n", "s", "e", "w", "ne", "nw", "se", "sw"]
+num_sensors = len(sensor_names)
+
 impact_started = False
 impact_start_time = None
 impact_peak_force = 0.0
@@ -83,14 +87,18 @@ print(f"总模拟时间: {timesteps * dt} 秒")
 for i in range(timesteps):
     mujoco.mj_step(model, data)
     
-    # 获取touch传感器数据（只有一个值）
-    touch_force = data.sensordata[0] if len(data.sensordata) > 0 else 0.0
+    # 获取所有touch传感器数据
+    sensor_data = data.sensordata[:num_sensors] if len(data.sensordata) >= num_sensors else [0.0] * num_sensors
+    total_force = sum(sensor_data)  # 总冲击力
+    max_force = max(sensor_data)    # 最大单个传感器力
     t = i * dt
     
     # 调试：打印传感器数据
     if i % 100 == 0:
         print(f"Step {i}, Time {t:.4f}s")
-        print(f"Touch传感器数据: {touch_force:.4f}")
+        print(f"传感器数据: {[f'{f:.4f}' for f in sensor_data]}")
+        print(f"总冲击力: {total_force:.4f} N")
+        print(f"最大传感器力: {max_force:.4f} N")
         print(f"传感器数据形状: {data.sensordata.shape}")
         
         # 检查球的位置
@@ -98,19 +106,19 @@ for i in range(timesteps):
         print(f"球的位置: x={ball_pos[0]:.4f}, y={ball_pos[1]:.4f}, z={ball_pos[2]:.4f}")
         print("---")
 
-    # 记录数据
-    force_log.append([t, touch_force])
+    # 记录数据（包含所有传感器）
+    force_log.append([t] + list(sensor_data) + [total_force, max_force])
 
     # 检测冲击开始
-    if not impact_started and touch_force > 0.001:  # 检测接触开始
+    if not impact_started and total_force > 0.001:  # 检测接触开始
         impact_started = True
         impact_start_time = t
-        impact_peak_force = touch_force
+        impact_peak_force = total_force
 
     # 冲击过程：记录峰值
     if impact_started:
-        impact_peak_force = max(impact_peak_force, touch_force)
-        if touch_force < 0.1 and impact_end_time is None:  # 调整结束条件
+        impact_peak_force = max(impact_peak_force, total_force)
+        if total_force < 0.1 and impact_end_time is None:  # 调整结束条件
             impact_end_time = t
 
 print("模拟完成，启动可视化...")
@@ -118,7 +126,8 @@ print("模拟完成，启动可视化...")
 mujoco.viewer.launch(model, data)
 
 # 转为 DataFrame
-df = pd.DataFrame(force_log, columns=["time", "touch_force"])
+columns = ["time"] + [f"force_{name}" for name in sensor_names] + ["total_force", "max_force"]
+df = pd.DataFrame(force_log, columns=columns)
 
 # 输出分析结果
 if impact_start_time is not None and impact_end_time is not None:
@@ -186,15 +195,28 @@ if impact_start_time is not None and impact_end_time is not None:
     print(f"总冲击时间: {total_impact_time*1000000:.0f} 微秒")
     
     # 绘图
-    plt.figure(figsize=(8, 4))
-    plt.plot(df["time"], df["touch_force"], label="Touch Force")
+    plt.figure(figsize=(12, 8))
+    
+    # 子图1：总冲击力
+    plt.subplot(2, 1, 1)
+    plt.plot(df["time"], df["total_force"], label="Total Force", linewidth=2, color='red')
     plt.axvline(impact_start_time, color="red", linestyle="--", label="Contact Start")
     plt.axvline(impact_end_time, color="green", linestyle="--", label="Contact End")
-    plt.title("Free Fall Impact Force Curve")
+    plt.title("Free Fall Impact Force Analysis")
     plt.xlabel("Time (s)")
-    plt.ylabel("Touch Force (N)")
+    plt.ylabel("Total Force (N)")
     plt.legend()
     plt.grid(True)
+    
+    # 子图2：各传感器力
+    plt.subplot(2, 1, 2)
+    for name in sensor_names:
+        plt.plot(df["time"], df[f"force_{name}"], label=f"Sensor {name.upper()}", alpha=0.7)
+    plt.xlabel("Time (s)")
+    plt.ylabel("Individual Sensor Force (N)")
+    plt.legend()
+    plt.grid(True)
+    
     plt.tight_layout()
     
     # 保存图片到XML文件所在目录
