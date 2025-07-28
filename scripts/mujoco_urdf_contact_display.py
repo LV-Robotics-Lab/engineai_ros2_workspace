@@ -712,10 +712,14 @@ def main():
             print("No URDF coordinate columns found")
             return
         
-        # Use body1 coordinates if available
-        if 'urdf_x_body1' in df.columns and 'urdf_y_body1' in df.columns and 'urdf_z_body1' in df.columns:
+        # Use corrected body1 coordinates if available (new format)
+        if 'urdf_corrected_x_body1' in df.columns and 'urdf_corrected_y_body1' in df.columns and 'urdf_corrected_z_body1' in df.columns:
+            x_col, y_col, z_col = 'urdf_corrected_x_body1', 'urdf_corrected_y_body1', 'urdf_corrected_z_body1'
+            print("Using corrected URDF coordinates (urdf_corrected_x/y/z_body1)")
+        # Fallback to old format if new format not available
+        elif 'urdf_x_body1' in df.columns and 'urdf_y_body1' in df.columns and 'urdf_z_body1' in df.columns:
             x_col, y_col, z_col = 'urdf_x_body1', 'urdf_y_body1', 'urdf_z_body1'
-            print("Using URDF coordinates (urdf_x/y/z_body1)")
+            print("Using legacy URDF coordinates (urdf_x/y/z_body1)")
         else:
             print("No complete URDF coordinate sets found")
             return

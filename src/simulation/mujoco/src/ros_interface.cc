@@ -71,7 +71,7 @@ bool RosInterface::Initialize() {
     csv_file_.open(csv_file_path_, std::ios::out);
     if (csv_file_.is_open()) {
       // 写入CSV头部
-      csv_file_ << "timestamp,contact_id,geom1_name,geom2_name,pos_x,pos_y,pos_z,urdf_x_body1,urdf_y_body1,urdf_z_body1,urdf_x_body2,urdf_y_body2,urdf_z_body2,force_x,force_y,force_z,force_magnitude,torque_x,torque_y,torque_z,gap,body1_id,body2_id\n";
+      csv_file_ << "timestamp,contact_id,geom1_name,geom2_name,pos_x,pos_y,pos_z,urdf_corrected_x_body1,urdf_corrected_y_body1,urdf_corrected_z_body1,urdf_corrected_x_body2,urdf_corrected_y_body2,urdf_corrected_z_body2,force_x,force_y,force_z,force_magnitude,torque_x,torque_y,torque_z,gap,body1_id,body2_id\n";
       csv_file_.flush();
       RCLCPP_INFO(node_->get_logger(), "Contact data will be saved to: %s", csv_file_path_.c_str());
     } else {
@@ -524,6 +524,52 @@ void RosInterface::PublishContactForces(const mjModel* m, mjData* d) {
         mju_negQuat(body2_quat_conj, body2_quat);
         mju_rotVecQuat(urdf_pos_body2, relative_pos2, body2_quat_conj);
         
+        // 计算正确的URDF坐标系位置（考虑关节角度变化）
+        // 获取body1的初始pose（从模型定义中）
+        mjtNum body1_init_pos[3] = {m->body_pos[body1_id*3], m->body_pos[body1_id*3+1], m->body_pos[body1_id*3+2]};
+        mjtNum body1_init_quat[4] = {m->body_quat[body1_id*4], m->body_quat[body1_id*4+1], m->body_quat[body1_id*4+2], m->body_quat[body1_id*4+3]};
+        
+        // 获取body2的初始pose（从模型定义中）
+        mjtNum body2_init_pos[3] = {m->body_pos[body2_id*3], m->body_pos[body2_id*3+1], m->body_pos[body2_id*3+2]};
+        mjtNum body2_init_quat[4] = {m->body_quat[body2_id*4], m->body_quat[body2_id*4+1], m->body_quat[body2_id*4+2], m->body_quat[body2_id*4+3]};
+        
+        // 计算从初始pose到当前pose的变换
+        // 对于body1
+        mjtNum body1_transform_quat[4];
+        mju_mulQuat(body1_transform_quat, body1_quat, body1_init_quat); // 当前pose相对于初始pose的旋转
+        
+        // 对于body2
+        mjtNum body2_transform_quat[4];
+        mju_mulQuat(body2_transform_quat, body2_quat, body2_init_quat); // 当前pose相对于初始pose的旋转
+        
+        // 将接触点从当前body坐标系转换到URDF初始坐标系
+        // 对于body1：先转换到当前body坐标系，再转换到初始坐标系
+        mjtNum urdf_corrected_pos_body1[3];
+        // 将接触点从世界坐标系转换到body1的当前局部坐标系
+        mjtNum body1_current_local[3];
+        mju_rotVecQuat(body1_current_local, relative_pos, body1_quat_conj);
+        
+        // 将接触点从body1的当前局部坐标系转换到初始局部坐标系
+        // 需要应用从初始到当前的逆变换
+        mjtNum body1_init_quat_conj[4];
+        mju_negQuat(body1_init_quat_conj, body1_init_quat);
+        mjtNum body1_transform_inv[4];
+        mju_mulQuat(body1_transform_inv, body1_init_quat_conj, body1_quat_conj);
+        mju_rotVecQuat(urdf_corrected_pos_body1, body1_current_local, body1_transform_inv);
+        
+        // 对于body2：同样的处理
+        mjtNum urdf_corrected_pos_body2[3];
+        // 将接触点从世界坐标系转换到body2的当前局部坐标系
+        mjtNum body2_current_local[3];
+        mju_rotVecQuat(body2_current_local, relative_pos2, body2_quat_conj);
+        
+        // 将接触点从body2的当前局部坐标系转换到初始局部坐标系
+        mjtNum body2_init_quat_conj[4];
+        mju_negQuat(body2_init_quat_conj, body2_init_quat);
+        mjtNum body2_transform_inv[4];
+        mju_mulQuat(body2_transform_inv, body2_init_quat_conj, body2_quat_conj);
+        mju_rotVecQuat(urdf_corrected_pos_body2, body2_current_local, body2_transform_inv);
+        
         // 写入CSV行
         csv_file_ << std::fixed << std::setprecision(6)
                   << sim_time << ","
@@ -533,12 +579,12 @@ void RosInterface::PublishContactForces(const mjModel* m, mjData* d) {
                   << pos[0] << ","
                   << pos[1] << ","
                   << pos[2] << ","
-                  << urdf_pos_body1[0] << ","
-                  << urdf_pos_body1[1] << ","
-                  << urdf_pos_body1[2] << ","
-                  << urdf_pos_body2[0] << ","
-                  << urdf_pos_body2[1] << ","
-                  << urdf_pos_body2[2] << ","
+                  << urdf_corrected_pos_body1[0] << ","
+                  << urdf_corrected_pos_body1[1] << ","
+                  << urdf_corrected_pos_body1[2] << ","
+                  << urdf_corrected_pos_body2[0] << ","
+                  << urdf_corrected_pos_body2[1] << ","
+                  << urdf_corrected_pos_body2[2] << ","
                   << world_force[0] << ","
                   << world_force[1] << ","
                   << world_force[2] << ","

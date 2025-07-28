@@ -96,16 +96,16 @@ ros2 launch mujoco_simulator mujoco_simulator.launch.py save_contact_csv:=true c
 cd /home/wang22/engineai/engineai_ros2_workspace
 source venv/bin/activate
 # plot contact force max
-python3 scripts/analyze_contact_forces.py /home/wang22/engineai/engineai_ros2_workspace/logs/contact_data_20250725_000144.csv
+python3 scripts/analyze_contact_forces.py /home/wang22/engineai/engineai_ros2_workspace/logs/contact_data_20250728_181135.csv
 # plot contact point with force
 # 使用现有的XML文件
-python3 scripts/mujoco_urdf_contact_display.py logs/contact_data_20250725_000144.csv src/simulation/mujoco/assets/resource/pm_v2.xml
+python3 scripts/mujoco_urdf_contact_display.py logs/contact_data_20250728_181135.csv src/simulation/mujoco/assets/resource/pm_v2.xml
 
 # 或者使用URDF文件（会自动转换）
 python3 scripts/mujoco_urdf_contact_display.py logs/contact_data_20250725_000144.csv src/simulation/mujoco/assets/resource/robot/pm_v2/urdf/serial_pm_v2.urdf
 
 # 使用球体可视化（推荐）
-python3 scripts/mujoco_urdf_contact_display.py logs/contact_data_20250725_000144.csv src/simulation/mujoco/assets/resource/robot/pm_v2/urdf/serial_pm_v2.urdf sphere
+python3 scripts/mujoco_urdf_contact_display.py logs/contact_data_20250728_181135.csv src/simulation/mujoco/assets/resource/robot/pm_v2/urdf/serial_pm_v2.urdf sphere
 
 # 使用球体可视化 + 世界坐标
 python3 scripts/mujoco_urdf_contact_display.py logs/contact_data_20250725_000144.csv src/simulation/mujoco/assets/resource/robot/pm_v2/urdf/serial_pm_v2.urdf sphere world

@@ -12,8 +12,23 @@ def analyze_coordinates(csv_file):
     df = pd.read_csv(csv_file)
     print(f"Loaded {len(df)} rows")
     
-    # Check if both coordinate systems are available
-    if 'pos_x' in df.columns and 'urdf_x_body1' in df.columns:
+    # Check if both coordinate systems are available (try new format first, then fallback to old)
+    urdf_x_col = None
+    urdf_y_col = None
+    urdf_z_col = None
+    
+    if 'urdf_corrected_x_body1' in df.columns and 'urdf_corrected_y_body1' in df.columns and 'urdf_corrected_z_body1' in df.columns:
+        urdf_x_col = 'urdf_corrected_x_body1'
+        urdf_y_col = 'urdf_corrected_y_body1'
+        urdf_z_col = 'urdf_corrected_z_body1'
+        print("Using corrected URDF coordinates")
+    elif 'urdf_x_body1' in df.columns and 'urdf_y_body1' in df.columns and 'urdf_z_body1' in df.columns:
+        urdf_x_col = 'urdf_x_body1'
+        urdf_y_col = 'urdf_y_body1'
+        urdf_z_col = 'urdf_z_body1'
+        print("Using legacy URDF coordinates")
+    
+    if 'pos_x' in df.columns and urdf_x_col:
         print("\n=== Coordinate Analysis ===")
         
         # Sample some data for analysis
@@ -23,9 +38,9 @@ def analyze_coordinates(csv_file):
         print(f"\nAnalyzing {sample_size} sample rows...")
         
         # Compare world vs URDF coordinates
-        pos_diff_x = df_sample['pos_x'] - df_sample['urdf_x_body1']
-        pos_diff_y = df_sample['pos_y'] - df_sample['urdf_y_body1']
-        pos_diff_z = df_sample['pos_z'] - df_sample['urdf_z_body1']
+        pos_diff_x = df_sample['pos_x'] - df_sample[urdf_x_col]
+        pos_diff_y = df_sample['pos_y'] - df_sample[urdf_y_col]
+        pos_diff_z = df_sample['pos_z'] - df_sample[urdf_z_col]
         
         print(f"\nWorld vs URDF coordinate differences:")
         print(f"  X difference: mean={pos_diff_x.mean():.6f}, std={pos_diff_x.std():.6f}")
@@ -47,16 +62,16 @@ def analyze_coordinates(csv_file):
         print(f"  World X: {df_sample['pos_x'].min():.6f} to {df_sample['pos_x'].max():.6f}")
         print(f"  World Y: {df_sample['pos_y'].min():.6f} to {df_sample['pos_y'].max():.6f}")
         print(f"  World Z: {df_sample['pos_z'].min():.6f} to {df_sample['pos_z'].max():.6f}")
-        print(f"  URDF X: {df_sample['urdf_x_body1'].min():.6f} to {df_sample['urdf_x_body1'].max():.6f}")
-        print(f"  URDF Y: {df_sample['urdf_y_body1'].min():.6f} to {df_sample['urdf_y_body1'].max():.6f}")
-        print(f"  URDF Z: {df_sample['urdf_z_body1'].min():.6f} to {df_sample['urdf_z_body1'].max():.6f}")
+        print(f"  URDF X: {df_sample[urdf_x_col].min():.6f} to {df_sample[urdf_x_col].max():.6f}")
+        print(f"  URDF Y: {df_sample[urdf_y_col].min():.6f} to {df_sample[urdf_y_col].max():.6f}")
+        print(f"  URDF Z: {df_sample[urdf_z_col].min():.6f} to {df_sample[urdf_z_col].max():.6f}")
         
         # Show some examples
         print(f"\nSample coordinate pairs:")
         for i in range(min(5, sample_size)):
             print(f"  Row {i}:")
             print(f"    World: ({df_sample.iloc[i]['pos_x']:.6f}, {df_sample.iloc[i]['pos_y']:.6f}, {df_sample.iloc[i]['pos_z']:.6f})")
-            print(f"    URDF:  ({df_sample.iloc[i]['urdf_x_body1']:.6f}, {df_sample.iloc[i]['urdf_y_body1']:.6f}, {df_sample.iloc[i]['urdf_z_body1']:.6f})")
+            print(f"    URDF:  ({df_sample.iloc[i][urdf_x_col]:.6f}, {df_sample.iloc[i][urdf_y_col]:.6f}, {df_sample.iloc[i][urdf_z_col]:.6f})")
             print(f"    Diff:  ({pos_diff_x.iloc[i]:.6f}, {pos_diff_y.iloc[i]:.6f}, {pos_diff_z.iloc[i]:.6f})")
             print()
         
@@ -69,7 +84,7 @@ def analyze_coordinates(csv_file):
             for i in range(min(3, len(diff_rows))):
                 row = diff_rows.iloc[i]
                 print(f"  Row: World=({row['pos_x']:.6f}, {row['pos_y']:.6f}, {row['pos_z']:.6f})")
-                print(f"       URDF=({row['urdf_x_body1']:.6f}, {row['urdf_y_body1']:.6f}, {row['urdf_z_body1']:.6f})")
+                print(f"       URDF=({row[urdf_x_col]:.6f}, {row[urdf_y_col]:.6f}, {row[urdf_z_col]:.6f})")
         else:
             print("All coordinates are identical!")
             

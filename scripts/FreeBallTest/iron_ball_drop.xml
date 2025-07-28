@@ -1,0 +1,91 @@
+<mujoco model="iron_ball_drop">
+    <!-- ========================================== -->
+    <!-- Iron Ball Free Fall Impact Force Analysis -->
+    <!-- ========================================== -->
+    
+    <!-- Compiler settings -->
+    <compiler angle="radian" coordinate="local" discardvisual="false" autolimits="true"/>
+    
+    <!-- Simulation options -->
+    <option gravity="0 0 -9.81" integrator="RK4" timestep="0.00001" tolerance="1e-12"/>
+    
+    <!-- Visualization settings -->
+    <visual>
+        <!-- Contact visualization settings -->
+        <rgba contactpoint="1.0 0.0 0.0 1.0" contactforce="0.8 0.36 0.36 1" 
+               contactfriction="0.8 0.36 0.36 1" contacttorque="0.8 0.36 0.36 1" 
+               contactgap="0.8 0.36 0.36 1" haze="0.15 0.25 0.35 1"/>
+        <scale contactwidth="0.003" contactheight="0.005" forcewidth="0.02"/>
+        
+        <!-- Lighting and rendering settings -->
+        <headlight diffuse="0.6 0.6 0.6" ambient="0.3 0.3 0.3" specular="0 0 0"/>
+        <global azimuth="150" elevation="-20"/>
+        <quality shadowsize="0"/>
+    </visual>
+
+    <!-- Asset definitions -->
+    <asset>
+        <!-- Material definitions -->
+        <material name="iron" rgba="0.4 0.4 0.4 1" specular="0.3" reflectance="0.1"/>
+        <material name="ground_material" rgba="0.7 0.7 0.7 1" specular="0.5" reflectance="0.2"/>
+        
+        <!-- Texture for ground plane -->
+        <texture type="2d" name="groundplane" builtin="checker" mark="edge" 
+                 rgb1="0.2 0.3 0.4" rgb2="0.1 0.2 0.3" markrgb="0.8 0.8 0.8" 
+                 width="1000" height="1000"/>
+        <material name="groundplane" texture="groundplane" texuniform="true" 
+                  texrepeat="5 5" reflectance="0"/>
+    </asset>
+
+    <!-- Default settings for geometries and joints -->
+    <default>
+        <!-- Default settings for iron objects -->
+        <default class="iron_object">
+            <geom density="7860" friction="0.5 0.005 0.0001" condim="6" 
+                   solimp="0.9 0.95" solref="0.001 1" material="iron"/>
+        </default>
+        
+        <!-- Default settings for ground objects -->
+        <default class="ground_object">
+            <geom material="iron" conaffinity="7" condim="6" friction="1"/>
+        </default>
+        
+        <!-- Default settings for joints -->
+        <default class="free_joint">
+            <joint type="free"/>
+        </default>
+    </default>
+
+    <!-- World body - main simulation environment -->
+    <worldbody>
+        <!-- Lighting -->
+        <light name="spotlight" pos="0 0 5" dir="0 0 -1" directional="true"/>
+        
+        <!-- Ground plane -->
+        <geom name="ground" type="plane" size="1 1 0.1" material="groundplane" 
+               class="ground_object"/>
+        
+        <!-- Ground reference site for force measurement -->
+        <site name="ground_site" pos="0 0 0" size="0.001" rgba="0 1 0 1"/>
+        
+        <!-- Iron ball body -->
+        <body name="iron_ball" pos="0 0 1.0">
+            <!-- Free joint for 6-DOF motion -->
+            <joint type="free"/>
+            
+            <!-- Ball geometry - 5kg iron ball (radius: 0.0534m) -->
+            <geom name="ball_geom" type="sphere" size="0.0534" class="iron_object" 
+                   rgba="0.3 0.3 0.3 1"/>
+            
+            <!-- Contact sensor site at bottom of ball -->
+            <site name="ball_contact" pos="0 0 -0.0534" size="0.005" rgba="1 0 0 1"/>
+        </body>
+    </worldbody>
+
+    <!-- Sensor definitions -->
+    <sensor>
+        <!-- Touch sensor for measuring contact force between ball and ground -->
+        <touch name="ball_touch" site="ball_contact"/>
+    </sensor>
+
+</mujoco>
