@@ -11,11 +11,12 @@
     <!-- autolimits="true": 自动设置关节限制 -->
     
     <!-- 仿真选项 -->
-    <option gravity="0 0 -9.81" integrator="RK4" timestep="0.00001" tolerance="1e-12"/>
+    <option gravity="0 0 -9.81" integrator="RK4" timestep="0.00001" tolerance="1e-12" cone="elliptic"/>
     <!-- gravity="0 0 -9.81": 重力加速度，z轴向下9.81 m/s² -->
     <!-- integrator="RK4": 使用四阶龙格库塔积分器 -->
     <!-- timestep="0.00001": 仿真时间步长，0.01毫秒，用于高精度冲击力分析 -->
     <!-- tolerance="1e-12": 数值求解容差，确保高精度计算 -->
+    <!-- cone="elliptic": 使用椭圆锥接触模型，提供更精确的接触力计算 -->
     
     <!-- 可视化设置 -->
     <visual>
@@ -89,7 +90,7 @@
             <!-- friction="0.5 0.005 0.0001": 摩擦系数，滑动/滚动/旋转摩擦 -->
             <!-- condim="6": 接触维度，6表示完整3D接触 -->
             <!-- solimp="0.9 0.95": 求解器参数，影响接触力计算精度 -->
-            <!-- solref="0.001 1": 求解器参考参数，时间步长和阻尼 -->
+            <!-- solref="0.001 1": 标准接触参数，提供适当的能量损失 -->
             <!-- material="iron": 使用铁材料 -->
         </default>
         
@@ -101,7 +102,7 @@
             <!-- friction="0.5 0.005 0.0001": 摩擦系数，滑动/滚动/旋转摩擦 -->
             <!-- condim="6": 接触维度，6表示完整3D接触 -->
             <!-- solimp="0.9 0.95": 求解器参数，影响接触力计算精度 -->
-            <!-- solref="0.001 1": 求解器参考参数，时间步长和阻尼 -->
+            <!-- solref="0.001 1": 标准接触参数，提供适当的能量损失 -->
             <!-- material="iron": 使用铁材料 -->
         </default>
         
@@ -257,6 +258,15 @@
 
         </body>
     </worldbody>
+
+    <!-- 接触对定义 - 标准接触设置 -->
+    <contact>
+        <pair geom1="ground" geom2="ball_geom" solref="0.001 1" solreffriction="0.001 1"/>
+        <!-- geom1="ground": 地面几何体 -->
+        <!-- geom2="ball_geom": 球体几何体 -->
+        <!-- solref="0.001 1": 标准接触参数，提供适当的能量损失 -->
+        <!-- solreffriction="0.001 1": 标准摩擦参数，提供适当的摩擦阻尼 -->
+    </contact>
 
     <!-- 传感器定义 -->
     <sensor>
