@@ -11,12 +11,19 @@ import os
 import xml.etree.ElementTree as ET
 
 # 加载模型
-xml_path = "engineai_ros2_workspace/scripts/FreeBallTest/iron_ball_drop_bySensor.xml"
+xml_path = "engineai_ros2_workspace/scripts/FreeBallTest/iron_ball_drop.xml"
 model = mujoco.MjModel.from_xml_path(xml_path)
 data = mujoco.MjData(model)
 
 # 获取XML文件所在目录
 xml_dir = os.path.dirname(xml_path)
+
+def calculate_ball_mass(radius, density=7860):
+    """根据半径和密度计算球体质量"""
+    import math
+    volume = (4/3) * math.pi * (radius ** 3)
+    mass = density * volume
+    return mass
 
 def read_xml_parameters(xml_path):
     """从XML文件中读取参数"""
@@ -32,6 +39,24 @@ def read_xml_parameters(xml_path):
         params['gravity'] = option.get('gravity', '0 0 -9.81')
         params['integrator'] = option.get('integrator', 'RK4')
         params['tolerance'] = option.get('tolerance', '1e-10')
+    
+    # 读取铁球信息
+    worldbody = root.find('worldbody')
+    if worldbody is not None:
+        iron_ball = worldbody.find("body[@name='iron_ball']")
+        if iron_ball is not None:
+            # 读取初始高度
+            pos = iron_ball.get('pos', '0 0 1.0')
+            pos_parts = pos.split()
+            if len(pos_parts) >= 3:
+                params['ball_height'] = float(pos_parts[2])
+            
+            # 读取球体半径和质量
+            geom = iron_ball.find("geom[@name='ball_geom']")
+            if geom is not None:
+                radius = float(geom.get('size', '0.0534'))
+                params['ball_radius'] = radius
+                params['ball_mass'] = calculate_ball_mass(radius)
     
     # 读取default classes
     defaults = root.findall('default')
@@ -213,6 +238,10 @@ df = pd.DataFrame(force_log, columns=columns)
 
 # 输出分析结果
 if impact_start_time is not None and impact_end_time is not None:
+
+    # 从XML文件中读取参数
+    xml_params = read_xml_parameters(xml_path)
+
     print("\n=== 冲击力分析结果 ===")
     print(f"冲击开始时间: {impact_start_time:.4f} 秒")
     print(f"冲击结束时间: {impact_end_time:.4f} 秒")
@@ -222,23 +251,32 @@ if impact_start_time is not None and impact_end_time is not None:
     print(f"冲击持续时间: {total_impact_time:.4f} 秒 ({total_impact_time*1000:.1f} 毫秒)")
     print(f"最大冲击力: {impact_peak_force:.2f} N")
     
+    # 生成包含小球重量和高度的文件名
+    ball_mass = xml_params.get('ball_mass', 5.0)
+    ball_height = xml_params.get('ball_height', 1.0)
+    ball_radius = xml_params.get('ball_radius', 0.0534)
+    
+    # 格式化文件名
+    mass_str = f"{ball_mass:.1f}kg"
+    height_str = f"{ball_height:.1f}m"
+    radius_str = f"{ball_radius*1000:.0f}mm"  # 转换为毫米
+    
     # 保存CSV到XML文件所在目录
-    csv_path = os.path.join(xml_dir, "Free_Fall_Impact_Force_log.csv")
+    csv_filename = f"Free_Fall_Impact_Force_{mass_str}_{height_str}height_{radius_str}radius.csv"
+    csv_path = os.path.join(xml_dir, csv_filename)
     df.to_csv(csv_path, index=False)
     print(f"已保存接触力数据为 {csv_path}")
     
     # 打印XML碰撞参数
     print(f"\n=== XML碰撞参数 ===")
     
-    # 从XML文件中读取参数
-    xml_params = read_xml_parameters(xml_path)
-    
     # 从模型中读取铁球参数
     ball_geom = model.geom(1)  # iron_ball的geom
     
     print(f"铁球参数:")
-    print(f"  - 半径: {ball_geom.size[0]:.4f} m")
+    print(f"  - 半径: {ball_geom.size[0]:.4f} m ({ball_geom.size[0]*1000:.1f} mm)")
     print(f"  - 密度: {xml_params.get('iron_density', 7860):.0f} kg/m³")
+    print(f"  - 初始高度: {xml_params.get('ball_height', 1.0):.1f} m")
     
     # 计算质量
     volume = (4/3) * np.pi * ball_geom.size[0]**3
@@ -319,8 +357,10 @@ if impact_start_time is not None and impact_end_time is not None:
     
     plt.tight_layout()
     
+    
     # 保存图片到XML文件所在目录
-    plot_path = os.path.join(xml_dir, "Free_Fall_Impact_Force_log.png")
+    plot_filename = f"Free_Fall_Impact_Force_{mass_str}_{height_str}height_{radius_str}radius.png"
+    plot_path = os.path.join(xml_dir, plot_filename)
     plt.savefig(plot_path, dpi=300, bbox_inches='tight')
     print(f"已保存冲击力图表为 {plot_path}")
     plt.show()
@@ -334,7 +374,8 @@ if impact_start_time is not None and impact_end_time is not None:
     }
     
     df_3d = pd.DataFrame(sensor_data_3d)
-    csv_3d_path = os.path.join(xml_dir, "sensor_3d_data.csv")
+    csv_filename = f"sensor_3d_data_{mass_str}_{height_str}height_{radius_str}radius.csv"
+    csv_3d_path = os.path.join(xml_dir, csv_filename)
     df_3d.to_csv(csv_3d_path, index=False)
     print(f"已保存3D传感器数据为 {csv_3d_path}")
 

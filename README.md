@@ -119,6 +119,10 @@ python3 scripts/mujoco_urdf_contact_display.py logs/contact_data_20250725_000144
 # 参数3: 可视化类型 (sphere|cylinder) - 可选，默认为cylinder
 # 参数4: 坐标系统 (world|urdf) - 可选，默认为urdf
 
+# terminal 3
+# 小球撞地测试
+/home/wang22/engineai/engineai_ros2_workspace/venv/bin/python /home/wang22/engineai/engineai_ros2_workspace/scripts/FreeBallTest/iron_ball_drop.py
+
 git push origin bench
 
 # terminal 2
