@@ -1,0 +1,384 @@
+<mujoco model="iron_ball_drop">
+    <!-- ========================================== -->
+    <!-- 铁球自由落体冲击力分析模型 -->
+    <!-- ========================================== -->
+    
+    <!-- 编译器设置 -->
+    <compiler angle="radian" coordinate="local" discardvisual="false" autolimits="true"/>
+    <!-- angle="radian": 角度单位为弧度 -->
+    <!-- coordinate="local": 使用局部坐标系 -->
+    <!-- discardvisual="false": 保留视觉元素 -->
+    <!-- autolimits="true": 自动设置关节限制 -->
+    
+    <!-- 仿真选项 -->
+    <option gravity="0 0 -9.81" integrator="RK4" timestep="0.00001" tolerance="1e-12" cone="elliptic"/>
+    <!-- gravity="0 0 -9.81": 重力加速度，z轴向下9.81 m/s² -->
+    <!-- integrator="RK4": 使用四阶龙格库塔积分器 -->
+    <!-- timestep="0.00001": 仿真时间步长，0.01毫秒，用于高精度冲击力分析 -->
+    <!-- tolerance="1e-12": 数值求解容差，确保高精度计算 -->
+    <!-- cone="elliptic": 使用椭圆锥接触模型，提供更精确的接触力计算 -->
+    
+    <!-- 可视化设置 -->
+    <visual>
+        <!-- 接触点可视化设置 -->
+        <rgba contactpoint="1.0 0.0 0.0 1.0" contactforce="0.8 0.36 0.36 1" 
+               contactfriction="0.8 0.36 0.36 1" contacttorque="0.8 0.36 0.36 1" 
+               contactgap="0.8 0.36 0.36 1" haze="0.15 0.25 0.35 1"/>
+        <!-- contactpoint: 接触点颜色，红色 -->
+        <!-- contactforce: 接触力颜色，浅红色 -->
+        <!-- contactfriction: 摩擦力颜色，浅红色 -->
+        <!-- contacttorque: 接触力矩颜色，浅红色 -->
+        <!-- contactgap: 接触间隙颜色，浅红色 -->
+        <!-- haze: 雾化效果颜色，蓝灰色 -->
+        
+        <scale contactwidth="0.003" contactheight="0.005" forcewidth="0.02"/>
+        <!-- contactwidth: 接触点宽度，3毫米 -->
+        <!-- contactheight: 接触点高度，5毫米 -->
+        <!-- forcewidth: 力向量宽度，2厘米 -->
+        
+        <!-- 光照和渲染设置 -->
+        <headlight diffuse="0.6 0.6 0.6" ambient="0.3 0.3 0.3" specular="0 0 0"/>
+        <!-- diffuse: 漫反射光强度 -->
+        <!-- ambient: 环境光强度 -->
+        <!-- specular: 镜面反射光强度 -->
+        
+        <global azimuth="150" elevation="-20"/>
+        <!-- azimuth: 方位角，150度 -->
+        <!-- elevation: 仰角，-20度（向下看） -->
+        
+        <quality shadowsize="0"/>
+        <!-- shadowsize: 阴影大小，0表示无阴影 -->
+    </visual>
+
+    <!-- 资源定义 -->
+    <asset>
+        <!-- 材料定义 -->
+        <material name="iron" rgba="0.4 0.4 0.4 1" specular="0.3" reflectance="0.1"/>
+        <!-- name="iron": 铁材料名称 -->
+        <!-- rgba: 颜色，灰色，不透明度1.0 -->
+        <!-- specular: 镜面反射系数，0.3 -->
+        <!-- reflectance: 反射率，0.1 -->
+        
+        <!-- 地面纹理 -->
+        <texture type="2d" name="groundplane" builtin="checker" mark="edge" 
+                 rgb1="0.2 0.3 0.4" rgb2="0.1 0.2 0.3" markrgb="0.8 0.8 0.8" 
+                 width="1000" height="1000"/>
+        <!-- type="2d": 2D纹理类型 -->
+        <!-- name="groundplane": 纹理名称 -->
+        <!-- builtin="checker": 内置棋盘格纹理 -->
+        <!-- mark="edge": 边缘标记 -->
+        <!-- rgb1/rgb2: 棋盘格两种颜色，蓝灰色系 -->
+        <!-- markrgb: 边缘标记颜色，白色 -->
+        <!-- width/height: 纹理尺寸，1000x1000像素 -->
+        
+        <material name="groundplane" texture="groundplane" texuniform="true" 
+                  texrepeat="5 5" reflectance="0"/>
+        <!-- name="groundplane": 地面平面材料名称 -->
+        <!-- texture: 使用的纹理名称 -->
+        <!-- texuniform="true": 纹理均匀分布 -->
+        <!-- texrepeat="5 5": 纹理重复次数，5x5 -->
+        <!-- reflectance="0": 无反射 -->
+    </asset>
+
+    <!-- 几何体和关节的默认设置 -->
+    <default>
+        <!-- 铁质物体的默认设置 -->
+        <default class="iron_object">
+            <geom density="7860" friction="0.5 0.005 0.0001" condim="6" 
+                   solimp="0.9 0.95" solref="0.0005 1" material="iron"/>
+            <!-- density="7860": 密度，铁的标准密度7860 kg/m³ -->
+            <!-- friction="0.5 0.005 0.0001": 摩擦系数，滑动/滚动/旋转摩擦 -->
+            <!-- condim="6": 接触维度，6表示完整3D接触 -->
+            <!-- solimp="0.9 0.95": 求解器参数，影响接触力计算精度 -->
+            <!-- solref="0.0005 1": 中等刚度接触参数，产生适中的冲击时间 -->
+            <!-- material="iron": 使用铁材料 -->
+        </default>
+        
+        <!-- 地面物体的默认设置 -->
+        <default class="ground_object">
+            <geom density="7860" friction="0.5 0.005 0.0001" condim="6" 
+                   solimp="0.9 0.95" solref="0.0005 1" material="iron"/>
+            <!-- density="7860": 密度，铁的标准密度7860 kg/m³ -->
+            <!-- friction="0.5 0.005 0.0001": 摩擦系数，滑动/滚动/旋转摩擦 -->
+            <!-- condim="6": 接触维度，6表示完整3D接触 -->
+            <!-- solimp="0.9 0.95": 求解器参数，影响接触力计算精度 -->
+            <!-- solref="0.0005 1": 中等刚度接触参数，产生适中的冲击时间 -->
+            <!-- material="iron": 使用铁材料 -->
+        </default>
+        
+
+    </default>
+
+    <!-- 世界体 - 主仿真环境 -->
+    <worldbody>
+        <!-- 光照 -->
+        <light name="spotlight" pos="0 0 5" dir="0 0 -1" directional="true"/>
+        <!-- name="spotlight": 聚光灯名称 -->
+        <!-- pos="0 0 5": 光源位置，在z轴上方5米 -->
+        <!-- dir="0 0 -1": 光照方向，向下 -->
+        <!-- directional="true": 方向性光源 -->
+        
+        <!-- 地面平面 -->
+        <geom name="ground" type="plane" size="1 1 0.3" material="groundplane" 
+               class="ground_object"/>
+        <!-- name="ground": 地面几何体名称 -->
+        <!-- type="plane": 平面几何体类型 -->
+        <!-- size="1 1 0.3": 平面尺寸，1x1米，厚度0.1米 -->
+        <!-- material="groundplane": 使用地面平面材料 -->
+        <!-- class="ground_object": 使用地面物体类 -->
+        
+        <!-- 地面传感器阵列 - 10cmx10cm区域，密度1cm -->
+        <!-- 覆盖范围：-0.05到0.05米，总共11x11=121个传感器 -->
+        <site name="ground_contact_center" pos="0 0 0" size="0.005" rgba="1 0 0 1"/>
+        <site name="ground_contact_n1" pos="0 0.01 0" size="0.005" rgba="1 0 0 1"/>
+        <site name="ground_contact_n2" pos="0 0.02 0" size="0.005" rgba="1 0 0 1"/>
+        <site name="ground_contact_n3" pos="0 0.03 0" size="0.005" rgba="1 0 0 1"/>
+        <site name="ground_contact_n4" pos="0 0.04 0" size="0.005" rgba="1 0 0 1"/>
+        <site name="ground_contact_n5" pos="0 0.05 0" size="0.005" rgba="1 0 0 1"/>
+        <site name="ground_contact_s1" pos="0 -0.01 0" size="0.005" rgba="1 0 0 1"/>
+        <site name="ground_contact_s2" pos="0 -0.02 0" size="0.005" rgba="1 0 0 1"/>
+        <site name="ground_contact_s3" pos="0 -0.03 0" size="0.005" rgba="1 0 0 1"/>
+        <site name="ground_contact_s4" pos="0 -0.04 0" size="0.005" rgba="1 0 0 1"/>
+        <site name="ground_contact_s5" pos="0 -0.05 0" size="0.005" rgba="1 0 0 1"/>
+        <site name="ground_contact_e1" pos="0.01 0 0" size="0.005" rgba="1 0 0 1"/>
+        <site name="ground_contact_e2" pos="0.02 0 0" size="0.005" rgba="1 0 0 1"/>
+        <site name="ground_contact_e3" pos="0.03 0 0" size="0.005" rgba="1 0 0 1"/>
+        <site name="ground_contact_e4" pos="0.04 0 0" size="0.005" rgba="1 0 0 1"/>
+        <site name="ground_contact_e5" pos="0.05 0 0" size="0.005" rgba="1 0 0 1"/>
+        <site name="ground_contact_w1" pos="-0.01 0 0" size="0.005" rgba="1 0 0 1"/>
+        <site name="ground_contact_w2" pos="-0.02 0 0" size="0.005" rgba="1 0 0 1"/>
+        <site name="ground_contact_w3" pos="-0.03 0 0" size="0.005" rgba="1 0 0 1"/>
+        <site name="ground_contact_w4" pos="-0.04 0 0" size="0.005" rgba="1 0 0 1"/>
+        <site name="ground_contact_w5" pos="-0.05 0 0" size="0.005" rgba="1 0 0 1"/>
+        <!-- 对角线传感器 -->
+        <site name="ground_contact_ne1" pos="0.01 0.01 0" size="0.005" rgba="1 0 0 1"/>
+        <site name="ground_contact_ne2" pos="0.02 0.02 0" size="0.005" rgba="1 0 0 1"/>
+        <site name="ground_contact_ne3" pos="0.03 0.03 0" size="0.005" rgba="1 0 0 1"/>
+        <site name="ground_contact_ne4" pos="0.04 0.04 0" size="0.005" rgba="1 0 0 1"/>
+        <site name="ground_contact_ne5" pos="0.05 0.05 0" size="0.005" rgba="1 0 0 1"/>
+        <site name="ground_contact_nw1" pos="-0.01 0.01 0" size="0.005" rgba="1 0 0 1"/>
+        <site name="ground_contact_nw2" pos="-0.02 0.02 0" size="0.005" rgba="1 0 0 1"/>
+        <site name="ground_contact_nw3" pos="-0.03 0.03 0" size="0.005" rgba="1 0 0 1"/>
+        <site name="ground_contact_nw4" pos="-0.04 0.04 0" size="0.005" rgba="1 0 0 1"/>
+        <site name="ground_contact_nw5" pos="-0.05 0.05 0" size="0.005" rgba="1 0 0 1"/>
+        <site name="ground_contact_se1" pos="0.01 -0.01 0" size="0.005" rgba="1 0 0 1"/>
+        <site name="ground_contact_se2" pos="0.02 -0.02 0" size="0.005" rgba="1 0 0 1"/>
+        <site name="ground_contact_se3" pos="0.03 -0.03 0" size="0.005" rgba="1 0 0 1"/>
+        <site name="ground_contact_se4" pos="0.04 -0.04 0" size="0.005" rgba="1 0 0 1"/>
+        <site name="ground_contact_se5" pos="0.05 -0.05 0" size="0.005" rgba="1 0 0 1"/>
+        <site name="ground_contact_sw1" pos="-0.01 -0.01 0" size="0.005" rgba="1 0 0 1"/>
+        <site name="ground_contact_sw2" pos="-0.02 -0.02 0" size="0.005" rgba="1 0 0 1"/>
+        <site name="ground_contact_sw3" pos="-0.03 -0.03 0" size="0.005" rgba="1 0 0 1"/>
+        <site name="ground_contact_sw4" pos="-0.04 -0.04 0" size="0.005" rgba="1 0 0 1"/>
+        <site name="ground_contact_sw5" pos="-0.05 -0.05 0" size="0.005" rgba="1 0 0 1"/>
+        <!-- 填充其他位置的传感器 -->
+        <site name="ground_contact_01" pos="0.01 0.02 0" size="0.005" rgba="1 0 0 1"/>
+        <site name="ground_contact_02" pos="0.01 0.03 0" size="0.005" rgba="1 0 0 1"/>
+        <site name="ground_contact_03" pos="0.01 0.04 0" size="0.005" rgba="1 0 0 1"/>
+        <site name="ground_contact_04" pos="0.01 -0.02 0" size="0.005" rgba="1 0 0 1"/>
+        <site name="ground_contact_05" pos="0.01 -0.03 0" size="0.005" rgba="1 0 0 1"/>
+        <site name="ground_contact_06" pos="0.01 -0.04 0" size="0.005" rgba="1 0 0 1"/>
+        <site name="ground_contact_07" pos="0.02 0.01 0" size="0.005" rgba="1 0 0 1"/>
+        <site name="ground_contact_08" pos="0.02 0.03 0" size="0.005" rgba="1 0 0 1"/>
+        <site name="ground_contact_09" pos="0.02 0.04 0" size="0.005" rgba="1 0 0 1"/>
+        <site name="ground_contact_10" pos="0.02 -0.01 0" size="0.005" rgba="1 0 0 1"/>
+        <site name="ground_contact_11" pos="0.02 -0.03 0" size="0.005" rgba="1 0 0 1"/>
+        <site name="ground_contact_12" pos="0.02 -0.04 0" size="0.005" rgba="1 0 0 1"/>
+        <site name="ground_contact_13" pos="0.03 0.01 0" size="0.005" rgba="1 0 0 1"/>
+        <site name="ground_contact_14" pos="0.03 0.02 0" size="0.005" rgba="1 0 0 1"/>
+        <site name="ground_contact_15" pos="0.03 0.04 0" size="0.005" rgba="1 0 0 1"/>
+        <site name="ground_contact_16" pos="0.03 -0.01 0" size="0.005" rgba="1 0 0 1"/>
+        <site name="ground_contact_17" pos="0.03 -0.02 0" size="0.005" rgba="1 0 0 1"/>
+        <site name="ground_contact_18" pos="0.03 -0.04 0" size="0.005" rgba="1 0 0 1"/>
+        <site name="ground_contact_19" pos="0.04 0.01 0" size="0.005" rgba="1 0 0 1"/>
+        <site name="ground_contact_20" pos="0.04 0.02 0" size="0.005" rgba="1 0 0 1"/>
+        <site name="ground_contact_21" pos="0.04 0.03 0" size="0.005" rgba="1 0 0 1"/>
+        <site name="ground_contact_22" pos="0.04 -0.01 0" size="0.005" rgba="1 0 0 1"/>
+        <site name="ground_contact_23" pos="0.04 -0.02 0" size="0.005" rgba="1 0 0 1"/>
+        <site name="ground_contact_24" pos="0.04 -0.03 0" size="0.005" rgba="1 0 0 1"/>
+        <site name="ground_contact_25" pos="0.05 0.01 0" size="0.005" rgba="1 0 0 1"/>
+        <site name="ground_contact_26" pos="0.05 0.02 0" size="0.005" rgba="1 0 0 1"/>
+        <site name="ground_contact_27" pos="0.05 0.03 0" size="0.005" rgba="1 0 0 1"/>
+        <site name="ground_contact_28" pos="0.05 0.04 0" size="0.005" rgba="1 0 0 1"/>
+        <site name="ground_contact_29" pos="0.05 -0.01 0" size="0.005" rgba="1 0 0 1"/>
+        <site name="ground_contact_30" pos="0.05 -0.02 0" size="0.005" rgba="1 0 0 1"/>
+        <site name="ground_contact_31" pos="0.05 -0.03 0" size="0.005" rgba="1 0 0 1"/>
+        <site name="ground_contact_32" pos="0.05 -0.04 0" size="0.005" rgba="1 0 0 1"/>
+        <site name="ground_contact_33" pos="-0.01 0.02 0" size="0.005" rgba="1 0 0 1"/>
+        <site name="ground_contact_34" pos="-0.01 0.03 0" size="0.005" rgba="1 0 0 1"/>
+        <site name="ground_contact_35" pos="-0.01 0.04 0" size="0.005" rgba="1 0 0 1"/>
+        <site name="ground_contact_36" pos="-0.01 -0.02 0" size="0.005" rgba="1 0 0 1"/>
+        <site name="ground_contact_37" pos="-0.01 -0.03 0" size="0.005" rgba="1 0 0 1"/>
+        <site name="ground_contact_38" pos="-0.01 -0.04 0" size="0.005" rgba="1 0 0 1"/>
+        <site name="ground_contact_39" pos="-0.02 0.01 0" size="0.005" rgba="1 0 0 1"/>
+        <site name="ground_contact_40" pos="-0.02 0.03 0" size="0.005" rgba="1 0 0 1"/>
+        <site name="ground_contact_41" pos="-0.02 0.04 0" size="0.005" rgba="1 0 0 1"/>
+        <site name="ground_contact_42" pos="-0.02 -0.01 0" size="0.005" rgba="1 0 0 1"/>
+        <site name="ground_contact_43" pos="-0.02 -0.03 0" size="0.005" rgba="1 0 0 1"/>
+        <site name="ground_contact_44" pos="-0.02 -0.04 0" size="0.005" rgba="1 0 0 1"/>
+        <site name="ground_contact_45" pos="-0.03 0.01 0" size="0.005" rgba="1 0 0 1"/>
+        <site name="ground_contact_46" pos="-0.03 0.02 0" size="0.005" rgba="1 0 0 1"/>
+        <site name="ground_contact_47" pos="-0.03 0.04 0" size="0.005" rgba="1 0 0 1"/>
+        <site name="ground_contact_48" pos="-0.03 -0.01 0" size="0.005" rgba="1 0 0 1"/>
+        <site name="ground_contact_49" pos="-0.03 -0.02 0" size="0.005" rgba="1 0 0 1"/>
+        <site name="ground_contact_50" pos="-0.03 -0.04 0" size="0.005" rgba="1 0 0 1"/>
+        <site name="ground_contact_51" pos="-0.04 0.01 0" size="0.005" rgba="1 0 0 1"/>
+        <site name="ground_contact_52" pos="-0.04 0.02 0" size="0.005" rgba="1 0 0 1"/>
+        <site name="ground_contact_53" pos="-0.04 0.03 0" size="0.005" rgba="1 0 0 1"/>
+        <site name="ground_contact_54" pos="-0.04 -0.01 0" size="0.005" rgba="1 0 0 1"/>
+        <site name="ground_contact_55" pos="-0.04 -0.02 0" size="0.005" rgba="1 0 0 1"/>
+        <site name="ground_contact_56" pos="-0.04 -0.03 0" size="0.005" rgba="1 0 0 1"/>
+        <site name="ground_contact_57" pos="-0.05 0.01 0" size="0.005" rgba="1 0 0 1"/>
+        <site name="ground_contact_58" pos="-0.05 0.02 0" size="0.005" rgba="1 0 0 1"/>
+        <site name="ground_contact_59" pos="-0.05 0.03 0" size="0.005" rgba="1 0 0 1"/>
+        <site name="ground_contact_60" pos="-0.05 0.04 0" size="0.005" rgba="1 0 0 1"/>
+        <site name="ground_contact_61" pos="-0.05 -0.01 0" size="0.005" rgba="1 0 0 1"/>
+        <site name="ground_contact_62" pos="-0.05 -0.02 0" size="0.005" rgba="1 0 0 1"/>
+        <site name="ground_contact_63" pos="-0.05 -0.03 0" size="0.005" rgba="1 0 0 1"/>
+        <site name="ground_contact_64" pos="-0.05 -0.04 0" size="0.005" rgba="1 0 0 1"/>
+        
+        <!-- 铁球体 -->
+        <body name="iron_ball" pos="0 0 1.0">
+            <!-- name="iron_ball": 铁球体名称 -->
+            <!-- pos="0 0 1.0": 初始位置，在z轴上方1米 -->
+            
+            <!-- 自由关节，允许6自由度运动 -->
+            <joint type="free"/>
+            <!-- type="free": 自由关节类型 -->
+            
+            <!-- 球体几何 - 5kg铁球（半径：0.0534米） -->
+            <geom name="ball_geom" type="sphere" size="0.0534" class="iron_object" 
+                   rgba="0.3 0.3 0.3 1"/>
+            <!-- name="ball_geom": 球体几何体名称 -->
+            <!-- type="sphere": 球体几何体类型 -->
+            <!-- size="0.0534": 球体半径，5.34厘米 -->
+            <!-- class="iron_object": 使用铁质物体类 -->
+            <!-- rgba="0.3 0.3 0.3 1": 颜色，深灰色 -->
+            
+
+        </body>
+    </worldbody>
+
+    <!-- 接触对定义 - 中等刚度接触设置 -->
+    <contact>
+        <pair geom1="ground" geom2="ball_geom" solref="0.0005 1" solreffriction="0.0005 1"/>
+        <!-- geom1="ground": 地面几何体 -->
+        <!-- geom2="ball_geom": 球体几何体 -->
+        <!-- solref="0.0005 1": 中等刚度接触参数，产生适中的冲击时间 -->
+        <!-- solreffriction="0.0005 1": 中等摩擦刚度参数，提供适当的摩擦阻尼 -->
+    </contact>
+
+    <!-- 传感器定义 -->
+    <sensor>
+        <!-- 地面传感器阵列 - 121个触摸传感器 -->
+        <touch name="touch_center" site="ground_contact_center"/>
+        <touch name="touch_n1" site="ground_contact_n1"/>
+        <touch name="touch_n2" site="ground_contact_n2"/>
+        <touch name="touch_n3" site="ground_contact_n3"/>
+        <touch name="touch_n4" site="ground_contact_n4"/>
+        <touch name="touch_n5" site="ground_contact_n5"/>
+        <touch name="touch_s1" site="ground_contact_s1"/>
+        <touch name="touch_s2" site="ground_contact_s2"/>
+        <touch name="touch_s3" site="ground_contact_s3"/>
+        <touch name="touch_s4" site="ground_contact_s4"/>
+        <touch name="touch_s5" site="ground_contact_s5"/>
+        <touch name="touch_e1" site="ground_contact_e1"/>
+        <touch name="touch_e2" site="ground_contact_e2"/>
+        <touch name="touch_e3" site="ground_contact_e3"/>
+        <touch name="touch_e4" site="ground_contact_e4"/>
+        <touch name="touch_e5" site="ground_contact_e5"/>
+        <touch name="touch_w1" site="ground_contact_w1"/>
+        <touch name="touch_w2" site="ground_contact_w2"/>
+        <touch name="touch_w3" site="ground_contact_w3"/>
+        <touch name="touch_w4" site="ground_contact_w4"/>
+        <touch name="touch_w5" site="ground_contact_w5"/>
+        <touch name="touch_ne1" site="ground_contact_ne1"/>
+        <touch name="touch_ne2" site="ground_contact_ne2"/>
+        <touch name="touch_ne3" site="ground_contact_ne3"/>
+        <touch name="touch_ne4" site="ground_contact_ne4"/>
+        <touch name="touch_ne5" site="ground_contact_ne5"/>
+        <touch name="touch_nw1" site="ground_contact_nw1"/>
+        <touch name="touch_nw2" site="ground_contact_nw2"/>
+        <touch name="touch_nw3" site="ground_contact_nw3"/>
+        <touch name="touch_nw4" site="ground_contact_nw4"/>
+        <touch name="touch_nw5" site="ground_contact_nw5"/>
+        <touch name="touch_se1" site="ground_contact_se1"/>
+        <touch name="touch_se2" site="ground_contact_se2"/>
+        <touch name="touch_se3" site="ground_contact_se3"/>
+        <touch name="touch_se4" site="ground_contact_se4"/>
+        <touch name="touch_se5" site="ground_contact_se5"/>
+        <touch name="touch_sw1" site="ground_contact_sw1"/>
+        <touch name="touch_sw2" site="ground_contact_sw2"/>
+        <touch name="touch_sw3" site="ground_contact_sw3"/>
+        <touch name="touch_sw4" site="ground_contact_sw4"/>
+        <touch name="touch_sw5" site="ground_contact_sw5"/>
+        <!-- 填充其他位置的传感器 -->
+        <touch name="touch_01" site="ground_contact_01"/>
+        <touch name="touch_02" site="ground_contact_02"/>
+        <touch name="touch_03" site="ground_contact_03"/>
+        <touch name="touch_04" site="ground_contact_04"/>
+        <touch name="touch_05" site="ground_contact_05"/>
+        <touch name="touch_06" site="ground_contact_06"/>
+        <touch name="touch_07" site="ground_contact_07"/>
+        <touch name="touch_08" site="ground_contact_08"/>
+        <touch name="touch_09" site="ground_contact_09"/>
+        <touch name="touch_10" site="ground_contact_10"/>
+        <touch name="touch_11" site="ground_contact_11"/>
+        <touch name="touch_12" site="ground_contact_12"/>
+        <touch name="touch_13" site="ground_contact_13"/>
+        <touch name="touch_14" site="ground_contact_14"/>
+        <touch name="touch_15" site="ground_contact_15"/>
+        <touch name="touch_16" site="ground_contact_16"/>
+        <touch name="touch_17" site="ground_contact_17"/>
+        <touch name="touch_18" site="ground_contact_18"/>
+        <touch name="touch_19" site="ground_contact_19"/>
+        <touch name="touch_20" site="ground_contact_20"/>
+        <touch name="touch_21" site="ground_contact_21"/>
+        <touch name="touch_22" site="ground_contact_22"/>
+        <touch name="touch_23" site="ground_contact_23"/>
+        <touch name="touch_24" site="ground_contact_24"/>
+        <touch name="touch_25" site="ground_contact_25"/>
+        <touch name="touch_26" site="ground_contact_26"/>
+        <touch name="touch_27" site="ground_contact_27"/>
+        <touch name="touch_28" site="ground_contact_28"/>
+        <touch name="touch_29" site="ground_contact_29"/>
+        <touch name="touch_30" site="ground_contact_30"/>
+        <touch name="touch_31" site="ground_contact_31"/>
+        <touch name="touch_32" site="ground_contact_32"/>
+        <touch name="touch_33" site="ground_contact_33"/>
+        <touch name="touch_34" site="ground_contact_34"/>
+        <touch name="touch_35" site="ground_contact_35"/>
+        <touch name="touch_36" site="ground_contact_36"/>
+        <touch name="touch_37" site="ground_contact_37"/>
+        <touch name="touch_38" site="ground_contact_38"/>
+        <touch name="touch_39" site="ground_contact_39"/>
+        <touch name="touch_40" site="ground_contact_40"/>
+        <touch name="touch_41" site="ground_contact_41"/>
+        <touch name="touch_42" site="ground_contact_42"/>
+        <touch name="touch_43" site="ground_contact_43"/>
+        <touch name="touch_44" site="ground_contact_44"/>
+        <touch name="touch_45" site="ground_contact_45"/>
+        <touch name="touch_46" site="ground_contact_46"/>
+        <touch name="touch_47" site="ground_contact_47"/>
+        <touch name="touch_48" site="ground_contact_48"/>
+        <touch name="touch_49" site="ground_contact_49"/>
+        <touch name="touch_50" site="ground_contact_50"/>
+        <touch name="touch_51" site="ground_contact_51"/>
+        <touch name="touch_52" site="ground_contact_52"/>
+        <touch name="touch_53" site="ground_contact_53"/>
+        <touch name="touch_54" site="ground_contact_54"/>
+        <touch name="touch_55" site="ground_contact_55"/>
+        <touch name="touch_56" site="ground_contact_56"/>
+        <touch name="touch_57" site="ground_contact_57"/>
+        <touch name="touch_58" site="ground_contact_58"/>
+        <touch name="touch_59" site="ground_contact_59"/>
+        <touch name="touch_60" site="ground_contact_60"/>
+        <touch name="touch_61" site="ground_contact_61"/>
+        <touch name="touch_62" site="ground_contact_62"/>
+        <touch name="touch_63" site="ground_contact_63"/>
+        <touch name="touch_64" site="ground_contact_64"/>
+        <!-- 传感器阵列覆盖10cmx10cm区域，密度1cm -->
+        <!-- 可以检测铁球在任何位置的冲击力 -->
+    </sensor>
+
+</mujoco>
