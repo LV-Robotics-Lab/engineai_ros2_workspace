@@ -58,24 +58,81 @@ def read_xml_parameters(xml_path):
                 params['ball_radius'] = radius
                 params['ball_mass'] = calculate_ball_mass(radius)
     
-    # 读取default classes
-    defaults = root.findall('default')
-    for default in defaults:
-        class_name = default.get('class', '')
-        geom = default.find('geom')
-        if geom is not None:
-            if class_name == 'iron_object':
-                params['iron_density'] = float(geom.get('density', 7860))
-                params['iron_friction'] = geom.get('friction', '0.5 0.005 0.0001')
-                params['iron_condim'] = int(geom.get('condim', 3))
-                params['iron_solimp'] = geom.get('solimp', '0.9 0.95')
-                params['iron_solref'] = geom.get('solref', '0.001 1')
-                params['iron_material'] = geom.get('material', 'iron')
-            elif class_name == 'ground_object':
-                params['ground_material'] = geom.get('material', 'iron')
-                params['ground_friction'] = float(geom.get('friction', 1.0))
-                params['ground_condim'] = int(geom.get('condim', 3))
-                params['ground_conaffinity'] = int(geom.get('conaffinity', 7))
+    # 读取default classes - 修正为处理嵌套的default结构
+    outer_defaults = root.findall('default')
+    iron_object_found = False
+    ground_object_found = False
+    
+    print(f"找到 {len(outer_defaults)} 个外层 default 元素")
+    
+    for outer_default in outer_defaults:
+        print(f"检查外层 default 元素")
+        # 查找内层的default元素
+        inner_defaults = outer_default.findall('default')
+        print(f"  找到 {len(inner_defaults)} 个内层 default 元素")
+        
+        for inner_default in inner_defaults:
+            class_name = inner_default.get('class', '')
+            print(f"  检查内层 default 类: '{class_name}'")
+            geom = inner_default.find('geom')
+            if geom is not None:
+                print(f"    找到 geom 元素，类名: '{class_name}'")
+                if class_name == 'iron_object':
+                    iron_object_found = True
+                    print("    找到 iron_object 类")
+                    # 检查必要参数是否存在
+                    if geom.get('density') is None:
+                        raise ValueError("iron_object 缺少 density 参数")
+                    if geom.get('friction') is None:
+                        raise ValueError("iron_object 缺少 friction 参数")
+                    if geom.get('condim') is None:
+                        raise ValueError("iron_object 缺少 condim 参数")
+                    if geom.get('solimp') is None:
+                        raise ValueError("iron_object 缺少 solimp 参数")
+                    if geom.get('solref') is None:
+                        raise ValueError("iron_object 缺少 solref 参数")
+                    if geom.get('material') is None:
+                        raise ValueError("iron_object 缺少 material 参数")
+                    
+                    params['iron_density'] = float(geom.get('density'))
+                    params['iron_friction'] = geom.get('friction')
+                    params['iron_condim'] = int(geom.get('condim'))
+                    params['iron_solimp'] = geom.get('solimp')
+                    params['iron_solref'] = geom.get('solref')
+                    params['iron_material'] = geom.get('material')
+                    
+                elif class_name == 'ground_object':
+                    ground_object_found = True
+                    print("    找到 ground_object 类")
+                    # 检查必要参数是否存在
+                    if geom.get('friction') is None:
+                        raise ValueError("ground_object 缺少 friction 参数")
+                    if geom.get('condim') is None:
+                        raise ValueError("ground_object 缺少 condim 参数")
+                    if geom.get('solimp') is None:
+                        raise ValueError("ground_object 缺少 solimp 参数")
+                    if geom.get('solref') is None:
+                        raise ValueError("ground_object 缺少 solref 参数")
+                    if geom.get('material') is None:
+                        raise ValueError("ground_object 缺少 material 参数")
+                    
+                    params['ground_material'] = geom.get('material')
+                    params['ground_friction'] = geom.get('friction')
+                    params['ground_condim'] = int(geom.get('condim'))
+                    params['ground_solimp'] = geom.get('solimp')
+                    params['ground_solref'] = geom.get('solref')
+                    params['ground_conaffinity'] = int(geom.get('conaffinity', 7))
+            else:
+                print(f"    未找到 geom 元素")
+    
+    print(f"iron_object_found: {iron_object_found}")
+    print(f"ground_object_found: {ground_object_found}")
+    
+    # 检查是否找到了必要的类
+    if not iron_object_found:
+        raise ValueError("XML文件中未找到 iron_object 类")
+    if not ground_object_found:
+        raise ValueError("XML文件中未找到 ground_object 类")
     
     # 读取材料
     materials = root.findall('material')
@@ -280,23 +337,27 @@ if impact_start_time is not None and impact_end_time is not None:
     
     # 计算质量
     volume = (4/3) * np.pi * ball_geom.size[0]**3
-    mass = xml_params.get('iron_density', 7860) * volume
+    mass = xml_params['iron_density'] * volume
     print(f"  - 质量: {mass:.2f} kg")
     
-    friction = xml_params.get('iron_friction', '0.5 0.005 0.0001').split()
+    friction = xml_params['iron_friction'].split()
     print(f"  - 摩擦系数: {friction[0]} (滑动), {friction[1]} (滚动), {friction[2]} (自旋)")
-    print(f"  - 接触维度: {xml_params.get('iron_condim', 6)} (包含力矩)")
+    print(f"  - 接触维度: {xml_params['iron_condim']} (包含力矩)")
     
-    solimp = xml_params.get('iron_solimp', '0.9 0.95').split()
-    solref = xml_params.get('iron_solref', '0.001 1').split()
+    solimp = xml_params['iron_solimp'].split()
+    solref = xml_params['iron_solref'].split()
     print(f"  - 求解器参数: solimp({solimp[0]}, {solimp[1]}), solref({solref[0]}, {solref[1]})")
     
-    print(f"  - 材料: {xml_params.get('iron_material', 'iron')}, 镜面反射{xml_params.get('iron_specular', 0.3):.1f}, 反射率{xml_params.get('iron_reflectance', 0.1):.1f}")
+    print(f"  - 材料: {xml_params['iron_material']}, 镜面反射{xml_params.get('iron_specular', 0.3):.1f}, 反射率{xml_params.get('iron_reflectance', 0.1):.1f}")
     
     print(f"地面参数:")
-    print(f"  - 材料: {xml_params.get('ground_material', 'iron')}")
-    print(f"  - 摩擦系数: {xml_params.get('ground_friction', 1.0):.1f}")
-    print(f"  - 接触维度: {xml_params.get('ground_condim', 6)} (包含力矩)")
+    print(f"  - 材料: {xml_params['ground_material']}")
+    ground_friction = xml_params['ground_friction'].split()
+    print(f"  - 摩擦系数: {ground_friction[0]} (滑动), {ground_friction[1]} (滚动), {ground_friction[2]} (自旋)")
+    print(f"  - 接触维度: {xml_params['ground_condim']} (包含力矩)")
+    ground_solimp = xml_params['ground_solimp'].split()
+    ground_solref = xml_params['ground_solref'].split()
+    print(f"  - 求解器参数: solimp({ground_solimp[0]}, {ground_solimp[1]}), solref({ground_solref[0]}, {ground_solref[1]})")
     print(f"  - 接触亲和性: {xml_params.get('ground_conaffinity', 7)}")
     
     # 读取仿真参数

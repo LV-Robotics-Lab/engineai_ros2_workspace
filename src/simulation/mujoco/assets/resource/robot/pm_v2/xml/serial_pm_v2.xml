@@ -15,6 +15,7 @@
     <default>
         <default class="biped">
             <default class="collision">
+                <!-- 碰撞判断的逻辑是 (contype1 & conaffinity2) || (contype2 & conaffinity1) -->
                 <geom group="3" contype="1" conaffinity="1" friction="0.8 0.005 0.0001" rgba="0.804 0.361 0.031 0.5"/>
                 <default class="collision_head">
                     <geom type="sphere" size="0.09" pos="0.01 0.0 0.11" rgba="0.804 0.361 0.031 0.5"/>
