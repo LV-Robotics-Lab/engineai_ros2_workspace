@@ -134,9 +134,13 @@ def create_time_evolution_heatmap(df, save_path=None):
         print("Warning: No URDF coordinate columns found. Skipping time evolution heatmap.")
         return
     
-    # Use body1 coordinates
-    if 'urdf_x_body1' in df.columns and 'urdf_y_body1' in df.columns:
+    # Use body1 coordinates (check for both corrected and regular versions)
+    if 'urdf_corrected_x_body1' in df.columns and 'urdf_corrected_y_body1' in df.columns:
+        x_col, y_col = 'urdf_corrected_x_body1', 'urdf_corrected_y_body1'
+    elif 'urdf_x_body1' in df.columns and 'urdf_y_body1' in df.columns:
         x_col, y_col = 'urdf_x_body1', 'urdf_y_body1'
+    elif 'urdf_corrected_x_body2' in df.columns and 'urdf_corrected_y_body2' in df.columns:
+        x_col, y_col = 'urdf_corrected_x_body2', 'urdf_corrected_y_body2'
     elif 'urdf_x_body2' in df.columns and 'urdf_y_body2' in df.columns:
         x_col, y_col = 'urdf_x_body2', 'urdf_y_body2'
     else:
@@ -201,7 +205,7 @@ def create_time_evolution_heatmap(df, save_path=None):
     
     # 3. Force magnitude distribution over time
     ax3 = axes[1, 0]
-    time_groups = df_valid.groupby(pd.cut(df_valid['timestamp'], bins=20))
+    time_groups = df_valid.groupby(pd.cut(df_valid['timestamp'], bins=20), observed=False)
     time_means = time_groups['force_magnitude'].mean()
     time_stds = time_groups['force_magnitude'].std()
     

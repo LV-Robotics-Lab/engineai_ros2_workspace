@@ -1,18 +1,11 @@
 #!/bin/bash
 
 # Initialize conda in the script (if exists)
-if [ -f ~/anaconda3/etc/profile.d/conda.sh ]; then
-    source ~/anaconda3/etc/profile.d/conda.sh
-
-    # 简洁的conda环境处理
-    if [[ -n "$CONDA_DEFAULT_ENV" ]]; then
-        echo "Conda environment '$CONDA_DEFAULT_ENV' detected."
-        echo "Deactivating conda environment..."
-        conda deactivate
-        echo "Conda environment deactivated."
-    fi
+if [ -f ~/miniconda3/etc/profile.d/conda.sh ]; then
+    source ~/miniconda3/etc/profile.d/conda.sh
+    echo "Conda initialized"
 else
-    echo "Anaconda not found, skipping conda initialization"
+    echo "Miniconda not found, skipping conda initialization"
 fi
 
 # Gets the source directory
@@ -81,31 +74,57 @@ fi
 # Create build directory if it doesn't exist
 mkdir -p "$root_dir/build"
 
-# Activate virtual environment if it exists
-if [ -f "$root_dir/venv/bin/activate" ]; then
-    echo "Activating virtual environment..."
-    source "$root_dir/venv/bin/activate"
-    # Ensure virtual environment Python is used
-    export PATH="$root_dir/venv/bin:$PATH"
+# Activate conda environment if it exists
+if [ -f ~/miniconda3/etc/profile.d/conda.sh ]; then
+    echo "Activating conda environment..."
+    conda activate engineai_ros2
+    # Ensure conda environment Python is used
+    export PATH="$CONDA_PREFIX/bin:$PATH"
     echo "Using Python: $(which python3)"
     # Set environment variables to avoid numpy issues
-    export PYTHONPATH="$root_dir/venv/lib/python3.10/site-packages"
+    export PYTHONPATH="$CONDA_PREFIX/lib/python3.10/site-packages:/opt/ros/humble/lib/python3.10/site-packages"
     export COLCON_PYTHON_SETUP_PY_SKIP_PACKAGES="numpy"
     # Set additional environment variables to suppress numpy-related errors
     export COLCON_VERBOSE=0
     export PYTHONWARNINGS="ignore"
     # Redirect stderr to suppress error messages
     export COLCON_LOG_LEVEL=error
+    # Use system Python for ROS2 tools
+    export ROSIDL_ADAPTER_PYTHON_EXECUTABLE="/usr/bin/python3"
+    export PYTHONPATH="/opt/ros/humble/lib/python3.10/site-packages:/opt/ros/humble/local/lib/python3.10/dist-packages:$PYTHONPATH"
+    export PYTHONPATH="/usr/lib/python3/dist-packages:$PYTHONPATH"
 fi
 
 # Create .colcon_ignore file to exclude problematic numpy directories
-if [ -f "$root_dir/venv/bin/activate" ]; then
+if [ -f ~/miniconda3/etc/profile.d/conda.sh ]; then
     echo "Creating .colcon_ignore file to exclude numpy test directories..."
     cat > "$root_dir/.colcon_ignore" << EOF
-venv/lib/python3.10/site-packages/numpy/_core/tests/examples/cython
-venv/lib/python3.10/site-packages/numpy/_core/tests/examples/limited_api
-venv/lib/python3.10/site-packages/numpy/_core/tests/examples/cython/setup.py
-venv/lib/python3.10/site-packages/numpy/_core/tests/examples/limited_api/setup.py
+$CONDA_PREFIX/lib/python3.10/site-packages/numpy/_core/tests/examples/cython
+$CONDA_PREFIX/lib/python3.10/site-packages/numpy/_core/tests/examples/limited_api
+$CONDA_PREFIX/lib/python3.10/site-packages/numpy/_core/tests/examples/cython/setup.py
+$CONDA_PREFIX/lib/python3.10/site-packages/numpy/_core/tests/examples/limited_api/setup.py
+$CONDA_PREFIX/lib/python3.10/site-packages/numpy/random/_examples/cython
+$CONDA_PREFIX/lib/python3.10/site-packages/numpy/random/_examples/cython/setup.py
+$CONDA_PREFIX/lib/python3.10/site-packages/numpy/core/tests/examples/cython
+$CONDA_PREFIX/lib/python3.10/site-packages/numpy/core/tests/examples/limited_api
+$CONDA_PREFIX/lib/python3.10/site-packages/numpy/core/tests/examples/cython/setup.py
+$CONDA_PREFIX/lib/python3.10/site-packages/numpy/core/tests/examples/limited_api/setup.py
+$CONDA_PREFIX/lib/python3.10/site-packages/numpy/distutils
+$CONDA_PREFIX/lib/python3.10/site-packages/numpy/fft
+$CONDA_PREFIX/lib/python3.10/site-packages/numpy/lib
+$CONDA_PREFIX/lib/python3.10/site-packages/numpy/linalg
+$CONDA_PREFIX/lib/python3.10/site-packages/numpy/ma
+$CONDA_PREFIX/lib/python3.10/site-packages/numpy/matrixlib
+$CONDA_PREFIX/lib/python3.10/site-packages/numpy/polynomial
+$CONDA_PREFIX/lib/python3.10/site-packages/numpy/random
+$CONDA_PREFIX/lib/python3.10/site-packages/numpy/testing
+$CONDA_PREFIX/lib/python3.10/site-packages/numpy/typing
+$CONDA_PREFIX/lib/python3.10/site-packages/numpy/array_api
+$CONDA_PREFIX/lib/python3.10/site-packages/numpy/compat
+$CONDA_PREFIX/lib/python3.10/site-packages/numpy/f2py
+$CONDA_PREFIX/lib/python3.10/site-packages/numpy/_typing
+$CONDA_PREFIX/lib/python3.10/site-packages/numpy/core
+$CONDA_PREFIX/lib/python3.10/site-packages/numpy
 EOF
 fi
 

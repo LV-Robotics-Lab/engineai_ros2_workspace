@@ -83,7 +83,7 @@ Joystick Control is the simplest mode with which the user can enjoy the default 
 # in host
 # terminal 1
 cd /home/wang22/engineai/engineai_ros2_workspace
-source venv/bin/activate
+conda activate engineai_ros2
 ./src/third_party/install.sh
 ./scripts/build_nodes.sh sim
 source install/setup.bash
@@ -94,24 +94,24 @@ ros2 launch mujoco_simulator mujoco_simulator.launch.py save_contact_csv:=true c
 # choose mesh or geometry: in src/simulation/mujoco/assets/config/pm_v2.yaml
 # change "use_simplified_geometry: true"
 cd /home/wang22/engineai/engineai_ros2_workspace
-source venv/bin/activate
+conda activate engineai_ros2
 # plot contact force max
-python3 scripts/analyze_contact_forces.py /home/wang22/engineai/engineai_ros2_workspace/logs/contact_data_20250728_181135.csv
+python3 scripts/analyze_contact_forces.py /home/wang22/engineai/engineai_ros2_workspace/logs/contact_data_20250729_214158.csv
 # plot contact point with force
 # 使用现有的XML文件
-python3 scripts/mujoco_urdf_contact_display.py logs/contact_data_20250728_181135.csv src/simulation/mujoco/assets/resource/pm_v2.xml
+python3 scripts/mujoco_urdf_contact_display.py logs/contact_data_20250729_214158.csv src/simulation/mujoco/assets/resource/pm_v2.xml
 
 # 或者使用URDF文件（会自动转换）
-python3 scripts/mujoco_urdf_contact_display.py logs/contact_data_20250725_000144.csv src/simulation/mujoco/assets/resource/robot/pm_v2/urdf/serial_pm_v2.urdf
+python3 scripts/mujoco_urdf_contact_display.py logs/contact_data_20250729_214158.csv src/simulation/mujoco/assets/resource/robot/pm_v2/urdf/serial_pm_v2.urdf
 
 # 使用球体可视化（推荐）
-python3 scripts/mujoco_urdf_contact_display.py logs/contact_data_20250728_181135.csv src/simulation/mujoco/assets/resource/robot/pm_v2/urdf/serial_pm_v2.urdf sphere
+python3 scripts/mujoco_urdf_contact_display.py logs/contact_data_20250729_214158.csv src/simulation/mujoco/assets/resource/robot/pm_v2/urdf/serial_pm_v2.urdf sphere
 
 # 使用球体可视化 + 世界坐标
-python3 scripts/mujoco_urdf_contact_display.py logs/contact_data_20250725_000144.csv src/simulation/mujoco/assets/resource/robot/pm_v2/urdf/serial_pm_v2.urdf sphere world
+python3 scripts/mujoco_urdf_contact_display.py logs/contact_data_20250729_214158.csv src/simulation/mujoco/assets/resource/robot/pm_v2/urdf/serial_pm_v2.urdf sphere world
 
 # 使用圆柱体可视化（Mujoco内置）
-python3 scripts/mujoco_urdf_contact_display.py logs/contact_data_20250725_000144.csv src/simulation/mujoco/assets/resource/pm_v2.xml cylinder
+python3 scripts/mujoco_urdf_contact_display.py logs/contact_data_20250729_214158.csv src/simulation/mujoco/assets/resource/pm_v2.xml cylinder
 
 # 完整参数说明
 # 参数1: CSV文件路径
@@ -121,7 +121,9 @@ python3 scripts/mujoco_urdf_contact_display.py logs/contact_data_20250725_000144
 
 # terminal 3
 # 小球撞地测试
-/home/wang22/engineai/engineai_ros2_workspace/venv/bin/python /home/wang22/engineai/engineai_ros2_workspace/scripts/FreeBallTest/iron_ball_drop.py
+conda activate engineai_ros2
+python /home/wang22/engineai/engineai_ros2_workspace/scripts/FreeBallTest/iron_ball_drop.py
+
 
 git push origin bench
 
