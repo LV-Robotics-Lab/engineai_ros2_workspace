@@ -125,6 +125,11 @@ conda activate engineai_ros2
 python /home/wang22/engineai/engineai_ros2_workspace/scripts/FreeBallTest/iron_ball_drop.py
 
 
+# terminal 4
+# 根据urdf和xml里的初始位置，把机器人多link的mesh合成一个整体mesh
+conda activate engineai_ros2
+python engineai_ros2_workspace/scripts/MeshCombine/urdf_mesh_combiner.py
+
 git push origin bench
 
 # terminal 2
