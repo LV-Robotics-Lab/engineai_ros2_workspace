@@ -82,10 +82,9 @@ Joystick Control is the simplest mode with which the user can enjoy the default 
 ```bash
 # in host
 # terminal 1
-cd /home/wang22/engineai/engineai_ros2_workspace
-conda activate engineai_ros2
+cd /home/wang22/engineai/engineai_ros2_workspace && conda activate engineai_ros2
 ./src/third_party/install.sh
-./scripts/build_nodes.sh sim
+./scripts/build_nodes.sh sim    # or colcon build --packages-select mujoco_simulator
 source install/setup.bash
 # ros2 launch mujoco_simulator mujoco_simulator.launch.py
 ros2 launch mujoco_simulator mujoco_simulator.launch.py save_contact_csv:=true csv_save_frequency:=1
@@ -105,7 +104,7 @@ python3 scripts/mujoco_urdf_contact_display.py logs/contact_data_20250804_132251
 python3 scripts/mujoco_urdf_contact_display.py logs/contact_data_20250804_132251.csv src/simulation/mujoco/assets/resource/robot/pm_v2/urdf/serial_pm_v2.urdf
 
 # 使用球体可视化（推荐）
-python3 scripts/mujoco_urdf_contact_display.py logs/contact_data_20250729_214158.csv src/simulation/mujoco/assets/resource/robot/pm_v2/urdf/serial_pm_v2.urdf sphere
+python3 scripts/mujoco_urdf_contact_display.py logs/contact_data_20250804_203133.csv src/simulation/mujoco/assets/resource/robot/pm_v2/urdf/serial_pm_v2.urdf sphere
 
 # 使用球体可视化 + 世界坐标
 python3 scripts/mujoco_urdf_contact_display.py logs/contact_data_20250729_214158.csv src/simulation/mujoco/assets/resource/robot/pm_v2/urdf/serial_pm_v2.urdf sphere world

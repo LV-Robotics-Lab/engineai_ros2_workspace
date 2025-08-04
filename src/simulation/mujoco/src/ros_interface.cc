@@ -1,3 +1,14 @@
+/**
+ * @file ros_interface.cc
+ * @brief MuJoCo仿真器与ROS2的接口实现
+ * @details 该文件实现了MuJoCo仿真器与ROS2系统的接口，包括：
+ *          - 关节状态发布
+ *          - IMU数据发布
+ *          - 接触力数据发布和CSV保存
+ *          - 关节命令订阅
+ *          - 运动状态定时发布
+ */
+
 #include "ros_interface.h"
 #include <chrono>
 #include <cmath>
@@ -16,16 +27,25 @@
 #include "config_loader.h"
 #include "rclcpp/rclcpp.hpp"
 
-// Constants
-const int kDofFloatingBase = 6;        // Number of DoF for floating base
-const int kNumFloatingBaseJoints = 7;  // Number of joints for floating base (quaternion + xyz)
-const int kDimQuaternion = 4;          // Dimension of a quaternion
+// 常量定义
+const int kDofFloatingBase = 6;        // 浮动基座的自由度数量
+const int kNumFloatingBaseJoints = 7;  // 浮动基座的关节数量（四元数 + xyz位置）
+const int kDimQuaternion = 4;          // 四元数的维度
 
 namespace mujoco {
 
+/**
+ * @brief 构造函数
+ * @param node ROS2节点指针
+ * @param config_loader 配置加载器指针
+ */
 RosInterface::RosInterface(const std::shared_ptr<rclcpp::Node>& node, std::shared_ptr<ConfigLoader> config_loader)
     : node_(node), config_loader_(config_loader), model_(nullptr), data_(nullptr), is_floating_base_(false) {}
 
+/**
+ * @brief 析构函数
+ * @details 关闭CSV文件并输出保存路径信息
+ */
 RosInterface::~RosInterface() {
   // 关闭CSV文件
   if (csv_file_.is_open()) {
@@ -35,6 +55,16 @@ RosInterface::~RosInterface() {
   }
 }
 
+/**
+ * @brief 初始化ROS接口
+ * @return 初始化是否成功
+ * @details 初始化包括：
+ *          - 读取接触力导出参数
+ *          - 设置CSV保存参数
+ *          - 创建发布者和订阅者
+ *          - 初始化关节命令数组
+ *          - 创建定时器
+ */
 bool RosInterface::Initialize() {
   // 读取接触力导出参数
   node_->declare_parameter("export_contact", false);
@@ -89,22 +119,22 @@ bool RosInterface::Initialize() {
     }
   }
 
-  // Create publishers
+  // 创建发布者
   joint_state_pub_ =
       node_->create_publisher<interface_protocol::msg::JointState>(config_loader_->GetJointStateTopic(), 10);
 
   imu_pub_ = node_->create_publisher<interface_protocol::msg::ImuInfo>(config_loader_->GetImuTopic(), 10);
   
-  // Create publisher for motion state
+  // 创建运动状态发布者
   motion_state_pub_ = node_->create_publisher<interface_protocol::msg::MotionState>("/motion/motion_state", 10);
 
-  // Create publisher for contact forces if enabled
+  // 如果启用接触力导出，创建接触力发布者
   if (export_contact_) {
     contact_force_pub_ = node_->create_publisher<interface_protocol::msg::ContactForce>(contact_topic_, 10);
     RCLCPP_INFO(node_->get_logger(), "Contact force publishing enabled on topic: %s", contact_topic_.c_str());
   }
 
-  // Create subscriber with more compatible QoS settings
+  // 创建订阅者，使用更兼容的QoS设置
   using std::placeholders::_1;
 
   // 创建更兼容的QoS设置
@@ -113,10 +143,10 @@ bool RosInterface::Initialize() {
   joint_cmd_sub_ = node_->create_subscription<interface_protocol::msg::JointCommand>(
       config_loader_->GetJointCommandTopic(), qos, std::bind(&RosInterface::JointCommandCallback, this, _1));
 
-  // Get number of joints from config loader
-  // num_total_joints_ = config_loader_->GetNumTotalJoints(); // This line is now moved to Initialize()
+  // 从配置加载器获取关节数量
+  // num_total_joints_ = config_loader_->GetNumTotalJoints(); // 这行现在移到Initialize()中
 
-  // Initialize commanded values with zeros
+  // 用零值初始化命令数组
   joint_command_.position.resize(num_total_joints_, 0.0);
   joint_command_.velocity.resize(num_total_joints_, 0.0);
   joint_command_.torque.resize(num_total_joints_, 0.0);
@@ -124,7 +154,7 @@ bool RosInterface::Initialize() {
   joint_command_.stiffness.resize(num_total_joints_, 0.0);
   joint_command_.damping.resize(num_total_joints_, 0.0);
 
-  // Create timer for publishing motion state every 1 second
+  // 创建定时器，每秒发布一次运动状态
   motion_state_timer_ = node_->create_wall_timer(
       std::chrono::seconds(1),
       std::bind(&RosInterface::MotionStateTimerCallback, this));
@@ -133,18 +163,28 @@ bool RosInterface::Initialize() {
   return true;
 }
 
+/**
+ * @brief 获取安全的关节命令
+ * @return 当前的关节命令
+ * @details 使用互斥锁保护，确保线程安全
+ */
 interface_protocol::msg::JointCommand RosInterface::GetCommandedSafe() {
   std::lock_guard<std::mutex> lock(mtx_);
   return joint_command_;
 }
 
+/**
+ * @brief 关节命令回调函数
+ * @param msg 接收到的关节命令消息
+ * @details 更新关节命令并确保所有向量大小正确
+ */
 void RosInterface::JointCommandCallback(const interface_protocol::msg::JointCommand::SharedPtr msg) {
   std::lock_guard<std::mutex> lock(mtx_);
 
-  // Update commanded values
+  // 更新命令值
   joint_command_ = *msg;
 
-  // Ensure all vectors are properly sized
+  // 确保所有向量大小正确
   if (joint_command_.position.size() > num_total_joints_) {
     joint_command_.position.resize(num_total_joints_);
   }
@@ -165,27 +205,33 @@ void RosInterface::JointCommandCallback(const interface_protocol::msg::JointComm
   }
 }
 
+/**
+ * @brief 更新仿真状态并发布数据
+ * @param m MuJoCo模型指针
+ * @param d MuJoCo数据指针
+ * @details 发布关节状态、IMU数据和接触力数据
+ */
 void RosInterface::UpdateSimState(const mjModel* m, mjData* d) {
   is_floating_base_ = (m->nv != m->nu);
 
-  // Create messages
+  // 创建消息
   auto joint_state_msg = std::make_unique<interface_protocol::msg::JointState>();
   auto imu_msg = std::make_unique<interface_protocol::msg::ImuInfo>();
 
-  // Set timestamp
+  // 设置时间戳
   joint_state_msg->header.stamp = node_->now();
   imu_msg->header.stamp = node_->now();
 
-  // Set joint states
+  // 设置关节状态
   joint_state_msg->name.resize(num_total_joints_);
   joint_state_msg->position.resize(num_total_joints_);
   joint_state_msg->velocity.resize(num_total_joints_);
   joint_state_msg->torque.resize(num_total_joints_);
 
   if (is_floating_base_) {
-    // Skip the floating base joints
+    // 跳过浮动基座关节
     for (int i = 0; i < num_total_joints_; ++i) {
-      // Get joint name from MuJoCo model
+      // 从MuJoCo模型获取关节名称
       joint_state_msg->name[i] = m->names + m->name_jntadr[i + kNumFloatingBaseJoints];
       joint_state_msg->position[i] = d->qpos[i + kNumFloatingBaseJoints];
       joint_state_msg->velocity[i] = d->qvel[i + kDofFloatingBase];
@@ -193,7 +239,7 @@ void RosInterface::UpdateSimState(const mjModel* m, mjData* d) {
     }
   } else {
     for (int i = 0; i < num_total_joints_; ++i) {
-      // Get joint name from MuJoCo model
+      // 从MuJoCo模型获取关节名称
       joint_state_msg->name[i] = m->names + m->name_jntadr[i];
       joint_state_msg->position[i] = d->qpos[i];
       joint_state_msg->velocity[i] = d->qvel[i];
@@ -201,44 +247,50 @@ void RosInterface::UpdateSimState(const mjModel* m, mjData* d) {
     }
   }
 
-  // IMU data typically comes from sensors in MuJoCo
+  // IMU数据通常来自MuJoCo中的传感器
   int index = 0;
 
-  // Set IMU quaternion
+  // 设置IMU四元数
   imu_msg->quaternion.w = d->sensordata[index + 0];
   imu_msg->quaternion.x = d->sensordata[index + 1];
   imu_msg->quaternion.y = d->sensordata[index + 2];
   imu_msg->quaternion.z = d->sensordata[index + 3];
   index += kDimQuaternion;
 
-  // Set RPY values from the sensor data
-  // Assuming the RPY values are the next three values after the quaternion
-  imu_msg->rpy.x = d->sensordata[index + 0];  // Roll
-  imu_msg->rpy.y = d->sensordata[index + 1];  // Pitch
-  imu_msg->rpy.z = d->sensordata[index + 2];  // Yaw
+  // 从传感器数据设置RPY值
+  // 假设RPY值是四元数后的三个值
+  imu_msg->rpy.x = d->sensordata[index + 0];  // 横滚角
+  imu_msg->rpy.y = d->sensordata[index + 1];  // 俯仰角
+  imu_msg->rpy.z = d->sensordata[index + 2];  // 偏航角
   index += 3;
 
-  // Linear acceleration
+  // 线性加速度
   imu_msg->linear_acceleration.x = d->sensordata[index + 0];
   imu_msg->linear_acceleration.y = d->sensordata[index + 1];
   imu_msg->linear_acceleration.z = d->sensordata[index + 2];
   index += 3;
 
-  // Angular velocity
+  // 角速度
   imu_msg->angular_velocity.x = d->sensordata[index + 0];
   imu_msg->angular_velocity.y = d->sensordata[index + 1];
   imu_msg->angular_velocity.z = d->sensordata[index + 2];
 
-  // Publish messages
+  // 发布消息
   joint_state_pub_->publish(std::move(joint_state_msg));
   imu_pub_->publish(std::move(imu_msg));
 
-  // Publish contact forces if enabled
+  // 如果启用，发布接触力
   if (export_contact_) {
     PublishContactForces(m, d);
   }
 }
 
+/**
+ * @brief 发布接触力数据
+ * @param m MuJoCo模型指针
+ * @param d MuJoCo数据指针
+ * @details 计算并发布所有接触点的力和力矩信息，同时保存到CSV文件
+ */
 void RosInterface::PublishContactForces(const mjModel* m, mjData* d) {
   if (!contact_force_pub_) {
     return;
@@ -248,7 +300,7 @@ void RosInterface::PublishContactForces(const mjModel* m, mjData* d) {
   contact_msg->header.stamp = node_->now();
   contact_msg->header.frame_id = "world";
 
-  // Get number of contacts
+  // 获取接触数量
   int ncon = d->ncon;
   
   // 添加调试信息，每1000帧打印一次（在10kHz频率下约每0.1秒一次）
@@ -315,12 +367,12 @@ void RosInterface::PublishContactForces(const mjModel* m, mjData* d) {
   }
   
   if (ncon == 0) {
-    // No contacts, publish empty message
+    // 没有接触，发布空消息
     contact_force_pub_->publish(std::move(contact_msg));
     return;
   }
 
-  // Resize vectors to hold contact data
+  // 调整向量大小以容纳接触数据
   contact_msg->contact_names.resize(ncon);
   contact_msg->contact_positions_x.resize(ncon);
   contact_msg->contact_positions_y.resize(ncon);
@@ -339,11 +391,11 @@ void RosInterface::PublishContactForces(const mjModel* m, mjData* d) {
   mjtNum total_world_force[3] = {0.0, 0.0, 0.0};
   mjtNum total_world_torque[3] = {0.0, 0.0, 0.0};
 
-  // Fill contact data
+  // 填充接触数据
   for (int i = 0; i < ncon; ++i) {
     const mjContact& contact = d->contact[i];
     
-    // Contact name (using geom names)
+    // 接触名称（使用几何体名称）
     std::string geom1_name = m->names + m->name_geomadr[contact.geom[0]];
     std::string geom2_name = m->names + m->name_geomadr[contact.geom[1]];
     contact_msg->contact_names[i] = geom1_name + "_" + geom2_name;
@@ -417,10 +469,10 @@ void RosInterface::PublishContactForces(const mjModel* m, mjData* d) {
     contact_msg->contact_torques_y[i] = world_torque[1];
     contact_msg->contact_torques_z[i] = world_torque[2];
 
-    // Contact gap (distance)
+    // 接触间隙（距离）
     contact_msg->contact_gaps[i] = contact.dist;
 
-    // Contact body indices
+    // 接触体索引
     contact_msg->contact_bodies_1[i] = m->geom_bodyid[contact.geom[0]];
     contact_msg->contact_bodies_2[i] = m->geom_bodyid[contact.geom[1]];
   }
@@ -437,7 +489,7 @@ void RosInterface::PublishContactForces(const mjModel* m, mjData* d) {
                      total_world_force[2]*total_world_force[2]));
   }
 
-  // Publish contact force message
+  // 发布接触力消息
   contact_force_pub_->publish(std::move(contact_msg));
 
   // 保存到CSV文件
@@ -580,19 +632,28 @@ void RosInterface::PublishContactForces(const mjModel* m, mjData* d) {
   }
 }
 
+/**
+ * @brief 设置MuJoCo模型和数据指针
+ * @param model MuJoCo模型指针
+ * @param data MuJoCo数据指针
+ */
 void RosInterface::SetModelAndData(mjModel* model, mjData* data) {
   model_ = model;
   data_ = data;
 }
 
+/**
+ * @brief 运动状态定时器回调函数
+ * @details 每秒发布一次运动状态消息，当前设置为"joint_bridge"模式
+ */
 void RosInterface::MotionStateTimerCallback() {
-  // Create a motion state message
+  // 创建运动状态消息
   auto motion_state_msg = std::make_unique<interface_protocol::msg::MotionState>();
   
-  // Set the current_motion_task field to "joint_bridge"
+  // 设置当前运动任务字段为"joint_bridge"
   motion_state_msg->current_motion_task = "joint_bridge";
   
-  // Publish the message
+  // 发布消息
   motion_state_pub_->publish(std::move(motion_state_msg));
 }
 

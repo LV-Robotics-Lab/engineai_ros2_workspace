@@ -98,6 +98,7 @@ install(DIRECTORY config/
 install(PROGRAMS
   scripts/contact_viz_and_log.py
   scripts/body_velocity_control_example.py
+  src/joint_state_converter.py
   DESTINATION lib/${PROJECT_NAME}
 )
 

@@ -1,3 +1,15 @@
+/**
+ * @file sim_manager.cc
+ * @brief MuJoCo仿真管理器实现
+ * @details 该文件实现了MuJoCo仿真的核心管理功能，包括：
+ *          - 仿真初始化和配置
+ *          - 物理仿真循环
+ *          - 模型加载和管理
+ *          - 接触力可视化设置
+ *          - 关节控制器实现
+ *          - ROS接口集成
+ */
+
 #include "sim_manager.h"
 #include <chrono>
 #include <cstring>
@@ -9,28 +21,45 @@ namespace mju = mujoco::sample_util;
 
 using namespace std::chrono_literals;
 
-// Constants
-// Number of DoF for floating base
-const int kDofFloatingBase = 6;
-// Number of joints for floating base (quaternion + xyz)
-const int kNumFloatingBaseJoints = 7;
-// maximum mis-alignment before re-sync
-constexpr double kSyncMisalign = 0.1;
-// fraction of refresh available for simulation
-constexpr double kSimRefreshFraction = 0.7;
-// Initialize static member
-const std::chrono::milliseconds kBusyWaitTime(1);
+// 常量定义
+const int kDofFloatingBase = 6;        // 浮动基座的自由度数量
+const int kNumFloatingBaseJoints = 7;  // 浮动基座的关节数量（四元数 + xyz位置）
+constexpr double kSyncMisalign = 0.1;  // 重新同步前的最大偏差
+constexpr double kSimRefreshFraction = 0.7;  // 可用于仿真的刷新率分数
+const std::chrono::milliseconds kBusyWaitTime(1);  // 忙等待时间
 
-// Static wrapper function for MuJoCo control callback
-static void TorqueControllerWrapper(const mjModel* m, mjData* d) { SimManager::GetInstance().TorqueController(m, d); }
+/**
+ * @brief MuJoCo控制回调的静态包装函数
+ * @param m MuJoCo模型指针
+ * @param d MuJoCo数据指针
+ * @details 将MuJoCo控制回调转发到SimManager实例
+ */
+static void TorqueControllerWrapper(const mjModel* m, mjData* d) { 
+  SimManager::GetInstance().TorqueController(m, d); 
+}
 
+/**
+ * @brief 获取SimManager单例实例
+ * @return SimManager的引用
+ * @details 使用单例模式确保全局只有一个仿真管理器实例
+ */
 SimManager& SimManager::GetInstance() {
   static SimManager instance;
   return instance;
 }
 
-SimManager::SimManager() { node_ = std::make_shared<rclcpp::Node>("mujoco_simulator"); }
+/**
+ * @brief 构造函数
+ * @details 初始化ROS节点和基本成员变量
+ */
+SimManager::SimManager() { 
+  node_ = std::make_shared<rclcpp::Node>("mujoco_simulator"); 
+}
 
+/**
+ * @brief 析构函数
+ * @details 清理资源，包括物理线程、模型数据和ROS接口
+ */
 SimManager::~SimManager() {
   if (physics_thread_.joinable()) {
     physics_thread_.join();
@@ -40,25 +69,31 @@ SimManager::~SimManager() {
   ros_interface_.reset();
 }
 
+/**
+ * @brief 关节力矩控制器
+ * @param m MuJoCo模型指针
+ * @param d MuJoCo数据指针
+ * @details 实现PD控制器，根据关节命令计算控制力矩
+ */
 void SimManager::TorqueController(const mjModel* m, mjData* d) {
   if (!ros_interface_) {
     return;
   }
 
-  // Get thread-safe copy of the command values
+  // 获取线程安全的命令值副本
   auto cmd = ros_interface_->GetCommandedSafe();
 
-  // Check if this is a floating base robot
+  // 检查是否为浮动基座机器人
   bool is_floating_base = (m->nv != m->nu);
 
-  // Apply commanded controls
+  // 应用命令控制
   for (int i = 0; i < m->nu; ++i) {
     if (i >= cmd.position.size() || i >= cmd.velocity.size() || i >= cmd.torque.size() ||
         i >= cmd.feed_forward_torque.size() || i >= cmd.stiffness.size() || i >= cmd.damping.size()) {
       continue;
     }
 
-    // Get position and velocity, accounting for floating base if needed
+    // 获取位置和速度，考虑浮动基座
     double position;
     double velocity;
 
@@ -70,7 +105,7 @@ void SimManager::TorqueController(const mjModel* m, mjData* d) {
       velocity = d->qvel[i];
     }
 
-    // PD control with feed-forward torque
+    // PD控制加前馈力矩
     double position_error = cmd.position[i] - position;
     double velocity_error = cmd.velocity[i] - velocity;
 
@@ -78,6 +113,17 @@ void SimManager::TorqueController(const mjModel* m, mjData* d) {
   }
 }
 
+/**
+ * @brief 初始化仿真管理器
+ * @return 初始化是否成功
+ * @details 初始化包括：
+ *          - 设置日志级别
+ *          - 验证环境变量
+ *          - 加载配置文件
+ *          - 初始化ROS接口
+ *          - 设置控制回调
+ *          - 配置可视化选项
+ */
 bool SimManager::Initialize() {
   auto logger = node_->get_logger();
   if (rcutils_logging_set_logger_level(logger.get_name(), RCUTILS_LOG_SEVERITY_INFO) != RCUTILS_RET_OK) {
@@ -87,21 +133,21 @@ bool SimManager::Initialize() {
 
   RCLCPP_INFO(logger, "MuJoCo Simulator node initialized");
 
-  // Verify environment variables
+  // 验证环境变量
   if (!std::getenv("PRODUCT") || !std::getenv("MUJOCO_ASSETS_PATH")) {
     RCLCPP_ERROR(logger, "Required environment variables not set! Please run from launch file.");
     return false;
   }
 
-  // Get product name and resource path from environment variables
+  // 从环境变量获取产品名称和资源路径
   std::string product_name = std::string(std::getenv("PRODUCT"));
   std::string assets_path = std::string(std::getenv("MUJOCO_ASSETS_PATH"));
 
-  // Construct config file path
+  // 构建配置文件路径
   std::string config_file = assets_path + "/config/" + product_name + ".yaml";
   RCLCPP_INFO(logger, "Loading config from %s", config_file.c_str());
 
-  // Initialize config loader
+  // 初始化配置加载器
   config_loader_ = std::make_shared<ConfigLoader>(config_file);
   config_loader_->SetAssetsPath(assets_path);
   if (!config_loader_->LoadConfig()) {
@@ -109,24 +155,24 @@ bool SimManager::Initialize() {
     return false;
   }
 
-  // Create the MuJoCo ROS interface
+  // 创建MuJoCo ROS接口
   ros_interface_ = std::make_unique<mujoco::RosInterface>(node_, config_loader_);
   if (!ros_interface_->Initialize()) {
     RCLCPP_ERROR(logger, "Failed to initialize MuJoCo ROS interface");
     return false;
   }
 
-  // Install control callback
+  // 安装控制回调
   mjcb_control = TorqueControllerWrapper;
 
-  // Log version
+  // 记录版本信息
   RCLCPP_INFO(logger, "MuJoCo version %s", mj_versionString());
   if (mjVERSION_HEADER != mj_version()) {
     RCLCPP_ERROR(logger, "Headers and library have different versions");
     return false;
   }
 
-  // Setup camera, option, perturb
+  // 设置相机、选项、扰动
   mjvCamera cam;
   mjv_defaultCamera(&cam);
 
@@ -145,32 +191,42 @@ bool SimManager::Initialize() {
   mjvPerturb pert;
   mjv_defaultPerturb(&pert);
 
-  // Create simulation object
+  // 创建仿真对象
   sim_ = std::make_unique<mj::Simulate>(std::make_unique<mj::GlfwAdapter>(), &cam, &opt, &pert, false);
 
   return true;
 }
 
+/**
+ * @brief 运行仿真
+ * @details 启动物理线程和UI渲染循环
+ */
 void SimManager::Run() {
   auto logger = node_->get_logger();
   std::string model_file = config_loader_->GetModelFilePath();
   RCLCPP_INFO(logger, "Model file path: %s", model_file.c_str());
 
-  // Set VFS directory before starting physics thread
+  // 在启动物理线程前设置VFS目录
   const std::string resource_dir = config_loader_->GetResourceDir();
   setenv("MJCF_PATH", resource_dir.c_str(), 1);
   RCLCPP_INFO(logger, "Setting MJCF_PATH environment variable: %s", resource_dir.c_str());
 
-  // Start physics thread
+  // 启动物理线程
   RCLCPP_INFO(logger, "Starting physics thread");
   physics_thread_ = std::thread([this, model_file]() { PhysicsThread(model_file); });
 
-  // Start UI loop
+  // 启动UI循环
   RCLCPP_INFO(logger, "Starting UI rendering loop");
   sim_->RenderLoop();
   RCLCPP_INFO(logger, "UI rendering loop completed");
 }
 
+/**
+ * @brief 加载MuJoCo模型
+ * @param file 模型文件路径
+ * @return 加载的模型指针，失败时返回nullptr
+ * @details 支持加载.mjb二进制文件和.xml文本文件
+ */
 mjModel* SimManager::LoadModel(std::string_view file) {
   char filename[mj::Simulate::kMaxFilenameLength];
   mju::strcpy_arr(filename, file.data());
@@ -182,6 +238,7 @@ mjModel* SimManager::LoadModel(std::string_view file) {
   auto load_start = mj::Simulate::Clock::now();
   auto logger = node_->get_logger();
 
+  // 检查是否为二进制模型文件(.mjb)
   if (mju::strlen_arr(filename) > 4 && !std::strncmp(filename + mju::strlen_arr(filename) - 4, ".mjb",
                                                      mju::sizeof_arr(filename) - mju::strlen_arr(filename) + 4)) {
     mnew = mj_loadModel(filename, nullptr);
@@ -241,6 +298,13 @@ mjModel* SimManager::LoadModel(std::string_view file) {
   return mnew;
 }
 
+/**
+ * @brief 检查仿真是否发散
+ * @param disableflags 禁用标志
+ * @param d MuJoCo数据指针
+ * @return 发散信息字符串，未发散时返回nullptr
+ * @details 检查位置、速度、加速度是否超出合理范围
+ */
 const char* SimManager::Diverged(int disableflags, const mjData* d) {
   if (disableflags & mjDSBL_AUTORESET) {
     for (mjtWarning w : {mjWARN_BADQACC, mjWARN_BADQVEL, mjWARN_BADQPOS}) {
@@ -252,6 +316,10 @@ const char* SimManager::Diverged(int disableflags, const mjData* d) {
   return nullptr;
 }
 
+/**
+ * @brief 处理拖拽加载请求
+ * @details 加载用户拖拽的模型文件
+ */
 void SimManager::HandleDropLoad() {
   sim_->LoadMessage(sim_->dropfilename);
   mjModel* mnew = LoadModel(sim_->dropfilename);
@@ -275,6 +343,10 @@ void SimManager::HandleDropLoad() {
   }
 }
 
+/**
+ * @brief 处理UI加载请求
+ * @details 加载UI界面请求的模型文件
+ */
 void SimManager::HandleUILoad() {
   sim_->uiloadrequest.fetch_sub(1);
   sim_->LoadMessage(sim_->filename);
@@ -297,23 +369,36 @@ void SimManager::HandleUILoad() {
   }
 }
 
+/**
+ * @brief 物理仿真循环
+ * @details 主要的仿真循环，包括：
+ *          - ROS消息处理
+ *          - 模型加载处理
+ *          - 仿真步进
+ *          - 状态更新
+ *          - 发散检测
+ */
 void SimManager::PhysicsLoop() {
   std::chrono::time_point<mj::Simulate::Clock> syncCPU;
   mjtNum syncSim = 0;
 
   while (!sim_->exitrequest.load()) {
+    // 处理ROS消息
     if (ros_interface_) {
       rclcpp::spin_some(ros_interface_->GetNode());
     }
 
+    // 处理拖拽加载请求
     if (sim_->droploadrequest.load()) {
       HandleDropLoad();
     }
 
+    // 处理UI加载请求
     if (sim_->uiloadrequest.load()) {
       HandleUILoad();
     }
 
+    // 忙等待或睡眠
     if (sim_->run && sim_->busywait) {
       std::this_thread::yield();
     } else {
@@ -332,12 +417,14 @@ void SimManager::PhysicsLoop() {
           double slowdown = 100 / sim_->percentRealTime[sim_->real_time_index];
           bool misaligned = std::abs((elapsedCPU / slowdown).count() - elapsedSim) > kSyncMisalign;
 
+          // 检查是否需要重新同步
           if (elapsedSim < 0 || elapsedCPU.count() < 0 || syncCPU.time_since_epoch().count() == 0 || misaligned ||
               sim_->speed_changed) {
             syncCPU = startCPU;
             syncSim = d_->time;
             sim_->speed_changed = false;
 
+            // 执行仿真步进
             mj_step(m_, d_);
             ros_interface_->UpdateSimState(m_, d_);
             const char* message = Diverged(m_->opt.disableflags, d_);
@@ -348,6 +435,7 @@ void SimManager::PhysicsLoop() {
               stepped = true;
             }
           } else {
+            // 执行多个仿真步进以保持实时性
             bool measured = false;
             mjtNum prevSim = d_->time;
             double refreshTime = kSimRefreshFraction / sim_->refresh_rate;
@@ -380,6 +468,7 @@ void SimManager::PhysicsLoop() {
             sim_->AddToHistory();
           }
         } else {
+          // 仿真暂停时只进行前向计算
           mj_forward(m_, d_);
           sim_->speed_changed = true;
         }
@@ -388,6 +477,15 @@ void SimManager::PhysicsLoop() {
   }
 }
 
+/**
+ * @brief 物理线程主函数
+ * @param filename 模型文件路径
+ * @details 在独立线程中运行物理仿真，包括：
+ *          - 模型加载
+ *          - 数据初始化
+ *          - 可视化设置
+ *          - 物理循环
+ */
 void SimManager::PhysicsThread(std::string_view filename) {
   if (!rclcpp::ok()) {
     std::cerr << "ROS context not initialized in physics thread!" << std::endl;
@@ -401,6 +499,7 @@ void SimManager::PhysicsThread(std::string_view filename) {
 
   RCLCPP_INFO(logger, "PhysicsThread started, filename: %s", filename.data());
 
+  // 验证控制回调设置
   if (mjcb_control != &TorqueControllerWrapper) {
     RCLCPP_WARN(logger, "Control callback not set correctly, setting mjcb_control now");
     mjcb_control = &TorqueControllerWrapper;
@@ -408,6 +507,7 @@ void SimManager::PhysicsThread(std::string_view filename) {
     RCLCPP_INFO(logger, "MuJoCo control callback is correctly set");
   }
 
+  // 加载模型文件
   if (!filename.empty()) {
     sim_->LoadMessage(filename.data());
     m_ = LoadModel(filename);

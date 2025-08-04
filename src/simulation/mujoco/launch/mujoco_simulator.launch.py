@@ -120,6 +120,15 @@ def generate_launch_description():
             ]
         )
 
+        # 定义joint_state转换节点
+        joint_state_converter_node = Node(
+            package='interface_example',
+            executable='joint_state_converter.py',
+            name='joint_state_converter',
+            output='screen',
+            parameters=[{'use_sim_time': True}]
+        )
+
         # 定义robot_state_publisher节点
         robot_state_publisher_node = Node(
             package='robot_state_publisher',
@@ -133,7 +142,7 @@ def generate_launch_description():
         )
 
         # 返回节点对象列表
-        return [mujoco_node, robot_state_publisher_node]
+        return [mujoco_node, joint_state_converter_node, robot_state_publisher_node]
 
     # 使用OpaqueFunction以便在launch时动态获取参数
     mujoco_launch = OpaqueFunction(function=launch_setup)
