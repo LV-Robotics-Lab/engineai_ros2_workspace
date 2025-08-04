@@ -24,12 +24,19 @@ def load_and_clean_data(csv_file):
         df = pd.read_csv(csv_file)
         print(f"Successfully loaded {len(df)} rows")
         
-        # Check if URDF coordinates are available
-        urdf_columns = [col for col in df.columns if 'urdf' in col.lower()]
-        if urdf_columns:
-            print(f"Found URDF coordinate columns: {urdf_columns}")
+        # Check if robot frame coordinates are available
+        robot_frame_columns = [col for col in df.columns if 'robot_frame' in col.lower()]
+        if robot_frame_columns:
+            print(f"Found robot frame coordinate columns: {robot_frame_columns}")
         else:
-            print("Warning: No URDF coordinate columns found")
+            print("Warning: No robot frame coordinate columns found")
+        
+        # Check if joint angles are available
+        joint_columns = [col for col in df.columns if 'joint_' in col and '_angle' in col]
+        if joint_columns:
+            print(f"Found {len(joint_columns)} joint angle columns")
+        else:
+            print("Warning: No joint angle columns found")
         
         # Basic data check
         print(f"Time range: {df['timestamp'].min():.3f} - {df['timestamp'].max():.3f} seconds")
@@ -128,23 +135,17 @@ def create_time_evolution_heatmap(df, save_path=None):
     """Create time evolution heatmap showing force changes over time and space"""
     print("\nGenerating time evolution heatmap...")
     
-    # Check if URDF coordinates are available
-    urdf_columns = [col for col in df.columns if 'urdf' in col.lower()]
-    if not urdf_columns:
-        print("Warning: No URDF coordinate columns found. Skipping time evolution heatmap.")
+    # Check if robot frame coordinates are available
+    robot_frame_columns = [col for col in df.columns if 'robot_frame' in col.lower()]
+    if not robot_frame_columns:
+        print("Warning: No robot frame coordinate columns found. Skipping time evolution heatmap.")
         return
     
-    # Use body1 coordinates (check for both corrected and regular versions)
-    if 'urdf_corrected_x_body1' in df.columns and 'urdf_corrected_y_body1' in df.columns:
-        x_col, y_col = 'urdf_corrected_x_body1', 'urdf_corrected_y_body1'
-    elif 'urdf_x_body1' in df.columns and 'urdf_y_body1' in df.columns:
-        x_col, y_col = 'urdf_x_body1', 'urdf_y_body1'
-    elif 'urdf_corrected_x_body2' in df.columns and 'urdf_corrected_y_body2' in df.columns:
-        x_col, y_col = 'urdf_corrected_x_body2', 'urdf_corrected_y_body2'
-    elif 'urdf_x_body2' in df.columns and 'urdf_y_body2' in df.columns:
-        x_col, y_col = 'urdf_x_body2', 'urdf_y_body2'
+    # Use robot frame coordinates (new format)
+    if 'robot_frame_x' in df.columns and 'robot_frame_y' in df.columns:
+        x_col, y_col = 'robot_frame_x', 'robot_frame_y'
     else:
-        print("Warning: No 2D URDF coordinates found. Skipping time evolution heatmap.")
+        print("Warning: No 2D robot frame coordinates found. Skipping time evolution heatmap.")
         return
     
     # Filter valid data
@@ -177,8 +178,8 @@ def create_time_evolution_heatmap(df, save_path=None):
     im1 = ax1.imshow(avg_force.T, origin='lower', aspect='auto',
                      extent=[xedges[0], xedges[-1], yedges[0], yedges[-1]], 
                      cmap='hot')
-    ax1.set_xlabel(f'URDF X')
-    ax1.set_ylabel(f'URDF Y')
+    ax1.set_xlabel(f'Robot Frame X')
+    ax1.set_ylabel(f'Robot Frame Y')
     ax1.set_title('Average Force Distribution (2D)')
     plt.colorbar(im1, ax=ax1, label='Average Force (N)')
     
@@ -199,7 +200,7 @@ def create_time_evolution_heatmap(df, save_path=None):
                      extent=[xedges2[0], xedges2[-1], yedges2[0], yedges2[-1]], 
                      cmap='viridis')
     ax2.set_xlabel('Time (seconds)')
-    ax2.set_ylabel(f'URDF X Position')
+    ax2.set_ylabel(f'Robot Frame X Position')
     ax2.set_title('Force Evolution Over Time')
     plt.colorbar(im2, ax=ax2, label='Average Force (N)')
     
@@ -225,8 +226,8 @@ def create_time_evolution_heatmap(df, save_path=None):
     im4 = ax4.imshow(hist_density.T, origin='lower', aspect='auto',
                      extent=[xedges[0], xedges[-1], yedges[0], yedges[-1]], 
                      cmap='Blues')
-    ax4.set_xlabel(f'URDF X')
-    ax4.set_ylabel(f'URDF Y')
+    ax4.set_xlabel(f'Robot Frame X')
+    ax4.set_ylabel(f'Robot Frame Y')
     ax4.set_title('Contact Point Density')
     plt.colorbar(im4, ax=ax4, label='Contact Count')
     
@@ -271,10 +272,10 @@ def generate_summary_report(df, csv_file):
     print(f"Total force over time: {time_stats['sum'].sum():.3f} N")
     
     # URDF coordinate statistics
-    urdf_columns = [col for col in df.columns if 'urdf' in col.lower()]
-    if urdf_columns:
-        print(f"\nURDF Coordinate Analysis:")
-        for col in urdf_columns:
+    robot_frame_columns = [col for col in df.columns if 'robot_frame' in col.lower()]
+    if robot_frame_columns:
+        print(f"\nRobot Frame Coordinate Analysis:")
+        for col in robot_frame_columns:
             if col in df.columns and df[col].notna().any():
                 valid_data = df[col].dropna()
                 print(f"  {col}: range [{valid_data.min():.3f}, {valid_data.max():.3f}]")

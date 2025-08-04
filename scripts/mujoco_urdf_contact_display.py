@@ -265,65 +265,36 @@ def create_contact_force_visualization(df, x_col, y_col, z_col):
     if 'force_magnitude' not in df_valid.columns:
         df_valid['force_magnitude'] = np.sqrt(df_valid['force_x']**2 + df_valid['force_y']**2 + df_valid['force_z']**2)
     
-    # Coordinate system adjustment
-    # XML model has robot base at z=0.82, but contact points are relative to robot base
-    # We need to understand if contact points are in robot base coordinates or world coordinates
-    print(f"Original coordinate ranges:")
+    # Coordinate system analysis
+    print(f"Coordinate ranges:")
     print(f"  X: {df_valid[x_col].min():.3f} to {df_valid[x_col].max():.3f}")
     print(f"  Y: {df_valid[y_col].min():.3f} to {df_valid[y_col].max():.3f}")
     print(f"  Z: {df_valid[z_col].min():.3f} to {df_valid[z_col].max():.3f}")
     
-    # Check if contact points are already in robot base coordinates
-    # If Z coordinates are mostly negative or close to 0, they might be relative to ground
-    # If Z coordinates are positive and reasonable for robot height, they might be relative to robot base
-    z_mean = df_valid[z_col].mean()
-    z_std = df_valid[z_col].std()
-    print(f"Z coordinate statistics: mean={z_mean:.3f}, std={z_std:.3f}")
-    
-    # If Z coordinates are mostly negative or very small, they are relative to ground
-    # We need to convert them to robot base coordinates
-    # XML model has robot base at z=0.82, so we add 0.82 to ground coordinates
-    if z_mean < 0.1:  # Most contact points are near ground level
-        print("Contact points appear to be relative to ground. Converting to robot base coordinates...")
-        # Convert from ground coordinates to robot base coordinates
-        # Robot base is at z=0.82 in world coordinates (matching XML)
-        df_valid['z_adjusted'] = df_valid[z_col] + 0.82
-        print(f"Adjusted Z coordinate range: {df_valid['z_adjusted'].min():.3f} to {df_valid['z_adjusted'].max():.3f}")
-    else:
-        print("Contact points appear to be already in robot base coordinates.")
+    # Check if we're using robot frame coordinates
+    if 'robot_frame' in x_col:
+        print("Using robot frame coordinates - these are relative to robot base")
+        # Robot frame coordinates are already relative to robot base
+        # No coordinate transformation needed
+        df_valid['x_adjusted'] = df_valid[x_col]
+        df_valid['y_adjusted'] = df_valid[y_col]
         df_valid['z_adjusted'] = df_valid[z_col]
-    
-    # Handle potential coordinate axis misalignment
-    # The contact data might have different axis definitions than the URDF model
-    # Try different coordinate transformations to align them properly
-    
-    # Option 1: Swap X and Y axes (common in robotics where X is forward, Y is left)
-    print("Attempting coordinate axis alignment...")
-    
-    # Check the range of X and Y to determine if we need to swap axes
-    x_range = df_valid[x_col].max() - df_valid[x_col].min()
-    y_range = df_valid[y_col].max() - df_valid[y_col].min()
-    
-    print(f"X range: {x_range:.3f}, Y range: {y_range:.3f}")
-    
-    # If X range is much larger than Y range, it might be the forward direction
-    # If Y range is much larger than X range, it might be the forward direction
-    # Let's try swapping X and Y to see if it aligns better
-    if x_range > y_range * 1.5:
-        print("X range is significantly larger than Y range. X might be the forward direction.")
-        # Keep current axis assignment
-        df_valid['x_adjusted'] = df_valid[x_col]
-        df_valid['y_adjusted'] = df_valid[y_col]
-    elif y_range > x_range * 1.5:
-        print("Y range is significantly larger than X range. Y might be the forward direction.")
-        # Swap X and Y
-        df_valid['x_adjusted'] = df_valid[y_col]
-        df_valid['y_adjusted'] = df_valid[x_col]
     else:
-        print("X and Y ranges are similar. Using original coordinate system.")
-        # Keep original coordinate system
-        df_valid['x_adjusted'] = df_valid[x_col]
-        df_valid['y_adjusted'] = df_valid[y_col]
+        # World coordinates - need to convert to robot base coordinates
+        print("Using world coordinates - converting to robot base coordinates...")
+        
+        # Check if we have base_link position data
+        if 'base_link_x' in df_valid.columns and 'base_link_y' in df_valid.columns and 'base_link_z' in df_valid.columns:
+            print("Converting world coordinates to robot base coordinates using base_link position...")
+            # Convert world coordinates to robot base coordinates
+            df_valid['x_adjusted'] = df_valid[x_col] - df_valid['base_link_x']
+            df_valid['y_adjusted'] = df_valid[y_col] - df_valid['base_link_y']
+            df_valid['z_adjusted'] = df_valid[z_col] - df_valid['base_link_z']
+        else:
+            print("No base_link position data found, using world coordinates as-is...")
+            df_valid['x_adjusted'] = df_valid[x_col]
+            df_valid['y_adjusted'] = df_valid[y_col]
+            df_valid['z_adjusted'] = df_valid[z_col]
     
     print(f"Adjusted coordinate ranges:")
     print(f"  X: {df_valid['x_adjusted'].min():.3f} to {df_valid['x_adjusted'].max():.3f}")
@@ -655,14 +626,14 @@ def show_mujoco_viewer_with_sphere_contacts(model, data, contact_forces):
 def main():
     """Main function"""
     if len(sys.argv) < 3 or len(sys.argv) > 5:
-        print("Usage: python3 mujoco_urdf_contact_display.py <csv_file> <xml_or_urdf_file> [sphere|cylinder] [world|urdf]")
+        print("Usage: python3 mujoco_urdf_contact_display.py <csv_file> <xml_or_urdf_file> [sphere|cylinder] [world|robot_frame]")
         print("Example: python3 mujoco_urdf_contact_display.py logs/contact_data_20250723_155151.csv src/simulation/mujoco/assets/resource/robot/pm_v2/xml/serial_pm_v2.xml")
         print("Example: python3 mujoco_urdf_contact_display.py logs/contact_data_20250723_155151.csv src/simulation/mujoco/assets/resource/pm_v2.xml sphere")
-        print("Example: python3 mujoco_urdf_contact_display.py logs/contact_data_20250723_155151.csv src/simulation/mujoco/assets/resource/robot/pm_v2/urdf/serial_pm_v2.urdf sphere world")
+        print("Example: python3 mujoco_urdf_contact_display.py logs/contact_data_20250723_155151.csv src/simulation/mujoco/assets/resource/robot/pm_v2/urdf/serial_pm_v2.urdf sphere robot_frame")
         print("Note: The script will automatically detect if you provide an XML file and use it directly")
         print("      If you provide a URDF file, it will convert it to XML first")
         print("      Optional third argument: 'sphere' for sphere visualization, 'cylinder' for Mujoco built-in (default)")
-        print("      Optional fourth argument: 'world' for world coordinates (pos_x/y/z), 'urdf' for URDF coordinates (urdf_x/y/z_body1) (default)")
+        print("      Optional fourth argument: 'world' for world coordinates (pos_x/y/z), 'robot_frame' for robot frame coordinates (robot_frame_x/y/z) (default)")
         return
     
     csv_file = sys.argv[1]
@@ -670,7 +641,7 @@ def main():
     
     # Check for visualization type
     viz_type = "cylinder"  # default to Mujoco built-in
-    coord_type = "urdf"    # default to URDF coordinates
+    coord_type = "robot_frame"    # default to robot frame coordinates
     if len(sys.argv) >= 4:
         viz_type = sys.argv[3].lower()
         if viz_type not in ["sphere", "cylinder"]:
@@ -679,8 +650,8 @@ def main():
     
     if len(sys.argv) >= 5:
         coord_type = sys.argv[4].lower()
-        if coord_type not in ["world", "urdf"]:
-            print("Error: Coordinate type must be 'world' or 'urdf'")
+        if coord_type not in ["world", "robot_frame"]:
+            print("Error: Coordinate type must be 'world' or 'robot_frame'")
             return
     
     if not os.path.exists(csv_file):
@@ -706,22 +677,18 @@ def main():
             print("World coordinates (pos_x/y/z) not found in CSV")
             return
     else:
-        # Use URDF coordinates
-        urdf_columns = [col for col in df.columns if 'urdf' in col.lower()]
-        if not urdf_columns:
-            print("No URDF coordinate columns found")
+        # Use robot frame coordinates
+        robot_frame_columns = [col for col in df.columns if 'robot_frame' in col.lower()]
+        if not robot_frame_columns:
+            print("No robot frame coordinate columns found")
             return
         
-        # Use corrected body1 coordinates if available (new format)
-        if 'urdf_corrected_x_body1' in df.columns and 'urdf_corrected_y_body1' in df.columns and 'urdf_corrected_z_body1' in df.columns:
-            x_col, y_col, z_col = 'urdf_corrected_x_body1', 'urdf_corrected_y_body1', 'urdf_corrected_z_body1'
-            print("Using corrected URDF coordinates (urdf_corrected_x/y/z_body1)")
-        # Fallback to old format if new format not available
-        elif 'urdf_x_body1' in df.columns and 'urdf_y_body1' in df.columns and 'urdf_z_body1' in df.columns:
-            x_col, y_col, z_col = 'urdf_x_body1', 'urdf_y_body1', 'urdf_z_body1'
-            print("Using legacy URDF coordinates (urdf_x/y/z_body1)")
+        # Use robot frame coordinates (new format)
+        if 'robot_frame_x' in df.columns and 'robot_frame_y' in df.columns and 'robot_frame_z' in df.columns:
+            x_col, y_col, z_col = 'robot_frame_x', 'robot_frame_y', 'robot_frame_z'
+            print("Using robot frame coordinates (robot_frame_x/y/z)")
         else:
-            print("No complete URDF coordinate sets found")
+            print("No complete robot frame coordinate sets found")
             return
     
     # Create contact force visualization

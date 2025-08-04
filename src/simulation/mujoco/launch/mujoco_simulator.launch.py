@@ -10,7 +10,7 @@ from launch_ros.actions import Node
 from launch.actions import OpaqueFunction
 # 导入获取ROS 2包路径的工具函数
 from ament_index_python.packages import get_package_share_directory
-# 导入os模块，进行操作系统相关操作（本文件未实际用到）
+# 导入os模块，进行操作系统相关操作
 import os
 
 # 生成launch描述的主函数
@@ -44,6 +44,13 @@ def generate_launch_description():
         description='CSV文件保存路径（留空则使用默认路径）'
     )
 
+    # 添加URDF文件路径参数
+    declare_urdf_file_arg = DeclareLaunchArgument(
+        'urdf_file',
+        default_value=PathJoinSubstitution([package_dir, 'assets', 'resource', 'robot', 'pm_v2', 'urdf', 'serial_pm_v2.urdf']),
+        description='URDF文件路径'
+    )
+
     # 创建环境变量列表，供仿真器使用
     env_vars = [
         # 设置产品型号为pm_v2
@@ -64,10 +71,19 @@ def generate_launch_description():
         contact_topic = LaunchConfiguration('contact_topic').perform(context)
         save_csv_str = LaunchConfiguration('save_contact_csv').perform(context)
         csv_file_path = LaunchConfiguration('csv_file_path').perform(context)
+        urdf_file = LaunchConfiguration('urdf_file').perform(context)
         
         # 将字符串转换为布尔值
         export_contact = export_contact_str.lower() == 'true'
         save_csv = save_csv_str.lower() == 'true'
+
+        # 读取URDF文件内容
+        try:
+            with open(urdf_file, 'r') as f:
+                robot_description = f.read()
+        except FileNotFoundError:
+            print(f"URDF文件未找到: {urdf_file}")
+            robot_description = ""
 
         # 节点启动参数列表
         args = []
@@ -104,8 +120,20 @@ def generate_launch_description():
             ]
         )
 
+        # 定义robot_state_publisher节点
+        robot_state_publisher_node = Node(
+            package='robot_state_publisher',
+            executable='robot_state_publisher',
+            name='robot_state_publisher',
+            output='screen',
+            parameters=[{
+                'robot_description': robot_description,
+                'use_sim_time': True
+            }]
+        )
+
         # 返回节点对象列表
-        return [mujoco_node]
+        return [mujoco_node, robot_state_publisher_node]
 
     # 使用OpaqueFunction以便在launch时动态获取参数
     mujoco_launch = OpaqueFunction(function=launch_setup)
@@ -116,6 +144,7 @@ def generate_launch_description():
         declare_contact_topic_arg,
         declare_save_csv_arg,
         declare_csv_path_arg,
+        declare_urdf_file_arg,
         *env_vars,
         mujoco_launch
     ])
