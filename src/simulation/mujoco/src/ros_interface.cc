@@ -70,8 +70,17 @@ bool RosInterface::Initialize() {
     std::lock_guard<std::mutex> lock(csv_mutex_);
     csv_file_.open(csv_file_path_, std::ios::out);
     if (csv_file_.is_open()) {
+      // 获取关节数量
+      num_total_joints_ = config_loader_->GetNumTotalJoints();
+      
       // 写入CSV头部
-      csv_file_ << "timestamp,contact_id,geom1_name,geom2_name,pos_x,pos_y,pos_z,urdf_corrected_x_body1,urdf_corrected_y_body1,urdf_corrected_z_body1,urdf_corrected_x_body2,urdf_corrected_y_body2,urdf_corrected_z_body2,force_x,force_y,force_z,force_magnitude,torque_x,torque_y,torque_z,gap,body1_id,body2_id\n";
+      csv_file_ << "timestamp,contact_id,geom1_name,geom2_name,pos_x,pos_y,pos_z,robot_frame_x,robot_frame_y,robot_frame_z,force_x,force_y,force_z,force_magnitude,torque_x,torque_y,torque_z,base_link_x,base_link_y,base_link_z,base_link_qw,base_link_qx,base_link_qy,base_link_qz";
+      
+      // 添加关节角度列
+      for (int i = 0; i < num_total_joints_; i++) {
+        csv_file_ << ",joint_" << i << "_angle";
+      }
+      csv_file_ << "\n";
       csv_file_.flush();
       RCLCPP_INFO(node_->get_logger(), "Contact data will be saved to: %s", csv_file_path_.c_str());
     } else {
@@ -105,7 +114,7 @@ bool RosInterface::Initialize() {
       config_loader_->GetJointCommandTopic(), qos, std::bind(&RosInterface::JointCommandCallback, this, _1));
 
   // Get number of joints from config loader
-  num_total_joints_ = config_loader_->GetNumTotalJoints();
+  // num_total_joints_ = config_loader_->GetNumTotalJoints(); // This line is now moved to Initialize()
 
   // Initialize commanded values with zeros
   joint_command_.position.resize(num_total_joints_, 0.0);
@@ -495,80 +504,36 @@ void RosInterface::PublishContactForces(const mjModel* m, mjData* d) {
         int body1_id = m->geom_bodyid[contact.geom[0]];
         int body2_id = m->geom_bodyid[contact.geom[1]];
         
-        // 获取body1的pose
-        mjtNum body1_pos[3] = {d->xpos[body1_id*3], d->xpos[body1_id*3+1], d->xpos[body1_id*3+2]};
-        mjtNum body1_quat[4] = {d->xquat[body1_id*4], d->xquat[body1_id*4+1], d->xquat[body1_id*4+2], d->xquat[body1_id*4+3]};
+        // 找到base_link对应的body ID（LINK_BASE）
+        int base_link_id = -1;
+        for (int i = 0; i < m->nbody; i++) {
+          if (std::string(m->names + m->name_bodyadr[i]) == "LINK_BASE") {
+            base_link_id = i;
+            break;
+          }
+        }
         
-        // 获取body2的pose
-        mjtNum body2_pos[3] = {d->xpos[body2_id*3], d->xpos[body2_id*3+1], d->xpos[body2_id*3+2]};
-        mjtNum body2_quat[4] = {d->xquat[body2_id*4], d->xquat[body2_id*4+1], d->xquat[body2_id*4+2], d->xquat[body2_id*4+3]};
+        // 获取base_link的pose（机器人基座的世界坐标位置）
+        mjtNum base_link_pos[3] = {0, 0, 0};
+        mjtNum base_link_quat[4] = {1, 0, 0, 0}; // 默认单位四元数
+        if (base_link_id >= 0) {
+          base_link_pos[0] = d->xpos[base_link_id*3];
+          base_link_pos[1] = d->xpos[base_link_id*3+1];
+          base_link_pos[2] = d->xpos[base_link_id*3+2];
+          base_link_quat[0] = d->xquat[base_link_id*4];
+          base_link_quat[1] = d->xquat[base_link_id*4+1];
+          base_link_quat[2] = d->xquat[base_link_id*4+2];
+          base_link_quat[3] = d->xquat[base_link_id*4+3];
+        }
         
-        // 计算URDF坐标系中的位置（相对于body1）
-        // 将世界坐标中的接触点位置转换到body1的局部坐标系
-        mjtNum urdf_pos_body1[3];
-        // 计算从body1到接触点的相对位置
-        mjtNum relative_pos[3] = {pos[0] - body1_pos[0], pos[1] - body1_pos[1], pos[2] - body1_pos[2]};
-        // 将相对位置从世界坐标系转换到body1的局部坐标系
-        // 需要先计算四元数的共轭（逆），然后旋转
-        mjtNum body1_quat_conj[4];
-        mju_negQuat(body1_quat_conj, body1_quat);
-        mju_rotVecQuat(urdf_pos_body1, relative_pos, body1_quat_conj);
-        
-        // 计算URDF坐标系中的位置（相对于body2）
-        mjtNum urdf_pos_body2[3];
-        // 计算从body2到接触点的相对位置
-        mjtNum relative_pos2[3] = {pos[0] - body2_pos[0], pos[1] - body2_pos[1], pos[2] - body2_pos[2]};
-        // 将相对位置从世界坐标系转换到body2的局部坐标系
-        // 需要先计算四元数的共轭（逆），然后旋转
-        mjtNum body2_quat_conj[4];
-        mju_negQuat(body2_quat_conj, body2_quat);
-        mju_rotVecQuat(urdf_pos_body2, relative_pos2, body2_quat_conj);
-        
-        // 计算正确的URDF坐标系位置（考虑关节角度变化）
-        // 获取body1的初始pose（从模型定义中）
-        mjtNum body1_init_pos[3] = {m->body_pos[body1_id*3], m->body_pos[body1_id*3+1], m->body_pos[body1_id*3+2]};
-        mjtNum body1_init_quat[4] = {m->body_quat[body1_id*4], m->body_quat[body1_id*4+1], m->body_quat[body1_id*4+2], m->body_quat[body1_id*4+3]};
-        
-        // 获取body2的初始pose（从模型定义中）
-        mjtNum body2_init_pos[3] = {m->body_pos[body2_id*3], m->body_pos[body2_id*3+1], m->body_pos[body2_id*3+2]};
-        mjtNum body2_init_quat[4] = {m->body_quat[body2_id*4], m->body_quat[body2_id*4+1], m->body_quat[body2_id*4+2], m->body_quat[body2_id*4+3]};
-        
-        // 计算从初始pose到当前pose的变换
-        // 对于body1
-        mjtNum body1_transform_quat[4];
-        mju_mulQuat(body1_transform_quat, body1_quat, body1_init_quat); // 当前pose相对于初始pose的旋转
-        
-        // 对于body2
-        mjtNum body2_transform_quat[4];
-        mju_mulQuat(body2_transform_quat, body2_quat, body2_init_quat); // 当前pose相对于初始pose的旋转
-        
-        // 将接触点从当前body坐标系转换到URDF初始坐标系
-        // 对于body1：先转换到当前body坐标系，再转换到初始坐标系
-        mjtNum urdf_corrected_pos_body1[3];
-        // 将接触点从世界坐标系转换到body1的当前局部坐标系
-        mjtNum body1_current_local[3];
-        mju_rotVecQuat(body1_current_local, relative_pos, body1_quat_conj);
-        
-        // 将接触点从body1的当前局部坐标系转换到初始局部坐标系
-        // 需要应用从初始到当前的逆变换
-        mjtNum body1_init_quat_conj[4];
-        mju_negQuat(body1_init_quat_conj, body1_init_quat);
-        mjtNum body1_transform_inv[4];
-        mju_mulQuat(body1_transform_inv, body1_init_quat_conj, body1_quat_conj);
-        mju_rotVecQuat(urdf_corrected_pos_body1, body1_current_local, body1_transform_inv);
-        
-        // 对于body2：同样的处理
-        mjtNum urdf_corrected_pos_body2[3];
-        // 将接触点从世界坐标系转换到body2的当前局部坐标系
-        mjtNum body2_current_local[3];
-        mju_rotVecQuat(body2_current_local, relative_pos2, body2_quat_conj);
-        
-        // 将接触点从body2的当前局部坐标系转换到初始局部坐标系
-        mjtNum body2_init_quat_conj[4];
-        mju_negQuat(body2_init_quat_conj, body2_init_quat);
-        mjtNum body2_transform_inv[4];
-        mju_mulQuat(body2_transform_inv, body2_init_quat_conj, body2_quat_conj);
-        mju_rotVecQuat(urdf_corrected_pos_body2, body2_current_local, body2_transform_inv);
+        // 计算碰撞点相对于base_link的位置（机器人坐标系）
+        mjtNum robot_frame_pos[3];
+        // 计算从base_link到接触点的相对位置（世界坐标系）
+        mjtNum relative_to_base[3] = {pos[0] - base_link_pos[0], pos[1] - base_link_pos[1], pos[2] - base_link_pos[2]};
+        // 将相对位置从世界坐标系转换到base_link的局部坐标系（机器人坐标系）
+        mjtNum base_link_quat_conj[4];
+        mju_negQuat(base_link_quat_conj, base_link_quat);
+        mju_rotVecQuat(robot_frame_pos, relative_to_base, base_link_quat_conj);
         
         // 写入CSV行
         csv_file_ << std::fixed << std::setprecision(6)
@@ -579,12 +544,9 @@ void RosInterface::PublishContactForces(const mjModel* m, mjData* d) {
                   << pos[0] << ","
                   << pos[1] << ","
                   << pos[2] << ","
-                  << urdf_corrected_pos_body1[0] << ","
-                  << urdf_corrected_pos_body1[1] << ","
-                  << urdf_corrected_pos_body1[2] << ","
-                  << urdf_corrected_pos_body2[0] << ","
-                  << urdf_corrected_pos_body2[1] << ","
-                  << urdf_corrected_pos_body2[2] << ","
+                  << robot_frame_pos[0] << ","  // 机器人坐标系中的位置
+                  << robot_frame_pos[1] << ","
+                  << robot_frame_pos[2] << ","
                   << world_force[0] << ","
                   << world_force[1] << ","
                   << world_force[2] << ","
@@ -592,9 +554,24 @@ void RosInterface::PublishContactForces(const mjModel* m, mjData* d) {
                   << world_torque[0] << ","
                   << world_torque[1] << ","
                   << world_torque[2] << ","
-                  << contact.dist << ","
-                  << body1_id << ","
-                  << body2_id << "\n";
+                  << base_link_pos[0] << ","
+                  << base_link_pos[1] << ","
+                  << base_link_pos[2] << ","
+                  << base_link_quat[0] << ","
+                  << base_link_quat[1] << ","
+                  << base_link_quat[2] << ","
+                  << base_link_quat[3];
+
+        // 添加关节角度列
+        for (int i = 0; i < num_total_joints_; i++) {
+          int joint_idx = i;
+          if (is_floating_base_) {
+            // 如果有浮动基座，跳过前6个自由度（3个位置+3个姿态）
+            joint_idx = i + 6;
+          }
+          csv_file_ << "," << d->qpos[joint_idx];
+        }
+        csv_file_ << "\n";
       }
       
       // 每帧都刷新文件缓冲区（10kHz频率）
