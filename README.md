@@ -96,13 +96,13 @@ ros2 launch mujoco_simulator mujoco_simulator.launch.py save_contact_csv:=true c
 cd /home/wang22/engineai/engineai_ros2_workspace
 conda activate engineai_ros2
 # plot contact force max
-python3 scripts/analyze_contact_forces.py /home/wang22/engineai/engineai_ros2_workspace/logs/contact_data_20250729_214158.csv
+python3 scripts/analyze_contact_forces.py /home/wang22/engineai/engineai_ros2_workspace/logs/contact_data_20250804_132251.csv
 # plot contact point with force
 # 使用现有的XML文件
-python3 scripts/mujoco_urdf_contact_display.py logs/contact_data_20250729_214158.csv src/simulation/mujoco/assets/resource/pm_v2.xml
+python3 scripts/mujoco_urdf_contact_display.py logs/contact_data_20250804_132251.csv src/simulation/mujoco/assets/resource/pm_v2.xml
 
 # 或者使用URDF文件（会自动转换）
-python3 scripts/mujoco_urdf_contact_display.py logs/contact_data_20250729_214158.csv src/simulation/mujoco/assets/resource/robot/pm_v2/urdf/serial_pm_v2.urdf
+python3 scripts/mujoco_urdf_contact_display.py logs/contact_data_20250804_132251.csv src/simulation/mujoco/assets/resource/robot/pm_v2/urdf/serial_pm_v2.urdf
 
 # 使用球体可视化（推荐）
 python3 scripts/mujoco_urdf_contact_display.py logs/contact_data_20250729_214158.csv src/simulation/mujoco/assets/resource/robot/pm_v2/urdf/serial_pm_v2.urdf sphere
@@ -122,7 +122,7 @@ python3 scripts/mujoco_urdf_contact_display.py logs/contact_data_20250729_214158
 # terminal 3
 # 小球撞地测试
 conda activate engineai_ros2
-python /home/wang22/engineai/engineai_ros2_workspace/scripts/FreeBallTest/iron_ball_drop.py
+python /home/wang22/engineai/engineai_ros2_workspace/scripts/FreeBallTest/iron_ball_drop_bySensor.py
 
 
 # terminal 4

@@ -1,33 +1,167 @@
+<!-- ==================== PM V2 机器人执行器配置文件 ==================== -->
+<!-- 文件名: serial_actuators.xml -->
+<!-- 描述: 定义PM V2双足机器人的所有执行器（电机）配置 -->
+<!-- 用途: 为机器人的24个关节配置对应的电机执行器，控制关节运动 -->
+
+<!-- 根元素：定义执行器模型 -->
+<!-- model="serial_actuators": 执行器模型名称 -->
 <mujoco model="serial_actuators">
 
+    <!-- ==================== 执行器组 (Actuator Group) ==================== -->
+    <!-- 定义所有关节的执行器，每个执行器对应一个关节 -->
     <actuator>
+        <!-- ==================== 左腿执行器 (Left Leg Actuators) ==================== -->
+        <!-- 左腿包含6个关节，每个关节配置一个电机执行器 -->
+        
+        <!-- 左髋关节俯仰轴电机 -->
+        <!-- name="motor_J00_HIP_PITCH_L": 电机名称，对应J00关节
+             joint="J00_HIP_PITCH_L": 控制的关节名称
+             gear="1": 齿轮比，1表示直接驱动
+             ctrllimited="true": 启用控制限制
+             ctrlrange="-164 164": 控制范围，±164牛米（大功率电机） -->
         <motor name="motor_J00_HIP_PITCH_L" joint="J00_HIP_PITCH_L" gear="1" ctrllimited="true" ctrlrange="-164 164" />
+        
+        <!-- 左髋关节横滚轴电机 -->
+        <!-- name="motor_J01_HIP_ROLL_L": 电机名称，对应J01关节
+             ctrlrange="-164 164": 控制范围，±164牛米（大功率电机） -->
         <motor name="motor_J01_HIP_ROLL_L" joint="J01_HIP_ROLL_L" gear="1" ctrllimited="true" ctrlrange="-164 164" />
+        
+        <!-- 左髋关节偏航轴电机 -->
+        <!-- name="motor_J02_HIP_YAW_L": 电机名称，对应J02关节
+             ctrlrange="-61 61": 控制范围，±61牛米（中等功率电机） -->
         <motor name="motor_J02_HIP_YAW_L" joint="J02_HIP_YAW_L" gear="1" ctrllimited="true" ctrlrange="-61 61" />
+        
+        <!-- 左膝关节俯仰轴电机 -->
+        <!-- name="motor_J03_KNEE_PITCH_L": 电机名称，对应J03关节
+             ctrlrange="-164 164": 控制范围，±164牛米（大功率电机，支撑体重） -->
         <motor name="motor_J03_KNEE_PITCH_L" joint="J03_KNEE_PITCH_L" gear="1" ctrllimited="true" ctrlrange="-164 164" />
+        
+        <!-- 左踝关节俯仰轴电机 -->
+        <!-- name="motor_J04_ANKLE_PITCH_L": 电机名称，对应J04关节
+             ctrlrange="-61 61": 控制范围，±61牛米（中等功率电机） -->
         <motor name="motor_J04_ANKLE_PITCH_L" joint="J04_ANKLE_PITCH_L" gear="1" ctrllimited="true" ctrlrange="-61 61" />
+        
+        <!-- 左踝关节横滚轴电机 -->
+        <!-- name="motor_J05_ANKLE_ROLL_L": 电机名称，对应J05关节
+             ctrlrange="-61 61": 控制范围，±61牛米（中等功率电机） -->
         <motor name="motor_J05_ANKLE_ROLL_L" joint="J05_ANKLE_ROLL_L" gear="1" ctrllimited="true" ctrlrange="-61 61" />
+        <!-- ==================== 右腿执行器 (Right Leg Actuators) ==================== -->
+        <!-- 右腿包含6个关节，每个关节配置一个电机执行器（与左腿对称） -->
+        
+        <!-- 右髋关节俯仰轴电机 -->
+        <!-- name="motor_J06_HIP_PITCH_R": 电机名称，对应J06关节
+             ctrlrange="-164 164": 控制范围，±164牛米（大功率电机） -->
         <motor name="motor_J06_HIP_PITCH_R" joint="J06_HIP_PITCH_R" gear="1" ctrllimited="true" ctrlrange="-164 164" />
+        
+        <!-- 右髋关节横滚轴电机 -->
+        <!-- name="motor_J07_HIP_ROLL_R": 电机名称，对应J07关节
+             ctrlrange="-164 164": 控制范围，±164牛米（大功率电机） -->
         <motor name="motor_J07_HIP_ROLL_R" joint="J07_HIP_ROLL_R" gear="1" ctrllimited="true" ctrlrange="-164 164" />
+        
+        <!-- 右髋关节偏航轴电机 -->
+        <!-- name="motor_J08_HIP_YAW_R": 电机名称，对应J08关节
+             ctrlrange="-61 61": 控制范围，±61牛米（中等功率电机） -->
         <motor name="motor_J08_HIP_YAW_R" joint="J08_HIP_YAW_R" gear="1" ctrllimited="true" ctrlrange="-61 61" />
+        
+        <!-- 右膝关节俯仰轴电机 -->
+        <!-- name="motor_J09_KNEE_PITCH_R": 电机名称，对应J09关节
+             ctrlrange="-164 164": 控制范围，±164牛米（大功率电机，支撑体重） -->
         <motor name="motor_J09_KNEE_PITCH_R" joint="J09_KNEE_PITCH_R" gear="1" ctrllimited="true" ctrlrange="-164 164" />
+        
+        <!-- 右踝关节俯仰轴电机 -->
+        <!-- name="motor_J10_ANKLE_PITCH_R": 电机名称，对应J10关节
+             ctrlrange="-61 61": 控制范围，±61牛米（中等功率电机） -->
         <motor name="motor_J10_ANKLE_PITCH_R" joint="J10_ANKLE_PITCH_R" gear="1" ctrllimited="true" ctrlrange="-61 61" />
+        
+        <!-- 右踝关节横滚轴电机 -->
+        <!-- name="motor_J11_ANKLE_ROLL_R": 电机名称，对应J11关节
+             ctrlrange="-61 61": 控制范围，±61牛米（中等功率电机） -->
         <motor name="motor_J11_ANKLE_ROLL_R" joint="J11_ANKLE_ROLL_R" gear="1" ctrllimited="true" ctrlrange="-61 61" />
 
+        <!-- ==================== 躯干执行器 (Torso Actuator) ==================== -->
+        <!-- 躯干包含1个关节，配置一个电机执行器 -->
+        
+        <!-- 躯干偏航轴电机 -->
+        <!-- name="motor_J12_WAIST_YAW": 电机名称，对应J12关节
+             joint="J12_WAIST_YAW": 控制的关节名称
+             ctrlrange="-61 61": 控制范围，±61牛米（中等功率电机） -->
         <motor name="motor_J12_WAIST_YAW" joint="J12_WAIST_YAW" gear="1" ctrllimited="true" ctrlrange="-61 61" />
 
+        <!-- ==================== 左臂执行器 (Left Arm Actuators) ==================== -->
+        <!-- 左臂包含5个关节，每个关节配置一个电机执行器 -->
+        
+        <!-- 左肩关节俯仰轴电机 -->
+        <!-- name="motor_J13_SHOULDER_PITCH_L": 电机名称，对应J13关节
+             ctrlrange="-61 61": 控制范围，±61牛米（中等功率电机） -->
         <motor name="motor_J13_SHOULDER_PITCH_L" joint="J13_SHOULDER_PITCH_L" gear="1" ctrllimited="true" ctrlrange="-61 61" />
+        
+        <!-- 左肩关节横滚轴电机 -->
+        <!-- name="motor_J14_SHOULDER_ROLL_L": 电机名称，对应J14关节
+             ctrlrange="-61 61": 控制范围，±61牛米（中等功率电机） -->
         <motor name="motor_J14_SHOULDER_ROLL_L" joint="J14_SHOULDER_ROLL_L" gear="1" ctrllimited="true" ctrlrange="-61 61" />
+        
+        <!-- 左肩关节偏航轴电机 -->
+        <!-- name="motor_J15_SHOULDER_YAW_L": 电机名称，对应J15关节
+             ctrlrange="-61 61": 控制范围，±61牛米（中等功率电机） -->
         <motor name="motor_J15_SHOULDER_YAW_L" joint="J15_SHOULDER_YAW_L" gear="1" ctrllimited="true" ctrlrange="-61 61" />
+        
+        <!-- 左肘关节俯仰轴电机 -->
+        <!-- name="motor_J16_ELBOW_PITCH_L": 电机名称，对应J16关节
+             ctrlrange="-61 61": 控制范围，±61牛米（中等功率电机） -->
         <motor name="motor_J16_ELBOW_PITCH_L" joint="J16_ELBOW_PITCH_L" gear="1" ctrllimited="true" ctrlrange="-61 61" />
+        
+        <!-- 左肘关节偏航轴电机 -->
+        <!-- name="motor_J17_ELBOW_YAW_L": 电机名称，对应J17关节
+             ctrlrange="-61 61": 控制范围，±61牛米（中等功率电机） -->
         <motor name="motor_J17_ELBOW_YAW_L" joint="J17_ELBOW_YAW_L" gear="1" ctrllimited="true" ctrlrange="-61 61" />
+        <!-- ==================== 右臂执行器 (Right Arm Actuators) ==================== -->
+        <!-- 右臂包含5个关节，每个关节配置一个电机执行器（与左臂对称） -->
+        
+        <!-- 右肩关节俯仰轴电机 -->
+        <!-- name="motor_J18_SHOULDER_PITCH_R": 电机名称，对应J18关节
+             ctrlrange="-61 61": 控制范围，±61牛米（中等功率电机） -->
         <motor name="motor_J18_SHOULDER_PITCH_R" joint="J18_SHOULDER_PITCH_R" gear="1" ctrllimited="true" ctrlrange="-61 61" />
+        
+        <!-- 右肩关节横滚轴电机 -->
+        <!-- name="motor_J19_SHOULDER_ROLL_R": 电机名称，对应J19关节
+             ctrlrange="-61 61": 控制范围，±61牛米（中等功率电机） -->
         <motor name="motor_J19_SHOULDER_ROLL_R" joint="J19_SHOULDER_ROLL_R" gear="1" ctrllimited="true" ctrlrange="-61 61" />
+        
+        <!-- 右肩关节偏航轴电机 -->
+        <!-- name="motor_J20_SHOULDER_YAW_R": 电机名称，对应J20关节
+             ctrlrange="-61 61": 控制范围，±61牛米（中等功率电机） -->
         <motor name="motor_J20_SHOULDER_YAW_R" joint="J20_SHOULDER_YAW_R" gear="1" ctrllimited="true" ctrlrange="-61 61" />
+        
+        <!-- 右肘关节俯仰轴电机 -->
+        <!-- name="motor_J21_ELBOW_PITCH_R": 电机名称，对应J21关节
+             ctrlrange="-61 61": 控制范围，±61牛米（中等功率电机） -->
         <motor name="motor_J21_ELBOW_PITCH_R" joint="J21_ELBOW_PITCH_R" gear="1" ctrllimited="true" ctrlrange="-61 61" />
+        
+        <!-- 右肘关节偏航轴电机 -->
+        <!-- name="motor_J22_ELBOW_YAW_R": 电机名称，对应J22关节
+             ctrlrange="-61 61": 控制范围，±61牛米（中等功率电机） -->
         <motor name="motor_J22_ELBOW_YAW_R" joint="J22_ELBOW_YAW_R" gear="1" ctrllimited="true" ctrlrange="-61 61" />
 
+        <!-- ==================== 头部执行器 (Head Actuator) ==================== -->
+        <!-- 头部包含1个关节，配置一个电机执行器 -->
+        
+        <!-- 头部偏航轴电机 -->
+        <!-- name="motor_J23_HEAD_YAW": 电机名称，对应J23关节（最后一个关节）
+             joint="J23_HEAD_YAW": 控制的关节名称
+             ctrlrange="-61 61": 控制范围，±61牛米（中等功率电机） -->
         <motor name="motor_J23_HEAD_YAW" joint="J23_HEAD_YAW" gear="1" ctrllimited="true" ctrlrange="-61 61" />
     </actuator>
 
+    <!-- ==================== 文件结束 ==================== -->
+    <!-- 此文件定义了PM V2双足机器人的所有执行器配置 -->
+    <!-- 包含24个电机执行器，对应24个关节： -->
+    <!-- - 左腿：6个执行器 (motor_J00-J05) -->
+    <!-- - 右腿：6个执行器 (motor_J06-J11) -->
+    <!-- - 躯干：1个执行器 (motor_J12) -->
+    <!-- - 左臂：5个执行器 (motor_J13-J17) -->
+    <!-- - 右臂：5个执行器 (motor_J18-J22) -->
+    <!-- - 头部：1个执行器 (motor_J23) -->
+    <!-- 电机功率分类： -->
+    <!-- - 大功率电机 (±164牛米)：髋关节和膝关节 -->
+    <!-- - 中等功率电机 (±61牛米)：其他关节 -->
 </mujoco>
