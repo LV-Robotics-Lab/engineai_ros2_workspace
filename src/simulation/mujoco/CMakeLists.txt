@@ -29,6 +29,7 @@ find_package(rclcpp REQUIRED)
 find_package(interface_protocol REQUIRED)
 find_package(std_msgs REQUIRED)
 find_package(geometry_msgs REQUIRED)
+find_package(visualization_msgs REQUIRED)
 
 # Find third-party packages exactly like the LCM version
 find_package(GTest REQUIRED)
@@ -94,6 +95,7 @@ ament_target_dependencies(mujoco_simulator
   interface_protocol
   std_msgs
   geometry_msgs
+  visualization_msgs
 )
 
 install(TARGETS

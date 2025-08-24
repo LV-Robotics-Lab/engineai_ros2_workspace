@@ -416,3 +416,38 @@ void SimManager::PhysicsThread(std::string_view filename) {
 
   RCLCPP_INFO(logger, "Physics thread ending, cleaning up resources");
 }
+
+void SimManager::ComputeStandardPoseWorldTransformsFromKey(mjModel* m, const char* key_name) {
+  // 1) 找到 keyframe id
+  int key_id = mj_name2id(m, mjOBJ_KEY, key_name);
+  if (key_id < 0) {
+    RCLCPP_WARN(node_->get_logger(), "Keyframe '%s' not found, fallback to zero pose.", key_name);
+  }
+
+  // 2) 建临时 data，设到 keyframe
+  mjData* dstd = mj_makeData(m);
+  if (key_id >= 0) {
+    mj_resetDataKeyframe(m, dstd, key_id);   // 直接把 qpos/qvel/act 置为 keyframe
+  } else {
+    // 兜底：零位（如果你想把 base z 设为 0.82，也能在这里设置）
+    mju_zero(dstd->qpos, m->nq);
+    if (m->jnt_type[0] == mjJNT_FREE) {
+      dstd->qpos[0] = 1; dstd->qpos[1] = dstd->qpos[2] = dstd->qpos[3] = 0; // quat=[1,0,0,0]
+      dstd->qpos[4] = dstd->qpos[5] = dstd->qpos[6] = 0;                     // base at origin
+      dstd->qpos[6] = 0.82; // 如果需要把 z 设为 0.82，可解注（注意顺序按你的模型而定）
+    }
+  }
+
+  // 3) 前向一次得到标准姿态的 body 世界位姿
+  mj_forward(m, dstd);
+
+  // 4) 缓存
+  std_xpos_.assign(dstd->xpos, dstd->xpos + 3*m->nbody);
+  std_xmat_.assign(dstd->xmat, dstd->xmat + 9*m->nbody);
+
+  mj_deleteData(dstd);
+  RCLCPP_INFO(node_->get_logger(), "Standard pose cached from keyframe '%s' (id=%d).",
+              key_name, key_id);
+}
+
+

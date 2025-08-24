@@ -12,9 +12,9 @@
 #include "interface_protocol/msg/joint_state.hpp"
 #include "interface_protocol/msg/motion_state.hpp"
 #include "rclcpp/rclcpp.hpp"
-
-// MuJoCo includes
 #include <mujoco/mujoco.h>
+#include <std_msgs/msg/float32_multi_array.hpp>
+#include <visualization_msgs/msg/marker_array.hpp>
 
 // Forward declarations
 namespace mujoco {
@@ -44,6 +44,8 @@ class RosInterface {
   // Set the current mjModel and mjData
   void SetModelAndData(mjModel* model, mjData* data);
 
+  void PublishContacts(const mjModel* m, const mjData* d);
+
   // Get the ROS node
   rclcpp::Node::SharedPtr GetNode() const { return node_; }
 
@@ -55,7 +57,9 @@ class RosInterface {
   rclcpp::Publisher<interface_protocol::msg::JointState>::SharedPtr joint_state_pub_;
   rclcpp::Publisher<interface_protocol::msg::ImuInfo>::SharedPtr imu_pub_;
   rclcpp::Publisher<interface_protocol::msg::MotionState>::SharedPtr motion_state_pub_;
-
+  rclcpp::Publisher<std_msgs::msg::Float32MultiArray>::SharedPtr contact_pub_;
+  rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr contact_marker_pub_;
+  
   // Subscribers
   rclcpp::Subscription<interface_protocol::msg::JointCommand>::SharedPtr joint_cmd_sub_;
 
