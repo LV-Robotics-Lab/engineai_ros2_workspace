@@ -34,6 +34,7 @@ class ConfigLoader {
   // 碰撞模型配置
   bool UseSimplifiedGeometry() const { return use_simplified_geometry_; }
   std::string GetCollisionModelCondition() const;
+  std::string GetXmlFilenameByCollisionType() const;  // 根据碰撞类型获取对应的XML文件名
 
   // Asset path related methods
   std::string GetModelFilePath() const;
@@ -64,6 +65,8 @@ class ConfigLoader {
 
   // 碰撞模型配置
   bool use_simplified_geometry_ = false;
+  std::string simplified_xml_filename_;  // 简化几何体XML文件名
+  std::string mesh_xml_filename_;        // 真实mesh XML文件名
 };
 
 #endif  // CONFIG_LOADER_H_

@@ -274,6 +274,7 @@ def urdf_meshes_to_single(urdf_path, xml_path, output_path):
                     mesh_absolute_path = os.path.abspath(mesh_absolute_path)
                 else:
                     mesh_absolute_path = mesh_path
+                    mesh_filename = os.path.basename(mesh_path)
                 
                 print(f"  加载mesh: {mesh_filename}")
                 
@@ -307,7 +308,7 @@ def urdf_meshes_to_single(urdf_path, xml_path, output_path):
 # 示例：合并URDF中的mesh为一个STL文件
 if __name__ == "__main__":
     urdf_meshes_to_single(
-        urdf_path=r"D:\Test\engineai\engineai_ros2_workspace\src\simulation\mujoco\assets\resource\robot\pm_v2\urdf\serial_pm_v2 copy.urdf",  # 使用修复后的URDF路径
-        xml_path=r"D:\Test\engineai\engineai_ros2_workspace\src\simulation\mujoco\assets\resource\robot\pm_v2\xml\serial_pm_v2.xml",  # XML文件路径
-        output_path=r"D:\Test\engineai\engineai_ros2_workspace\src\simulation\mujoco\assets\resource\robot\pm_v2\meshes\serial_pm_v2_combined.stl"       # 输出合并后的mesh路径
+        urdf_path=r"/home/wang22/engineai/engineai_ros2_workspace/src/simulation/mujoco/assets/resource/robot/pm_v2/urdf/serial_pm_v2_fixed.urdf",  # 使用修复后的URDF路径
+        xml_path=r"/home/wang22/engineai/engineai_ros2_workspace/src/simulation/mujoco/assets/resource/robot/pm_v2/xml/serial_pm_v2.xml",  # XML文件路径
+        output_path=r"/home/wang22/engineai/engineai_ros2_workspace/src/simulation/mujoco/assets/resource/robot/pm_v2/meshes/serial_pm_v2_combined.stl"       # 输出合并后的mesh路径
     )

@@ -95,16 +95,16 @@ ros2 launch mujoco_simulator mujoco_simulator.launch.py save_contact_csv:=true c
 cd /home/wang22/engineai/engineai_ros2_workspace
 conda activate engineai_ros2
 # plot contact force max
-python3 scripts/analyze_contact_forces.py /home/wang22/engineai/engineai_ros2_workspace/logs/contact_data_20250804_132251.csv
+python3 scripts/analyze_contact_forces.py /home/wang22/engineai/engineai_ros2_workspace/logs/contact_data_20250805_152300.csv
 # plot contact point with force
 # 使用现有的XML文件
-python3 scripts/mujoco_urdf_contact_display.py logs/contact_data_20250804_132251.csv src/simulation/mujoco/assets/resource/pm_v2.xml
+python3 scripts/mujoco_urdf_contact_display.py logs/contact_data_20250805_152300.csv src/simulation/mujoco/assets/resource/pm_v2.xml
 
 # 或者使用URDF文件（会自动转换）
 python3 scripts/mujoco_urdf_contact_display.py logs/contact_data_20250804_132251.csv src/simulation/mujoco/assets/resource/robot/pm_v2/urdf/serial_pm_v2.urdf
 
 # 使用球体可视化（推荐）
-python3 scripts/mujoco_urdf_contact_display.py logs/contact_data_20250804_203133.csv src/simulation/mujoco/assets/resource/robot/pm_v2/urdf/serial_pm_v2.urdf sphere
+python3 scripts/mujoco_urdf_contact_display.py logs/contact_data_20250805_152300.csv src/simulation/mujoco/assets/resource/robot/pm_v2/urdf/serial_pm_v2.urdf sphere
 
 # 使用球体可视化 + 世界坐标
 python3 scripts/mujoco_urdf_contact_display.py logs/contact_data_20250729_214158.csv src/simulation/mujoco/assets/resource/robot/pm_v2/urdf/serial_pm_v2.urdf sphere world
@@ -126,8 +126,10 @@ python /home/wang22/engineai/engineai_ros2_workspace/scripts/FreeBallTest/iron_b
 
 # terminal 4
 # 根据urdf和xml里的初始位置，把机器人多link的mesh合成一个整体mesh
-conda activate engineai_ros2
-python engineai_ros2_workspace/scripts/MeshCombine/urdf_mesh_combiner.py
+# main中，urdf提供机器人link父子关系，xml提供初始位姿，
+chmod +x ./scripts/MeshCombine/install_dependencies.sh
+./scripts/MeshCombine/install_dependencies.sh
+python ./scripts/MeshCombine/urdf_mesh_combiner.py
 
 git push origin bench
 

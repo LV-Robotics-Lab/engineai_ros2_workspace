@@ -1,4 +1,14 @@
+<!-- ==================== MuJoCo 主配置文件 ==================== -->
+<!-- 文件名: pm_v2.xml -->
+<!-- 描述: PM V2 双足机器人的主配置文件，根据配置选择不同的碰撞模型 -->
+<!-- 用途: 统一管理机器人和环境的配置 -->
+
 <mujoco model="global_model">
+    <!-- 机器人模型文件 -->
+    <!-- 注意：实际的文件选择由 SimManager 根据 pm_v2.yaml 中的 use_simplified_geometry 参数决定 -->
+    <!-- SimManager 会动态修改 serial_links.xml 的内容来实现选择 -->
     <include file="robot/pm_v2/xml/serial_pm_v2.xml"/>
+    
+    <!-- 环境配置 -->
     <include file="environment/ground.xml"/>
 </mujoco>

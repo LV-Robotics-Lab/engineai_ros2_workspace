@@ -248,11 +248,23 @@ mjModel* SimManager::LoadModel(std::string_view file) {
   } else {
     // 获取碰撞模型条件
     std::string collision_condition = "simplified";  // 默认值
+    std::string xml_filename = "pm_v2.xml";  // 默认使用主配置文件
+    
     if (config_loader_) {
       collision_condition = config_loader_->GetCollisionModelCondition();
+      // 根据碰撞类型选择对应的XML文件
+      xml_filename = config_loader_->GetXmlFilenameByCollisionType();
     }
     
     RCLCPP_INFO(logger, "Loading XML with collision condition: %s", collision_condition.c_str());
+    RCLCPP_INFO(logger, "Selected XML file: %s", xml_filename.c_str());
+    
+    // 构建完整的XML文件路径
+    std::string full_xml_path = config_loader_ ? 
+        config_loader_->GetResourceDir() + "/" + xml_filename : 
+        filename;
+    
+    RCLCPP_INFO(logger, "Full XML path: %s", full_xml_path.c_str());
     
     // 设置编译条件
     mjVFS vfs;
@@ -262,11 +274,11 @@ mjModel* SimManager::LoadModel(std::string_view file) {
     mjOption opt;
     mj_defaultOption(&opt);
     
-    // 注意：MuJoCo的碰撞模型选择应该在XML文件中配置
-    // 这里我们直接加载模型，让MuJoCo使用默认的编译设置
-    // 如果需要特定的碰撞模型，应该在XML文件中使用不同的几何体定义
+    // 加载选择的XML文件
+    char xml_path[mj::Simulate::kMaxFilenameLength];
+    mju::strcpy_arr(xml_path, full_xml_path.c_str());
     
-    mnew = mj_loadXML(filename, &vfs, mj_load_error_.data(), mj_load_error_.size());
+    mnew = mj_loadXML(xml_path, &vfs, mj_load_error_.data(), mj_load_error_.size());
     if (mj_load_error_[0]) {
       size_t error_length = std::strlen(mj_load_error_.data());
       if (mj_load_error_[error_length - 1] == '\n') {
