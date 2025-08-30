@@ -62,7 +62,7 @@
             <geom type="mesh" rgba="0.75294 0.75294 0.75294 1" mesh="LINK_HIP_ROLL_L" class="visual"/>
             
             <!-- 碰撞几何体 - 使用mesh模型 -->
-            <geom type="mesh" mesh="LINK_HIP_ROLL_L" class="collision"/>
+            <geom class="collision_hip_roll_left"/>
             
             <!-- 左髋关节偏航轴链接 -->
             <!-- name="LINK_HIP_YAW_L": 左髋关节偏航轴链接名称 -->
@@ -82,7 +82,7 @@
                 <geom type="mesh" rgba="0.75294 0.75294 0.75294 1" mesh="LINK_HIP_YAW_L" class="visual"/>
                 
                 <!-- 碰撞几何体 - 使用mesh模型 -->
-                <geom type="mesh" mesh="LINK_HIP_YAW_L" class="collision"/>
+                <geom class="collision_hip_yaw_left"/>
                 
                 <!-- 左膝关节俯仰轴链接 -->
                 <!-- name="LINK_KNEE_PITCH_L": 左膝关节俯仰轴链接名称 -->
@@ -123,7 +123,7 @@
                         <geom type="mesh" rgba="0.75294 0.75294 0.75294 1" mesh="LINK_ANKLE_PITCH_L" class="visual"/>
                         
                         <!-- 碰撞几何体 - 使用mesh模型 -->
-                        <geom type="mesh" mesh="LINK_ANKLE_PITCH_L" class="collision"/>
+                        <geom class="collision_ankle_pitch_left"/>
                         
                         <!-- 左踝关节横滚轴链接 -->
                         <!-- name="LINK_ANKLE_ROLL_L": 左踝关节横滚轴链接名称 -->
@@ -143,7 +143,7 @@
                             <geom type="mesh" rgba="0.75294 0.75294 0.75294 1" mesh="LINK_ANKLE_ROLL_L" class="visual"/>
                             
                             <!-- 碰撞几何体 - 使用mesh模型 -->
-                            <geom type="mesh" mesh="LINK_ANKLE_ROLL_L" class="collision"/>
+                            <geom class="collision_left_foot"/>
                             
                             <!-- 左脚链接（末端执行器） -->
                             <!-- name="LINK_FOOT_L": 左脚链接名称，作为末端执行器 -->
@@ -154,9 +154,9 @@
                                 
                                 <!-- 碰撞几何体 -->
                                 <!-- class="collision_left_foot": 左脚碰撞几何体 -->
-                                <geom class="collision_left_foot"/>
+                                <!-- <geom class="collision_left_foot"/> -->
                                 <!-- class="collision_left_foot_toe": 左脚脚趾碰撞几何体 -->
-                                <geom class="collision_left_foot_toe"/>
+                                <!-- <geom class="collision_left_foot_toe"/> -->
                                 
                                 <!-- 传感器站点 -->
                                 <!-- name="force_sensor_left_foot": 左脚力传感器站点 -->
@@ -201,7 +201,7 @@
             <geom type="mesh" rgba="0.75294 0.75294 0.75294 1" mesh="LINK_HIP_ROLL_R" class="visual"/>
             
             <!-- 碰撞几何体 - 使用mesh模型 -->
-            <geom type="mesh" mesh="LINK_HIP_ROLL_R" class="collision"/>
+            <geom class="collision_hip_roll_right"/>
             
             <body name="LINK_HIP_YAW_R" pos="-0.03139 0.0015966 -0.086016">
                 <inertial pos="-0.00365713 -0.00305643 -0.096268" quat="0.98114 0.00638485 -0.0440517 0.188105" mass="1.83146" diaginertia="0.0162512 0.0159872 0.00326512"/>
@@ -209,7 +209,7 @@
                 <geom type="mesh" rgba="0.75294 0.75294 0.75294 1" mesh="LINK_HIP_YAW_R" class="visual"/>
                 
                 <!-- 碰撞几何体 - 使用mesh模型 -->
-                <geom type="mesh" mesh="LINK_HIP_YAW_R" class="collision"/>
+                <geom class="collision_hip_yaw_right"/>
                 
                 <body name="LINK_KNEE_PITCH_R" pos="-0.02602 2.8566e-05 -0.23655">
                     <inertial pos="-0.00985503 -0.00214867 -0.118986" quat="0.654986 -0.0492067 -0.0356218 0.753195" mass="4.29186" diaginertia="0.0544863 0.0534591 0.00492098"/>
@@ -222,7 +222,7 @@
                         <geom type="mesh" rgba="0.75294 0.75294 0.75294 1" mesh="LINK_ANKLE_PITCH_R" class="visual"/>
                         
                         <!-- 碰撞几何体 - 使用mesh模型 -->
-                        <geom type="mesh" mesh="LINK_ANKLE_PITCH_R" class="collision"/>
+                        <geom class="collision_ankle_pitch_right"/>
                         
                         <body name="LINK_ANKLE_ROLL_R" pos="0 0 -0.015">
                             <inertial pos="0.0147067 1.452e-05 -0.0222658" quat="0.00494082 0.685204 -0.00483926 0.728318" mass="0.715592" diaginertia="0.00292483 0.00275765 0.000566261"/>
@@ -230,7 +230,7 @@
                             <geom type="mesh" rgba="0.75294 0.75294 0.75294 1" mesh="LINK_ANKLE_ROLL_R" class="visual"/>
                             
                             <!-- 碰撞几何体 - 使用mesh模型 -->
-                            <geom type="mesh" mesh="LINK_ANKLE_ROLL_R" class="collision"/>
+                            <!-- <geom class="collision_right_foot"/> -->
                             
                             <body name="LINK_FOOT_R">
                                 <inertial pos="0 0 0" mass="1e-3" diaginertia="1e-12 1e-12 1e-12"/>
@@ -267,7 +267,7 @@
         <geom type="mesh" rgba="0.75294 0.75294 0.75294 1" mesh="LINK_TORSO_YAW" class="visual"/>
         
         <!-- 碰撞几何体 - 使用mesh模型 -->
-        <geom type="mesh" mesh="LINK_TORSO_YAW" class="collision"/>
+        <geom class="collision_torso_yaw"/>
         
         <!-- ==================== 左臂运动链 (Left Arm Kinematic Chain) ==================== -->
         <!-- 左肩关节俯仰轴链接 -->
@@ -289,7 +289,7 @@
             <geom type="mesh" rgba="0.75294 0.75294 0.75294 1" mesh="LINK_SHOULDER_PITCH_L" class="visual"/>
             
             <!-- 碰撞几何体 - 使用mesh模型 -->
-            <geom type="mesh" mesh="LINK_SHOULDER_PITCH_L" class="collision"/>
+            <geom class="collision_shoulder_pitch_left"/>
             
             <body name="LINK_SHOULDER_ROLL_L" pos="-0.0371 0.066941 -0.020838">
                 <inertial pos="0.037412 0.00677175 -0.0267801" quat="0.694988 -0.115505 0.0954646 0.703233" mass="0.510813" diaginertia="0.0013316 0.000992823 0.000901346"/>
@@ -297,7 +297,7 @@
                 <geom type="mesh" rgba="0.75294 0.75294 0.75294 1" mesh="LINK_SHOULDER_ROLL_L" class="visual"/>
                 
                 <!-- 碰撞几何体 - 使用mesh模型 -->
-                <geom type="mesh" mesh="LINK_SHOULDER_ROLL_L" class="collision"/>
+                <geom class="collision_shoulder_roll_left"/>
                 
                 <body name="LINK_SHOULDER_YAW_L" pos="0.0371 0.017645 -0.070132">
                     <inertial pos="-0.00084545 0.00219391 -0.045665" quat="0.999922 -0.00834297 -0.00593057 0.00715565" mass="0.909138" diaginertia="0.00162177 0.00150888 0.000787082"/>
@@ -305,7 +305,7 @@
                     <geom type="mesh" rgba="0.75294 0.75294 0.75294 1" mesh="LINK_SHOULDER_YAW_L" class="visual"/>
                     
                     <!-- 碰撞几何体 - 使用mesh模型 -->
-                    <geom type="mesh" mesh="LINK_SHOULDER_YAW_L" class="collision"/>
+                    <geom class="collision_shoulder_yaw_left"/>
                     
                     <body name="LINK_ELBOW_PITCH_L" pos="0 0.0065994 -0.10487">
                         <inertial pos="0.00298237 0.00186711 -0.0651846" quat="0.850602 -0.0227837 0.0480929 0.52311" mass="1.38061" diaginertia="0.00600679 0.00586987 0.000776466"/>
@@ -336,7 +336,7 @@
             <geom type="mesh" rgba="0.75294 0.75294 0.75294 1" mesh="LINK_SHOULDER_PITCH_R" class="visual"/>
             
             <!-- 碰撞几何体 - 使用mesh模型 -->
-            <geom type="mesh" mesh="LINK_SHOULDER_PITCH_R" class="collision"/>
+            <geom class="collision_shoulder_pitch_right"/>
             
             <body name="LINK_SHOULDER_ROLL_R" pos="-0.0371 -0.066941 -0.020838">
                 <inertial pos="0.0374584 -0.00675724 -0.0267111" quat="0.702814 0.0963237 -0.114817 0.695408" mass="0.509678" diaginertia="0.00132926 0.000991635 0.000900119"/>
@@ -344,7 +344,7 @@
                 <geom type="mesh" rgba="0.75294 0.75294 0.75294 1" mesh="LINK_SHOULDER_ROLL_R" class="visual"/>
                 
                 <!-- 碰撞几何体 - 使用mesh模型 -->
-                <geom type="mesh" mesh="LINK_SHOULDER_ROLL_R" class="collision"/>
+                <geom class="collision_shoulder_roll_right"/>
                 
                 <body name="LINK_SHOULDER_YAW_R" pos="0.0371 -0.017644 -0.070132">
                     <inertial pos="-0.00081742 -0.00217677 -0.0456691" quat="0.999939 0.00845362 -0.00629935 -0.00342591" mass="0.908517" diaginertia="0.00162116 0.00150819 0.000786341"/>
@@ -352,7 +352,7 @@
                     <geom type="mesh" rgba="0.75294 0.75294 0.75294 1" mesh="LINK_SHOULDER_YAW_R" class="visual"/>
                     
                     <!-- 碰撞几何体 - 使用mesh模型 -->
-                    <geom type="mesh" mesh="LINK_SHOULDER_YAW_R" class="collision"/>
+                    <geom class="collision_shoulder_yaw_right"/>
                     
                     <body name="LINK_ELBOW_PITCH_R" pos="0 -0.006598 -0.10487">
                         <inertial pos="0.00302244 -0.00191447 -0.0652115" quat="0.525604 0.0481342 -0.0227734 0.849061" mass="1.38163" diaginertia="0.00600585 0.00586931 0.000776263"/>

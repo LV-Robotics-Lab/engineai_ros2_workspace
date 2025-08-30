@@ -126,6 +126,71 @@
                     <geom type="mesh" mesh="LINK_KNEE_PITCH_R" rgba="0.804 0.361 0.031 0.5"/>
                     <!-- <geom type="sphere" size="0.062" pos="0.004 0.00 -0.0" rgba="0.804 0.361 0.031 0.5"/> -->
                 </default>
+
+                <!-- 左髋关节横滚轴碰撞几何体 - 使用mesh模型进行精确碰撞检测 -->
+                <default class="collision_hip_roll_left">
+                    <geom type="mesh" mesh="LINK_HIP_ROLL_L" rgba="0.804 0.361 0.031 0.5"/>
+                </default>
+
+                <!-- 左髋关节偏航轴碰撞几何体 - 使用mesh模型进行精确碰撞检测 -->
+                <default class="collision_hip_yaw_left">
+                    <geom type="mesh" mesh="LINK_HIP_YAW_L" rgba="0.804 0.361 0.031 0.5"/>
+                </default>
+
+                <!-- 左踝关节俯仰轴碰撞几何体 - 使用mesh模型进行精确碰撞检测 -->
+                <default class="collision_ankle_pitch_left">
+                    <geom type="mesh" mesh="LINK_ANKLE_PITCH_L" rgba="0.804 0.361 0.031 0.5"/>
+                </default>
+
+                <!-- 右髋关节横滚轴碰撞几何体 - 使用mesh模型进行精确碰撞检测 -->
+                <default class="collision_hip_roll_right">
+                    <geom type="mesh" mesh="LINK_HIP_ROLL_R" rgba="0.804 0.361 0.031 0.5"/>
+                </default>
+
+                <!-- 右髋关节偏航轴碰撞几何体 - 使用mesh模型进行精确碰撞检测 -->
+                <default class="collision_hip_yaw_right">
+                    <geom type="mesh" mesh="LINK_HIP_YAW_R" rgba="0.804 0.361 0.031 0.5"/>
+                </default>
+
+                <!-- 右踝关节俯仰轴碰撞几何体 - 使用mesh模型进行精确碰撞检测 -->
+                <default class="collision_ankle_pitch_right">
+                    <geom type="mesh" mesh="LINK_ANKLE_PITCH_R" rgba="0.804 0.361 0.031 0.5"/>
+                </default>
+
+                <!-- 躯干偏航轴碰撞几何体 - 使用mesh模型进行精确碰撞检测 -->
+                <default class="collision_torso_yaw">
+                    <geom type="mesh" mesh="LINK_TORSO_YAW" rgba="0.804 0.361 0.031 0.5"/>
+                </default>
+
+                <!-- 左肩关节俯仰轴碰撞几何体 - 使用mesh模型进行精确碰撞检测 -->
+                <default class="collision_shoulder_pitch_left">
+                    <geom type="mesh" mesh="LINK_SHOULDER_PITCH_L" rgba="0.804 0.361 0.031 0.5"/>
+                </default>
+
+                <!-- 左肩关节横滚轴碰撞几何体 - 使用mesh模型进行精确碰撞检测 -->
+                <default class="collision_shoulder_roll_left">
+                    <geom type="mesh" mesh="LINK_SHOULDER_ROLL_L" rgba="0.804 0.361 0.031 0.5"/>
+                </default>
+
+                <!-- 左肩关节偏航轴碰撞几何体 - 使用mesh模型进行精确碰撞检测 -->
+                <default class="collision_shoulder_yaw_left">
+                    <geom type="mesh" mesh="LINK_SHOULDER_YAW_L" rgba="0.804 0.361 0.031 0.5"/>
+                </default>
+
+                <!-- 右肩关节俯仰轴碰撞几何体 - 使用mesh模型进行精确碰撞检测 -->
+                <default class="collision_shoulder_pitch_right">
+                    <geom type="mesh" mesh="LINK_SHOULDER_PITCH_R" rgba="0.804 0.361 0.031 0.5"/>
+                </default>
+
+                <!-- 右肩关节横滚轴碰撞几何体 - 使用mesh模型进行精确碰撞检测 -->
+                <default class="collision_shoulder_roll_right">
+                    <geom type="mesh" mesh="LINK_SHOULDER_ROLL_R" rgba="0.804 0.361 0.031 0.5"/>
+                </default>
+
+                <!-- 右肩关节偏航轴碰撞几何体 - 使用mesh模型进行精确碰撞检测 -->
+                <default class="collision_shoulder_yaw_right">
+                    <geom type="mesh" mesh="LINK_SHOULDER_YAW_R" rgba="0.804 0.361 0.031 0.5"/>
+                </default>
             </default>
 
             <!-- ==================== 视觉几何体组 (Visual Group) ==================== -->
@@ -236,14 +301,23 @@
             接下来5个：右臂关节 (肩部俯仰=0(前后甩手）, 横滚=0, 偏航=0, 肘部俯仰=0, 偏航=0)
             最后1个：头部偏航关节 (偏航=0)
         -->
-        <key name="floating_base_homing" qpos="
+        <!-- <key name="floating_base_homing" qpos="
         0 0 0.82 
         1 0 0 0 
         0 0 -0.12 0.24 -0.12 0 
         0 0 -0.12 0.24 -0.12 0 
         0 
-        0 0.12 0 0 0 
-        0 -0.12 0 0 0 
+        0 0 0 0 0 
+        0 -0 0 0 0 
+        0"/> -->
+        <key name="floating_base_homing" qpos="
+        0 0 0.83 
+        1 0 0 0 
+        0 0 -0 0 -0 0 
+        0 0 -0 0 -0 0 
+        0 
+        0 0.1 0 0 0 
+        0 -0.1 0 0 0 
         0"/>
     </keyframe>
 
