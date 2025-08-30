@@ -1,5 +1,0 @@
-<<<<<<< HEAD
-这是community分支的测试文件
-=======
-这是conflict-demo分支的测试文件
->>>>>>> conflict-demo
