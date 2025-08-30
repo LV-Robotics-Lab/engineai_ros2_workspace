@@ -38,7 +38,8 @@
                 
                 <!-- 头部碰撞几何体 - 使用mesh模型进行精确碰撞检测 -->
                 <default class="collision_head">
-                    <geom type="mesh" mesh="LINK_HEAD_YAW" condim="6" solimp="0.9 0.95" solref="0.0005 1" rgba="0.804 0.361 0.031 0.5"/>
+                    <!-- <geom type="mesh" mesh="LINK_HEAD_YAW" condim="6" solimp="0.9 0.95" solref="0.0005 1" rgba="0.804 0.361 0.031 0.5"/> -->
+                    <geom type="sphere" size="0.09" pos="0.01 0.0 0.11" condim="6" solimp="0.9 0.95" solref="0.0005 1" rgba="0.804 0.361 0.031 0.5"/>
                 </default>
 
                 <!-- 基座上部碰撞几何体 - 使用mesh模型进行精确碰撞检测 -->
@@ -53,22 +54,26 @@
 
                 <!-- 左脚碰撞几何体 - 使用mesh模型进行精确碰撞检测 -->
                 <default class="collision_left_foot">
-                    <geom type="mesh" mesh="LINK_ANKLE_ROLL_L" condim="6" solimp="0.9 0.95" solref="0.0005 1" rgba="0.804 0.361 0.031 0.5"/>
+                    <!-- <geom type="mesh" mesh="LINK_ANKLE_ROLL_L" condim="6" solimp="0.9 0.95" solref="0.0005 1" rgba="0.804 0.361 0.031 0.5"/> -->
+                    <geom type="box" size="0.102292353 0.053555 0.01" pos="0.0170 0.00166 -0.03631" condim="6" solimp="0.9 0.95" solref="0.0005 1" rgba="0.804 0.361 0.031 0.5"/>
                 </default>
 
                 <!-- 左脚脚趾碰撞几何体 - 使用mesh模型进行精确碰撞检测 -->
                 <default class="collision_left_foot_toe">
-                    <geom type="mesh" mesh="LINK_ANKLE_ROLL_L" condim="6" solimp="0.9 0.95" solref="0.0005 1" rgba="0.804 0.361 0.031 0.5"/>
+                    <!-- <geom type="mesh" mesh="LINK_ANKLE_ROLL_L" condim="6" solimp="0.9 0.95" solref="0.0005 1" rgba="0.804 0.361 0.031 0.5"/> -->
+                    <geom type="box" size="0.028 0.047805 0.01" quat="0.9741537 0 -0.2258863 0" pos="0.139 0.0 -0.0235" condim="6" solimp="0.9 0.95" solref="0.0005 1" rgba="0.804 0.361 0.031 0.5"/>
                 </default>
 
                 <!-- 右脚碰撞几何体 - 使用mesh模型进行精确碰撞检测 -->
                 <default class="collision_right_foot">
-                    <geom type="mesh" mesh="LINK_ANKLE_ROLL_R" condim="6" solimp="0.9 0.95" solref="0.0005 1" rgba="0.804 0.361 0.031 0.5"/>
+                    <!-- <geom type="mesh" mesh="LINK_ANKLE_ROLL_R" condim="6" solimp="0.9 0.95" solref="0.0005 1" rgba="0.804 0.361 0.031 0.5"/> -->
+                    <geom type="box" size="0.102292353 0.053555 0.01" pos="0.0170 -0.00166 -0.03631" condim="6" solimp="0.9 0.95" solref="0.0005 1" rgba="0.804 0.361 0.031 0.5"/>
                 </default>
 
                 <!-- 右脚脚趾碰撞几何体 - 使用mesh模型进行精确碰撞检测 -->
                 <default class="collision_right_foot_toe">
-                    <geom type="mesh" mesh="LINK_ANKLE_ROLL_R" condim="6" solimp="0.9 0.95" solref="0.0005 1" rgba="0.804 0.361 0.031 0.5"/>
+                    <!-- <geom type="mesh" mesh="LINK_ANKLE_ROLL_R" condim="6" solimp="0.9 0.95" solref="0.0005 1" rgba="0.804 0.361 0.031 0.5"/> -->
+                    <geom type="box" size="0.028 0.047805 0.01" quat="0.9741537 0 -0.2258863 0" pos="0.139 0.0 -0.0235" condim="6" solimp="0.9 0.95" solref="0.0005 1" rgba="0.804 0.361 0.031 0.5"/>
                 </default>
 
                 <!-- 左肘末端碰撞几何体 - 使用mesh模型进行精确碰撞检测 -->
@@ -77,8 +82,8 @@
                     <geom type="sphere" size="0.05" pos="0.03 -0.02 -0.14" condim="6" solimp="0.9 0.95" solref="0.0005 1" rgba="0.804 0.361 0.031 0.5"/>
                 </default>
                 
-                <!-- 通用肘部碰撞几何体 - 使用mesh模型进行精确碰撞检测 -->
-                <default class="collision_elbow">
+                <!-- 左肘大臂碰撞几何体 - 使用mesh模型进行精确碰撞检测 -->
+                <default class="collision_left_elbow_start">
                     <geom type="mesh" mesh="LINK_ELBOW_PITCH_L" condim="6" solimp="0.9 0.95" solref="0.0005 1" rgba="0.804 0.361 0.031 0.5"/>
                 </default>
 
@@ -86,6 +91,11 @@
                 <default class="collision_right_elbow_end">
                     <!-- <geom type="mesh" mesh="LINK_ELBOW_YAW_R" condim="6" solimp="0.9 0.95" solref="0.0005 1" rgba="0.804 0.361 0.031 0.5"/> -->
                     <geom type="sphere" size="0.05" pos="0.03 0.02 -0.14" condim="6" solimp="0.9 0.95" solref="0.0005 1" rgba="0.804 0.361 0.031 0.5"/>
+                </default>
+
+                <!-- 右肘大臂碰撞几何体 - 使用mesh模型进行精确碰撞检测 -->
+                <default class="collision_right_elbow_start">
+                    <geom type="mesh" mesh="LINK_ELBOW_PITCH_R" condim="6" solimp="0.9 0.95" solref="0.0005 1" rgba="0.804 0.361 0.031 0.5"/>
                 </default>
 
                 <!-- 左髋关节碰撞几何体 - 使用mesh模型进行精确碰撞检测 -->
@@ -100,8 +110,8 @@
 
                 <!-- 膝盖碰撞几何体 - 使用mesh模型进行精确碰撞检测 -->
                 <default class="collision_knee">
-                    <!-- <geom type="mesh" mesh="LINK_KNEE_PITCH_L" condim="6" solimp="0.9 0.95" solref="0.0005 1" rgba="0.804 0.361 0.031 0.5"/> -->
-                    <geom type="sphere" size="0.062" pos="0.004 0.00 -0.0" condim="6" solimp="0.9 0.95" solref="0.0005 1" rgba="0.804 0.361 0.031 0.5"/>
+                    <geom type="mesh" mesh="LINK_KNEE_PITCH_L" condim="6" solimp="0.9 0.95" solref="0.0005 1" rgba="0.804 0.361 0.031 0.5"/>
+                    <!-- <geom type="sphere" size="0.062" pos="0.004 0.00 -0.0" condim="6" solimp="0.9 0.95" solref="0.0005 1" rgba="0.804 0.361 0.031 0.5"/> -->
                 </default>
             </default>
 

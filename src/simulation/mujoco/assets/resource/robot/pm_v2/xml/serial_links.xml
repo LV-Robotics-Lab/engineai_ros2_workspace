@@ -155,6 +155,8 @@
             </body>
         </body>
     </body>
+
+    
     <!-- ==================== 右腿运动链 (Right Leg Kinematic Chain) ==================== -->
     <!-- 右髋关节俯仰轴链接 -->
     <!-- name="LINK_HIP_PITCH_R": 右髋关节俯仰轴链接名称
@@ -211,6 +213,8 @@
             </body>
         </body>
     </body>
+
+
     <!-- ==================== 躯干运动链 (Torso Kinematic Chain) ==================== -->
     <!-- 躯干偏航轴链接 -->
     <!-- name="LINK_TORSO_YAW": 躯干偏航轴链接名称
@@ -273,6 +277,7 @@
                 </body>
             </body>
         </body>
+
         <body name="LINK_SHOULDER_PITCH_R" pos="-0.027105 -0.12916 0.21549">
             <inertial pos="-0.00682535 -0.0562853 -0.0156716" quat="0.835241 0.527808 -0.0515869 0.145363" mass="0.929141" diaginertia="0.0012533 0.00108394 0.000621161"/>
             <joint name="J18_SHOULDER_PITCH_R" pos="0 0 0" axis="0 0.998027 -0.0627908" range="-2.9671 2.7925" actuatorfrcrange="-61 61" class="joint" armature="0.039175"/>
@@ -303,6 +308,8 @@
                 </body>
             </body>
         </body>
+
+
         <!-- ==================== 头部运动链 (Head Kinematic Chain) ==================== -->
         <!-- 头部偏航轴链接 -->
         <!-- name="LINK_HEAD_YAW": 头部偏航轴链接名称
