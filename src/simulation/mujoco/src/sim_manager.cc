@@ -349,6 +349,13 @@ void SimManager::HandleDropLoad() {
 
     m_ = mnew;
     d_ = dnew;
+    
+    // 应用 keyframe 中的初始位置
+    int keyframe_id = mj_name2id(m_, mjOBJ_KEY, "floating_base_homing");
+    if (keyframe_id >= 0) {
+      mj_resetDataKeyframe(m_, d_, keyframe_id);
+    }
+    
     mj_forward(m_, d_);
   } else {
     sim_->LoadMessageClear();
@@ -375,6 +382,13 @@ void SimManager::HandleUILoad() {
 
     m_ = mnew;
     d_ = dnew;
+    
+    // 应用 keyframe 中的初始位置
+    int keyframe_id = mj_name2id(m_, mjOBJ_KEY, "floating_base_homing");
+    if (keyframe_id >= 0) {
+      mj_resetDataKeyframe(m_, d_, keyframe_id);
+    }
+    
     mj_forward(m_, d_);
   } else {
     sim_->LoadMessageClear();
@@ -544,6 +558,16 @@ void SimManager::PhysicsThread(std::string_view filename) {
       sim_->opt.flags[mjVIS_CONTACTFORCE] = 1;  // 显示接触力
       sim_->opt.flags[mjVIS_CONTACTSPLIT] = 1;  // 显示接触分离
       RCLCPP_INFO(logger, "Contact visualization flags set in sim_->opt");
+
+      // 应用 keyframe 中的初始位置
+      int keyframe_id = mj_name2id(m_, mjOBJ_KEY, "floating_base_homing");
+      if (keyframe_id >= 0) {
+        RCLCPP_INFO(logger, "Applying keyframe 'floating_base_homing' (id: %d) as initial position", keyframe_id);
+        mj_resetDataKeyframe(m_, d_, keyframe_id);
+        RCLCPP_INFO(logger, "Keyframe applied successfully");
+      } else {
+        RCLCPP_WARN(logger, "Keyframe 'floating_base_homing' not found, using default initial position");
+      }
 
       RCLCPP_INFO(logger, "Performing initial mj_forward calculation...");
       mj_forward(m_, d_);

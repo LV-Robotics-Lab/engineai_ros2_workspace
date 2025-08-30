@@ -1840,7 +1840,13 @@ void Simulate::Sync() {
   }
 
   if (pending_.reset) {
-    mj_resetData(m_, d_);
+    // 尝试使用 keyframe 作为初始位置，如果找不到则使用默认位置
+    int keyframe_id = mj_name2id(m_, mjOBJ_KEY, "floating_base_homing");
+    if (keyframe_id >= 0) {
+      mj_resetDataKeyframe(m_, d_, keyframe_id);
+    } else {
+      mj_resetData(m_, d_);
+    }
     mj_forward(m_, d_);
     load_error[0] = '\0';
     update_profiler = true;
