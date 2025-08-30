@@ -68,6 +68,13 @@ add_executable(mujoco_simulator
   src/sim_manager.cc
 )
 
+# 设置运行时搜索路径，避免conda环境与系统库冲突
+set_target_properties(mujoco_simulator PROPERTIES
+  BUILD_WITH_INSTALL_RPATH TRUE
+  INSTALL_RPATH_USE_LINK_PATH TRUE
+  INSTALL_RPATH "${ENGINEAI_ROBOTICS_THIRD_PARTY}/lib"
+)
+
 target_include_directories(mujoco_simulator PUBLIC
   ${CMAKE_CURRENT_SOURCE_DIR}/include
   ${CMAKE_CURRENT_SOURCE_DIR}  # Add parent directory to correctly resolve simulate/array_safety.h

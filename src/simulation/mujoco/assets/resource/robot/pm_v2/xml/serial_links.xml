@@ -1,36 +1,152 @@
+<!-- ==================== PM V2 机器人链接定义文件 ==================== -->
+<!-- 文件名: serial_links.xml -->
+<!-- 描述: 定义PM V2双足机器人的所有链接、关节和几何体 -->
+<!-- 用途: 包含机器人的完整运动学链，从基座到末端执行器 -->
+
+<!-- 根元素：定义链接模型 -->
+<!-- model="serial_links": 链接模型名称 -->
 <mujoco model="serial_links">
 
+    <!-- ==================== 左腿运动链 (Left Leg Kinematic Chain) ==================== -->
+    <!-- 左髋关节俯仰轴链接 -->
+    <!-- name="LINK_HIP_PITCH_L": 左髋关节俯仰轴链接名称
+         pos: 相对于父链接的位置 (x, y, z) -->
     <body name="LINK_HIP_PITCH_L" pos="0.01541 0.076141 -0.061208">
+        <!-- 惯性属性设置 -->
+        <!-- pos: 惯性中心相对于链接坐标系的位置
+             quat: 惯性坐标系相对于链接坐标系的四元数 (w, x, y, z)
+             mass: 链接质量，1.68628千克
+             diaginertia: 对角惯性矩阵 (Ixx, Iyy, Izz) -->
         <inertial pos="0.0101086 0.045246 -0.0119649" quat="0.644148 0.745776 0.169512 -0.0125773" mass="1.68628" diaginertia="0.00232449 0.00220186 0.00200187"/>
+        
+        <!-- 关节定义 -->
+        <!-- name="J00_HIP_PITCH_L": 关节名称，J00表示第0个关节
+             pos: 关节位置，相对于链接坐标系
+             axis: 关节轴方向向量，定义旋转轴
+             range: 关节角度范围 (最小值 最大值)，单位：弧度
+             actuatorfrcrange: 执行器力矩范围 (最小值 最大值)，单位：牛米
+             class="joint": 使用默认关节类
+             armature: 电机转子惯性，0.045325千克·平方米 -->
         <joint name="J00_HIP_PITCH_L" pos="0 0 0" axis="0 0.965926 -0.258819" range="-3.141 2.443" actuatorfrcrange="-164 164" class="joint" armature="0.045325"/>
+        
+        <!-- 视觉几何体 -->
+        <!-- type="mesh": 使用mesh模型进行视觉显示
+             rgba: 颜色和透明度 (红 绿 蓝 透明度)
+             mesh: 引用的mesh模型名称
+             class="visual": 使用视觉几何体类，不参与碰撞检测 -->
         <geom type="mesh" rgba="0.75294 0.75294 0.75294 1" mesh="LINK_HIP_PITCH_L" class="visual"/>
+        
+        <!-- 碰撞几何体 -->
+        <!-- class="collision_hip_left": 使用左髋关节碰撞几何体类，参与碰撞检测 -->
         <geom class="collision_hip_left"/>
+        <!-- 左髋关节横滚轴链接 -->
+        <!-- name="LINK_HIP_ROLL_L": 左髋关节横滚轴链接名称
+             pos: 相对于父链接的位置 -->
         <body name="LINK_HIP_ROLL_L" pos="0.048 0.049359 -0.013226">
+            <!-- 惯性属性设置 -->
+            <!-- pos: 惯性中心位置
+                 quat: 惯性坐标系四元数
+                 mass: 链接质量，0.632743千克
+                 diaginertia: 对角惯性矩阵 -->
             <inertial pos="-0.0186136 0.00234772 -0.0460198" quat="0.934255 0.0674459 -0.349492 -0.0217749" mass="0.632743" diaginertia="0.0016198 0.00145212 0.000966255"/>
+            
+            <!-- 关节定义 -->
+            <!-- name="J01_HIP_ROLL_L": 第1个关节，左髋关节横滚轴
+                 axis="1 0 0": 绕X轴旋转
+                 range: 关节角度范围，-0.436到2.094弧度
+                 actuatorfrcrange: 执行器力矩范围，±164牛米 -->
             <joint name="J01_HIP_ROLL_L" pos="0 0 0" axis="1 0 0" range="-0.436 2.094" actuatorfrcrange="-164 164" class="joint" armature="0.045325"/>
+            
+            <!-- 视觉几何体 -->
             <geom type="mesh" rgba="0.75294 0.75294 0.75294 1" mesh="LINK_HIP_ROLL_L" class="visual"/>
+            <!-- 左髋关节偏航轴链接 -->
+            <!-- name="LINK_HIP_YAW_L": 左髋关节偏航轴链接名称 -->
             <body name="LINK_HIP_YAW_L" pos="-0.03139 -0.0015951 -0.086016">
+                <!-- 惯性属性设置 -->
+                <!-- mass: 链接质量，1.858千克 -->
                 <inertial pos="-0.00361155 0.00117239 -0.0931007" quat="0.979511 -0.00716725 -0.0443573 -0.196314" mass="1.858" diaginertia="0.0165126 0.01624 0.00332762"/>
+                
+                <!-- 关节定义 -->
+                <!-- name="J02_HIP_YAW_L": 第2个关节，左髋关节偏航轴
+                     axis="0 0 1": 绕Z轴旋转
+                     range: 关节角度范围，-1.57到4.014弧度
+                     actuatorfrcrange: 执行器力矩范围，±61牛米 -->
                 <joint name="J02_HIP_YAW_L" pos="0 0 0" axis="0 0 1" range="-1.57 4.014" actuatorfrcrange="-61 61" class="joint" armature="0.039175"/>
+                
+                <!-- 视觉几何体 -->
                 <geom type="mesh" rgba="0.75294 0.75294 0.75294 1" mesh="LINK_HIP_YAW_L" class="visual"/>
+                
+                <!-- 左膝关节俯仰轴链接 -->
+                <!-- name="LINK_KNEE_PITCH_L": 左膝关节俯仰轴链接名称 -->
                 <body name="LINK_KNEE_PITCH_L" pos="-0.02602 -2.8566e-05 -0.23655">
+                    <!-- 惯性属性设置 -->
+                    <!-- mass: 链接质量，4.29474千克（大腿质量较大） -->
                     <inertial pos="-0.00978702 0.00212191 -0.119309" quat="0.754298 -0.0350501 -0.0489895 0.653763" mass="4.29474" diaginertia="0.054833 0.053824 0.00490216"/>
+                    
+                    <!-- 关节定义 -->
+                    <!-- name="J03_KNEE_PITCH_L": 第3个关节，左膝关节俯仰轴
+                         axis="0 1 0": 绕Y轴旋转
+                         range: 关节角度范围，-0.3491到2.3911弧度
+                         actuatorfrcrange: 执行器力矩范围，±164牛米 -->
                     <joint name="J03_KNEE_PITCH_L" pos="0 0 0" axis="0 1 0" range="-0.3491 2.3911" actuatorfrcrange="-164 164" class="joint" armature="0.045325"/>
+                    
+                    <!-- 视觉几何体 -->
                     <geom type="mesh" rgba="0.75294 0.75294 0.75294 1" mesh="LINK_KNEE_PITCH_L" class="visual"/>
+                    
+                    <!-- 碰撞几何体 -->
+                    <!-- class="collision_knee": 使用膝关节碰撞几何体类 -->
                     <geom class="collision_knee"/>
+                    <!-- 左踝关节俯仰轴链接 -->
+                    <!-- name="LINK_ANKLE_PITCH_L": 左踝关节俯仰轴链接名称 -->
                     <body name="LINK_ANKLE_PITCH_L" pos="-0.026756 0.00041994 -0.36305">
+                        <!-- 惯性属性设置 -->
+                        <!-- mass: 链接质量，0.115345千克（小腿较轻） -->
                         <inertial pos="0.00126412 0 -0.00661445" quat="0.67654 -0.205654 -0.205654 0.67654" mass="0.115345" diaginertia="1.511e-05 1.42169e-05 1.17731e-05"/>
+                        
+                        <!-- 关节定义 -->
+                        <!-- name="J04_ANKLE_PITCH_L": 第4个关节，左踝关节俯仰轴
+                             axis="0 1 0": 绕Y轴旋转
+                             range: 关节角度范围，-0.6807到0.7243弧度
+                             actuatorfrcrange: 执行器力矩范围，±61牛米 -->
                         <joint name="J04_ANKLE_PITCH_L" pos="0 0 0" axis="0 1 0" range="-0.6807 0.7243" actuatorfrcrange="-61 61" class="joint" armature="0.039175"/>
+                        
+                        <!-- 视觉几何体 -->
                         <geom type="mesh" rgba="0.75294 0.75294 0.75294 1" mesh="LINK_ANKLE_PITCH_L" class="visual"/>
+                        
+                        <!-- 左踝关节横滚轴链接 -->
+                        <!-- name="LINK_ANKLE_ROLL_L": 左踝关节横滚轴链接名称 -->
                         <body name="LINK_ANKLE_ROLL_L" pos="0 0 -0.015">
+                            <!-- 惯性属性设置 -->
+                            <!-- mass: 链接质量，0.717868千克 -->
                             <inertial pos="0.0145606 1.19e-06 -0.0221989" quat="-0.0050662 0.684809 0.00428214 0.728692" mass="0.717868" diaginertia="0.00293283 0.00276538 0.000568479"/>
+                            
+                            <!-- 关节定义 -->
+                            <!-- name="J05_ANKLE_ROLL_L": 第5个关节，左踝关节横滚轴
+                                 axis="1 0 0": 绕X轴旋转
+                                 range: 关节角度范围，-0.2618到0.2618弧度（±15度）
+                                 actuatorfrcrange: 执行器力矩范围，±61牛米 -->
                             <joint name="J05_ANKLE_ROLL_L" pos="0 0 0" axis="1 0 0" range="-0.2618 0.2618" actuatorfrcrange="-61 61" class="joint" armature="0.039175"/>
+                            
+                            <!-- 视觉几何体 -->
                             <geom type="mesh" rgba="0.75294 0.75294 0.75294 1" mesh="LINK_ANKLE_ROLL_L" class="visual"/>
+                            
+                            <!-- 左脚链接（末端执行器） -->
+                            <!-- name="LINK_FOOT_L": 左脚链接名称，作为末端执行器 -->
                             <body name="LINK_FOOT_L">
+                                <!-- 惯性属性设置 -->
+                                <!-- mass: 链接质量，1e-3千克（脚部质量很小） -->
                                 <inertial pos="0 0 0" mass="1e-3" diaginertia="1e-12 1e-12 1e-12"/>
+                                
+                                <!-- 碰撞几何体 -->
+                                <!-- class="collision_left_foot": 左脚碰撞几何体 -->
                                 <geom class="collision_left_foot"/>
+                                <!-- class="collision_left_foot_toe": 左脚脚趾碰撞几何体 -->
                                 <geom class="collision_left_foot_toe"/>
+                                
+                                <!-- 传感器站点 -->
+                                <!-- name="force_sensor_left_foot": 左脚力传感器站点 -->
                                 <site name="force_sensor_left_foot"/>
+                                <!-- name="torque_sensor_left_foot": 左脚扭矩传感器站点 -->
                                 <site name="torque_sensor_left_foot"/>
                             </body>
                         </body>
@@ -39,10 +155,29 @@
             </body>
         </body>
     </body>
+
+    
+    <!-- ==================== 右腿运动链 (Right Leg Kinematic Chain) ==================== -->
+    <!-- 右髋关节俯仰轴链接 -->
+    <!-- name="LINK_HIP_PITCH_R": 右髋关节俯仰轴链接名称
+         pos: 相对于父链接的位置，Y坐标为负值表示右侧 -->
     <body name="LINK_HIP_PITCH_R" pos="0.01541 -0.076141 -0.061208">
+        <!-- 惯性属性设置 -->
+        <!-- mass: 链接质量，1.68024千克 -->
         <inertial pos="0.0102185 -0.0451673 -0.0122139" quat="0.774064 0.609636 0.00735361 -0.170631" mass="1.68024" diaginertia="0.00231922 0.00219067 0.00199347"/>
+        
+        <!-- 关节定义 -->
+        <!-- name="J06_HIP_PITCH_R": 第6个关节，右髋关节俯仰轴
+             axis="0 0.965926 0.258819": 关节轴方向（与左腿对称但方向相反）
+             range: 关节角度范围，-3.141到2.443弧度
+             actuatorfrcrange: 执行器力矩范围，±164牛米 -->
         <joint name="J06_HIP_PITCH_R" pos="0 0 0" axis="0 0.965926 0.258819" range="-3.141 2.443" actuatorfrcrange="-164 164" class="joint" armature="0.045325"/>
+        
+        <!-- 视觉几何体 -->
         <geom type="mesh" rgba="0.75294 0.75294 0.75294 1" mesh="LINK_HIP_PITCH_R" class="visual"/>
+        
+        <!-- 碰撞几何体 -->
+        <!-- class="collision_hip_right": 使用右髋关节碰撞几何体类 -->
         <geom class="collision_hip_right"/>
         <body name="LINK_HIP_ROLL_R" pos="0.048 -0.04936 -0.013226">
             <inertial pos="-0.0184778 -0.00232999 -0.0457321" quat="0.935033 -0.0668104 -0.34737 0.0241446" mass="0.636736" diaginertia="0.00163098 0.00146337 0.000968649"/>
@@ -78,13 +213,43 @@
             </body>
         </body>
     </body>
+
+
+    <!-- ==================== 躯干运动链 (Torso Kinematic Chain) ==================== -->
+    <!-- 躯干偏航轴链接 -->
+    <!-- name="LINK_TORSO_YAW": 躯干偏航轴链接名称
+         pos: 相对于父链接的位置，连接基座和躯干 -->
     <body name="LINK_TORSO_YAW" pos="0.01216 0 0.0809">
+        <!-- 惯性属性设置 -->
+        <!-- mass: 链接质量，9.01442千克（躯干质量最大，包含上身重量） -->
         <inertial pos="-0.0114072 -0.00348592 0.162838" quat="0.995948 -0.0278316 0.0854008 -0.00437854" mass="9.01442" diaginertia="0.0858373 0.0656652 0.056708"/>
+        
+        <!-- 关节定义 -->
+        <!-- name="J12_WAIST_YAW": 第12个关节，躯干偏航轴
+             axis="0 0 1": 绕Z轴旋转
+             range: 关节角度范围，-4.014到1.57弧度
+             actuatorfrcrange: 执行器力矩范围，±61牛米 -->
         <joint name="J12_WAIST_YAW" pos="0 0 0" axis="0 0 1" range="-4.014 1.57" actuatorfrcrange="-61 61" class="joint" armature="0.039175"/>
+        
+        <!-- 视觉几何体 -->
         <geom type="mesh" rgba="0.75294 0.75294 0.75294 1" mesh="LINK_TORSO_YAW" class="visual"/>
+        <!-- ==================== 左臂运动链 (Left Arm Kinematic Chain) ==================== -->
+        <!-- 左肩关节俯仰轴链接 -->
+        <!-- name="LINK_SHOULDER_PITCH_L": 左肩关节俯仰轴链接名称
+             pos: 相对于父链接的位置，Y坐标为正表示左侧 -->
         <body name="LINK_SHOULDER_PITCH_L" pos="-0.027105 0.12916 0.21549">
+            <!-- 惯性属性设置 -->
+            <!-- mass: 链接质量，0.932155千克 -->
             <inertial pos="-0.0068739 0.0562468 -0.0156415" quat="0.526158 0.83672 -0.143374 0.0500143" mass="0.932155" diaginertia="0.00125198 0.00108471 0.000622336"/>
+            
+            <!-- 关节定义 -->
+            <!-- name="J13_SHOULDER_PITCH_L": 第13个关节，左肩关节俯仰轴
+                 axis="0 0.998027 0.0627908": 关节轴方向
+                 range: 关节角度范围，-2.9671到2.7925弧度
+                 actuatorfrcrange: 执行器力矩范围，±61牛米 -->
             <joint name="J13_SHOULDER_PITCH_L" pos="0 0 0" axis="0 0.998027 0.0627908" range="-2.9671 2.7925" actuatorfrcrange="-61 61" class="joint" armature="0.039175"/>
+            
+            <!-- 视觉几何体 -->
             <geom type="mesh" rgba="0.75294 0.75294 0.75294 1" mesh="LINK_SHOULDER_PITCH_L" class="visual"/>
             <body name="LINK_SHOULDER_ROLL_L" pos="-0.0371 0.066941 -0.020838">
                 <inertial pos="0.037412 0.00677175 -0.0267801" quat="0.694988 -0.115505 0.0954646 0.703233" mass="0.510813" diaginertia="0.0013316 0.000992823 0.000901346"/>
@@ -112,6 +277,7 @@
                 </body>
             </body>
         </body>
+
         <body name="LINK_SHOULDER_PITCH_R" pos="-0.027105 -0.12916 0.21549">
             <inertial pos="-0.00682535 -0.0562853 -0.0156716" quat="0.835241 0.527808 -0.0515869 0.145363" mass="0.929141" diaginertia="0.0012533 0.00108394 0.000621161"/>
             <joint name="J18_SHOULDER_PITCH_R" pos="0 0 0" axis="0 0.998027 -0.0627908" range="-2.9671 2.7925" actuatorfrcrange="-61 61" class="joint" armature="0.039175"/>
@@ -142,12 +308,41 @@
                 </body>
             </body>
         </body>
+
+
+        <!-- ==================== 头部运动链 (Head Kinematic Chain) ==================== -->
+        <!-- 头部偏航轴链接 -->
+        <!-- name="LINK_HEAD_YAW": 头部偏航轴链接名称
+             pos: 相对于父链接的位置，位于躯干顶部 -->
         <body name="LINK_HEAD_YAW" pos="-0.017638 0 0.2961">
+            <!-- 惯性属性设置 -->
+            <!-- mass: 链接质量，0.8451千克 -->
             <inertial pos="0.00358213 0.00030109 0.0882263" quat="0.700279 0.122834 0.123579 0.692278" mass="0.8451" diaginertia="0.00500549 0.00445883 0.00296172"/>
+            
+            <!-- 关节定义 -->
+            <!-- name="J23_HEAD_YAW": 第23个关节，头部偏航轴（最后一个关节）
+                 axis="0 0 1": 绕Z轴旋转
+                 range: 关节角度范围，-0.6109到0.6109弧度（±35度）
+                 actuatorfrcrange: 执行器力矩范围，±61牛米 -->
             <joint name="J23_HEAD_YAW" pos="0 0 0" axis="0 0 1" range="-0.6109 0.6109" actuatorfrcrange="-61 61" class="joint" armature="0.039175"/>
+            
+            <!-- 视觉几何体 -->
             <geom type="mesh" rgba="0.75294 0.75294 0.75294 1" mesh="LINK_HEAD_YAW" class="visual"/>
+            
+            <!-- 碰撞几何体 -->
+            <!-- class="collision_head": 使用头部碰撞几何体类 -->
             <geom class="collision_head"/>
         </body>
     </body>
 
+    <!-- ==================== 文件结束 ==================== -->
+    <!-- 此文件定义了PM V2双足机器人的完整运动学链 -->
+    <!-- 包含24个关节的完整机器人结构： -->
+    <!-- - 左腿：6个关节 (J00-J05) -->
+    <!-- - 右腿：6个关节 (J06-J11) -->
+    <!-- - 躯干：1个关节 (J12) -->
+    <!-- - 左臂：5个关节 (J13-J17) -->
+    <!-- - 右臂：5个关节 (J18-J22) -->
+    <!-- - 头部：1个关节 (J23) -->
+    <!-- 每个链接都包含惯性属性、关节定义、视觉几何体和碰撞几何体 -->
 </mujoco>

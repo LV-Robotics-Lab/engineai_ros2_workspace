@@ -1,0 +1,327 @@
+<mujoco model="engineai_robotics_mesh">
+    <compiler angle="radian" discardvisual="false" autolimits="true" eulerseq="zyx"/>
+    <option timestep="0.0001" tolerance="1e-10"/>
+
+    <!-- 添加可视化设置 -->
+    <visual>
+        <!-- 接触点显示设置 -->
+        <!-- contactpoint: RGBA颜色 (红, 绿, 蓝, 透明度) -->
+        <!-- contactwidth: 接触点宽度 -->
+        <!-- contactheight: 接触点高度 -->
+        <rgba contactpoint="1.0 0.0 0.0 1.0" contactforce="0.8 0.36 0.36 1" contactfriction="0.8 0.36 0.36 1" contacttorque="0.8 0.36 0.36 1" contactgap="0.8 0.36 0.36 1"/>
+        <scale contactwidth="0.003" contactheight="0.005" forcewidth="0.02"/>
+    </visual>
+
+    <default>
+        <default class="biped">
+            <!-- ==================== 碰撞几何体组 (Collision Group) - Mesh版本 ==================== -->
+            <!-- 碰撞组用于物理仿真中的碰撞检测，使用高精度的mesh模型进行碰撞检测 -->
+            <default class="collision">
+                <!-- 碰撞检测逻辑说明：
+                     MuJoCo使用位运算进行碰撞检测：(contype1 & conaffinity2) || (contype2 & conaffinity1)
+                     contype: 接触类型标识符
+                     conaffinity: 接触亲和性标识符
+                     当两个几何体的contype和conaffinity按位与运算结果非零时，它们之间会产生碰撞 -->
+                
+                <!-- 基础碰撞几何体配置 -->
+                <!-- group="3": 碰撞组标识，用于分组管理
+                     contype="1": 接触类型为1
+                     conaffinity="1": 接触亲和性为1
+                     friction: 摩擦系数 (滑动摩擦 滚动摩擦 旋转摩擦)
+                     condim="6": 接触维度，6表示完整的6D接触
+                     solimp: 求解器参数，控制接触的软硬程度
+                     solref: 求解器参考参数，控制接触的响应特性
+                     rgba: 可视化颜色 (红 绿 蓝 透明度) -->
+                <geom group="3" contype="1" conaffinity="1" friction="0.5 0.005 0.0001" 
+                       condim="6" solimp="0.9 0.95" solref="0.0005 1" 
+                       rgba="0.804 0.361 0.031 0.5"/>
+                
+                <!-- 头部碰撞几何体 - 使用mesh模型进行精确碰撞检测 -->
+                <default class="collision_head">
+                    <!-- <geom type="mesh" mesh="LINK_HEAD_YAW" rgba="0.804 0.361 0.031 0.5"/> -->
+                    <geom type="sphere" size="0.09" pos="0.01 0.0 0.11" rgba="0.804 0.361 0.031 0.5"/>
+                </default>
+
+                <!-- 基座上部碰撞几何体 - 使用mesh模型进行精确碰撞检测 -->
+                <default class="collision_base_upper_box">
+                    <geom type="mesh" mesh="LINK_BASE" rgba="0.804 0.361 0.031 0.5"/>
+                </default>
+
+                <!-- 基座下部碰撞几何体 - 使用mesh模型进行精确碰撞检测 -->
+                <default class="collision_base_lower_box">
+                    <geom type="mesh" mesh="LINK_BASE" rgba="0.804 0.361 0.031 0.5"/>
+                </default>
+
+                <!-- 左脚碰撞几何体 - 使用mesh模型进行精确碰撞检测 -->
+                <default class="collision_left_foot">
+                    <!-- <geom type="mesh" mesh="LINK_ANKLE_ROLL_L" rgba="0.804 0.361 0.031 0.5"/> -->
+                    <geom type="box" size="0.102292353 0.053555 0.01" pos="0.0170 0.00166 -0.03631" rgba="0.804 0.361 0.031 0.5"/>
+                </default>
+
+                <!-- 左脚脚趾碰撞几何体 - 使用mesh模型进行精确碰撞检测 -->
+                <default class="collision_left_foot_toe">
+                    <!-- <geom type="mesh" mesh="LINK_ANKLE_ROLL_L" rgba="0.804 0.361 0.031 0.5"/> -->
+                    <geom type="box" size="0.028 0.047805 0.01" quat="0.9741537 0 -0.2258863 0" pos="0.139 0.0 -0.0235" rgba="0.804 0.361 0.031 0.5"/>
+                </default>
+
+                <!-- 右脚碰撞几何体 - 使用mesh模型进行精确碰撞检测 -->
+                <default class="collision_right_foot">
+                    <!-- <geom type="mesh" mesh="LINK_ANKLE_ROLL_R" rgba="0.804 0.361 0.031 0.5"/> -->
+                    <geom type="box" size="0.102292353 0.053555 0.01" pos="0.0170 -0.00166 -0.03631" rgba="0.804 0.361 0.031 0.5"/>
+                </default>
+
+                <!-- 右脚脚趾碰撞几何体 - 使用mesh模型进行精确碰撞检测 -->
+                <default class="collision_right_foot_toe">
+                    <!-- <geom type="mesh" mesh="LINK_ANKLE_ROLL_R" rgba="0.804 0.361 0.031 0.5"/> -->
+                    <geom type="box" size="0.028 0.047805 0.01" quat="0.9741537 0 -0.2258863 0" pos="0.139 0.0 -0.0235" rgba="0.804 0.361 0.031 0.5"/>
+                </default>
+
+                <!-- 左肘末端碰撞几何体 - 使用mesh模型进行精确碰撞检测 -->
+                <default class="collision_left_elbow_end">
+                    <geom type="sphere" size="0.05" pos="0.03 -0.02 -0.14" rgba="0.804 0.361 0.031 0.5"/>
+                </default>
+                
+                <!-- 左肘大臂碰撞几何体 - 使用mesh模型进行精确碰撞检测 -->
+                <default class="collision_left_elbow_start">
+                    <geom type="mesh" mesh="LINK_ELBOW_PITCH_L" rgba="0.804 0.361 0.031 0.5"/>
+                </default>
+
+                <!-- 右肘末端碰撞几何体 - 使用mesh模型进行精确碰撞检测 -->
+                <default class="collision_right_elbow_end">
+                    <geom type="sphere" size="0.05" pos="0.03 0.02 -0.14" rgba="0.804 0.361 0.031 0.5"/>
+                </default>
+
+                <!-- 右肘大臂碰撞几何体 - 使用mesh模型进行精确碰撞检测 -->
+                <default class="collision_right_elbow_start">
+                    <geom type="mesh" mesh="LINK_ELBOW_PITCH_R" rgba="0.804 0.361 0.031 0.5"/>
+                </default>
+
+                <!-- 左肘小臂碰撞几何体 - 使用mesh模型进行精确碰撞检测 -->
+                <default class="collision_left_elbow_yaw">
+                    <geom type="mesh" mesh="LINK_ELBOW_YAW_L" rgba="0.804 0.361 0.031 0.5"/>
+                </default>
+
+                <!-- 右肘小臂碰撞几何体 - 使用mesh模型进行精确碰撞检测 -->
+                <default class="collision_right_elbow_yaw">
+                    <geom type="mesh" mesh="LINK_ELBOW_YAW_R" rgba="0.804 0.361 0.031 0.5"/>
+                </default>
+
+                <!-- 左髋关节碰撞几何体 - 使用mesh模型进行精确碰撞检测 -->
+                <default class="collision_hip_left">
+                    <geom type="mesh" mesh="LINK_HIP_PITCH_L" rgba="0.804 0.361 0.031 0.5"/>
+                </default>
+
+                <!-- 右髋关节碰撞几何体 - 使用mesh模型进行精确碰撞检测 -->
+                <default class="collision_hip_right">
+                    <geom type="mesh" mesh="LINK_HIP_PITCH_R" rgba="0.804 0.361 0.031 0.5"/>
+                </default>
+
+                <!-- 左膝盖碰撞几何体 - 使用mesh模型进行精确碰撞检测 -->
+                <default class="collision_left_knee">
+                    <geom type="mesh" mesh="LINK_KNEE_PITCH_L" rgba="0.804 0.361 0.031 0.5"/>
+                    <!-- <geom type="sphere" size="0.062" pos="0.004 0.00 -0.0" rgba="0.804 0.361 0.031 0.5"/> -->
+                </default>
+                <!-- 右膝盖碰撞几何体 - 使用mesh模型进行精确碰撞检测 -->
+                <default class="collision_right_knee">
+                    <geom type="mesh" mesh="LINK_KNEE_PITCH_R" rgba="0.804 0.361 0.031 0.5"/>
+                    <!-- <geom type="sphere" size="0.062" pos="0.004 0.00 -0.0" rgba="0.804 0.361 0.031 0.5"/> -->
+                </default>
+
+                <!-- 左髋关节横滚轴碰撞几何体 - 使用mesh模型进行精确碰撞检测 -->
+                <default class="collision_hip_roll_left">
+                    <geom type="mesh" mesh="LINK_HIP_ROLL_L" rgba="0.804 0.361 0.031 0.5"/>
+                </default>
+
+                <!-- 左髋关节偏航轴碰撞几何体 - 使用mesh模型进行精确碰撞检测 -->
+                <default class="collision_hip_yaw_left">
+                    <geom type="mesh" mesh="LINK_HIP_YAW_L" rgba="0.804 0.361 0.031 0.5"/>
+                </default>
+
+                <!-- 左踝关节俯仰轴碰撞几何体 - 使用mesh模型进行精确碰撞检测 -->
+                <default class="collision_ankle_pitch_left">
+                    <geom type="mesh" mesh="LINK_ANKLE_PITCH_L" rgba="0.804 0.361 0.031 0.5"/>
+                </default>
+
+                <!-- 右髋关节横滚轴碰撞几何体 - 使用mesh模型进行精确碰撞检测 -->
+                <default class="collision_hip_roll_right">
+                    <geom type="mesh" mesh="LINK_HIP_ROLL_R" rgba="0.804 0.361 0.031 0.5"/>
+                </default>
+
+                <!-- 右髋关节偏航轴碰撞几何体 - 使用mesh模型进行精确碰撞检测 -->
+                <default class="collision_hip_yaw_right">
+                    <geom type="mesh" mesh="LINK_HIP_YAW_R" rgba="0.804 0.361 0.031 0.5"/>
+                </default>
+
+                <!-- 右踝关节俯仰轴碰撞几何体 - 使用mesh模型进行精确碰撞检测 -->
+                <default class="collision_ankle_pitch_right">
+                    <geom type="mesh" mesh="LINK_ANKLE_PITCH_R" rgba="0.804 0.361 0.031 0.5"/>
+                </default>
+
+                <!-- 躯干偏航轴碰撞几何体 - 使用mesh模型进行精确碰撞检测 -->
+                <default class="collision_torso_yaw">
+                    <geom type="mesh" mesh="LINK_TORSO_YAW" rgba="0.804 0.361 0.031 0.5"/>
+                </default>
+
+                <!-- 左肩关节俯仰轴碰撞几何体 - 使用mesh模型进行精确碰撞检测 -->
+                <default class="collision_shoulder_pitch_left">
+                    <geom type="mesh" mesh="LINK_SHOULDER_PITCH_L" rgba="0.804 0.361 0.031 0.5"/>
+                </default>
+
+                <!-- 左肩关节横滚轴碰撞几何体 - 使用mesh模型进行精确碰撞检测 -->
+                <default class="collision_shoulder_roll_left">
+                    <geom type="mesh" mesh="LINK_SHOULDER_ROLL_L" rgba="0.804 0.361 0.031 0.5"/>
+                </default>
+
+                <!-- 左肩关节偏航轴碰撞几何体 - 使用mesh模型进行精确碰撞检测 -->
+                <default class="collision_shoulder_yaw_left">
+                    <geom type="mesh" mesh="LINK_SHOULDER_YAW_L" rgba="0.804 0.361 0.031 0.5"/>
+                </default>
+
+                <!-- 右肩关节俯仰轴碰撞几何体 - 使用mesh模型进行精确碰撞检测 -->
+                <default class="collision_shoulder_pitch_right">
+                    <geom type="mesh" mesh="LINK_SHOULDER_PITCH_R" rgba="0.804 0.361 0.031 0.5"/>
+                </default>
+
+                <!-- 右肩关节横滚轴碰撞几何体 - 使用mesh模型进行精确碰撞检测 -->
+                <default class="collision_shoulder_roll_right">
+                    <geom type="mesh" mesh="LINK_SHOULDER_ROLL_R" rgba="0.804 0.361 0.031 0.5"/>
+                </default>
+
+                <!-- 右肩关节偏航轴碰撞几何体 - 使用mesh模型进行精确碰撞检测 -->
+                <default class="collision_shoulder_yaw_right">
+                    <geom type="mesh" mesh="LINK_SHOULDER_YAW_R" rgba="0.804 0.361 0.031 0.5"/>
+                </default>
+            </default>
+
+            <!-- ==================== 视觉几何体组 (Visual Group) ==================== -->
+            <!-- 视觉组用于显示机器人的外观，不参与物理碰撞检测，通常使用高精度的mesh模型 -->
+            <default class="visual">
+                <!-- 视觉几何体配置 -->
+                <!-- group="2": 视觉组标识，用于分组管理
+                     contype="0": 接触类型为0，表示不参与碰撞检测
+                     conaffinity="0": 接触亲和性为0，表示不参与碰撞检测
+                     视觉几何体主要用于显示，不影响物理仿真性能 -->
+                <geom contype="0" conaffinity="0" group="2"/>
+            </default>
+
+            <!-- ==================== 关节默认设置 (Joint Default Settings) ==================== -->
+            <!-- 定义所有关节的基础物理属性 -->
+            <default class="joint">
+                <!-- 关节物理参数 -->
+                <!-- damping: 关节阻尼系数，0.6表示中等阻尼，用于稳定关节运动
+                     frictionloss: 关节摩擦损失，0.8表示较高的摩擦，模拟真实关节的摩擦特性 -->
+                <joint damping="0.6" frictionloss="0.8"/>
+            </default>
+
+        </default>
+    </default>
+
+    <!-- ==================== 资源文件 (Asset Files) ==================== -->
+    <!-- 包含外部资源文件，如mesh模型、纹理等 -->
+    <asset>
+        <!-- 包含资源文件 -->
+        <!-- file="assets.xml": 外部资源文件，包含mesh模型、材质等资源定义 -->
+        <include file="assets.xml"/>
+    </asset>
+
+    <!-- ==================== 世界主体 (World Body) ==================== -->
+    <!-- 定义仿真世界中的主体结构，包括光源、机器人基座等 -->
+    <worldbody>
+        <!-- 光源设置 -->
+        <!-- name="spotlight": 光源名称
+             mode="targetbodycom": 光源模式，指向目标物体的质心
+             target="LINK_BASE": 目标物体，指向机器人基座
+             pos="0 -1 2": 光源位置，在机器人后方2米高处 -->
+        <light name="spotlight" mode="targetbodycom" target="LINK_BASE" pos="0 -1 2"/>
+        
+        <!-- 机器人基座主体 -->
+        <!-- name="LINK_BASE": 基座链接名称
+             pos="0 0 0.82": 基座位置，在原点上方0.82米处 -->
+        <body name="LINK_BASE" pos="0 0 0.82">
+            <!-- 惯性属性设置 -->
+            <!-- pos: 惯性中心相对于链接坐标系的位置
+                 mass: 基座质量，4.0864千克
+                 fullinertia: 完整惯性矩阵，包含转动惯量和惯性积 -->
+            <inertial pos="0.01525750 -0.00001621 -0.02333111" mass="4.08640035" fullinertia="0.02021593 0.01531282 0.01216285 -0.00000120 -0.00037784 -0.00000295"/>
+            <!-- 基座视觉几何体 - 使用高精度mesh模型显示基座外观 -->
+            <geom type="mesh" rgba="0.75294 0.75294 0.75294 1" mesh="LINK_BASE" class="visual"/>
+            <!-- 基座碰撞几何体 - 使用mesh模型进行精确碰撞检测 -->
+            <geom class="collision_base_lower_box"/>
+            <!-- 基座参考点设置 -->
+            <!-- name="base": 基座参考点名称，用于定位和导航
+                 pos="0 0 0": 参考点位置，在基座坐标系原点 -->
+            <site name="base" pos="0 0 0"/>
+            
+            <!-- IMU传感器位置 -->
+            <!-- name="imu": IMU传感器名称
+                 pos="0.02311 0 -0.09631": IMU在基座坐标系中的位置 -->
+            <site name="imu" pos="0.02311 0 -0.09631"/>
+            
+            <!-- 自由关节设置 -->
+            <!-- freejoint: 定义基座为自由浮动关节，允许6自由度运动（位置和姿态） -->
+            <freejoint/>
+
+            <!-- 包含其他链接文件 -->
+            <!-- file="serial_links_mesh.xml": 包含机器人其他链接的定义文件（mesh版本） -->
+            <include file="serial_links_mesh.xml"/>
+        </body>
+    </worldbody>
+
+    <!-- ==================== 执行器和传感器配置 ==================== -->
+    <!-- 包含机器人的执行器（电机）和传感器配置 -->
+    
+    <!-- 执行器配置文件 -->
+    <!-- file="serial_actuators.xml": 包含所有关节执行器的定义和参数 -->
+    <include file="serial_actuators.xml"/>
+    
+    <!-- 传感器配置文件 -->
+    <!-- file="serial_sensors.xml": 包含所有传感器的定义和参数 -->
+    <include file="serial_sensors.xml"/>
+
+    <!-- ==================== 关键帧配置 (Keyframe Configuration) ==================== -->
+    <!-- 定义机器人的预设姿态和位置，用于初始化和参考 -->
+    
+    <!-- 浮动基座归位关键帧 -->
+    <!-- 注意：当使用固定基座时，请注释此关键帧 -->
+    <!-- name="floating_base_homing": 浮动基座归位姿态名称
+         qpos: 关节位置向量，包含：
+         - 前3个值：基座位置 (x, y, z)
+         - 接下来4个值：基座姿态四元数 (w, x, y, z)
+         - 剩余值：各关节角度位置 -->
+    <keyframe>
+        <!-- 浮动基座归位关键帧：总31个参数，包含位置、姿态和所有关节角度 -->
+        <!-- 参数顺序：基座位置(3) + 基座姿态(4) + 左腿(6) + 右腿(6) + 腰部(1) + 左臂(6) + 右臂(6) + 头部(1) -->
+        <!-- 参数详解（31个参数）：
+            前3个：浮动基座位置 (x=0, y=0, z=0.82)
+            接下来4个：浮动基座姿态四元数 (w=1, x=0, y=0, z=0) - 表示无旋转
+            接下来6个：左腿关节 (髋关节俯仰=0, 横滚=0, 偏航=-0.12, 膝关节俯仰=0.24, 踝关节俯仰=-0.12, 横滚=0)
+            接下来6个：右腿关节 (髋关节俯仰=0, 横滚=0, 偏航=-0.12, 膝关节俯仰=0.24, 踝关节俯仰=-0.12, 横滚=0)
+            接下来1个：腰部偏航关节 (偏航=0)
+            接下来5个：左臂关节 (肩部俯仰=0(前后甩手）, 横滚=0, 偏航=0, 肘部俯仰=0, 偏航=0)
+            接下来5个：右臂关节 (肩部俯仰=0(前后甩手）, 横滚=0, 偏航=0, 肘部俯仰=0, 偏航=0)
+            最后1个：头部偏航关节 (偏航=0)
+        -->
+        <!-- <key name="floating_base_homing" qpos="
+        0 0 0.82 
+        1 0 0 0 
+        0 0 -0.12 0.24 -0.12 0 
+        0 0 -0.12 0.24 -0.12 0 
+        0 
+        0 0 0 0 0 
+        0 -0 0 0 0 
+        0"/> -->
+        <key name="floating_base_homing" qpos="
+        0 0 0.83 
+        1 0 0 0 
+        0 0 -0 0 -0 0 
+        0 0 -0 0 -0 0 
+        0 
+        0 0.1 0 0 0 
+        0 -0.1 0 0 0 
+        0"/>
+    </keyframe>
+
+    <!-- ==================== 文件结束 ==================== -->
+    <!-- 此文件定义了PM V2双足机器人的mesh碰撞模型版本 -->
+    <!-- 使用高精度的mesh模型进行碰撞检测，计算精度高但速度较慢 -->
+</mujoco>

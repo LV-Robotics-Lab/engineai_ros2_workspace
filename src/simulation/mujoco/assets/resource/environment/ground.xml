@@ -10,8 +10,8 @@
   </visual>
 
   <visual>
-    <rgba com="1 0.84 0 0.5" contactforce="0.8 0.36 0.36 1" contactpoint="1.0 1.0 0.6 0.4"/>
-    <scale com="1" forcewidth="0.02" contactwidth="0.01" contactheight="0.02" framewidth="0.05" framelength="0.6"/>
+    <rgba com="1 0.84 0 0.5" contactforce="0.8 0.36 0.36 1" contactpoint="1.0 0.0 0.0 0.8"/>
+    <scale com="1" forcewidth="0.02" contactwidth="0.005" contactheight="0.01" framewidth="0.05" framelength="0.6"/>
     <map force="0.01"/>
   </visual>
 

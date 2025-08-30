@@ -6,11 +6,13 @@
 #include <mutex>
 #include <string>
 #include <vector>
+#include <fstream>
 
 #include "interface_protocol/msg/imu_info.hpp"
 #include "interface_protocol/msg/joint_command.hpp"
 #include "interface_protocol/msg/joint_state.hpp"
 #include "interface_protocol/msg/motion_state.hpp"
+#include "interface_protocol/msg/contact_force.hpp"
 #include "rclcpp/rclcpp.hpp"
 
 // MuJoCo includes
@@ -26,7 +28,7 @@ namespace mujoco {
 
 class RosInterface {
  public:
-  RosInterface(const rclcpp::Node::SharedPtr& node, std::shared_ptr<ConfigLoader> config_loader);
+  RosInterface(const std::shared_ptr<rclcpp::Node>& node, std::shared_ptr<ConfigLoader> config_loader);
   ~RosInterface();
 
   // Initialize the MuJoCo interface
@@ -45,16 +47,20 @@ class RosInterface {
   void SetModelAndData(mjModel* model, mjData* data);
 
   // Get the ROS node
-  rclcpp::Node::SharedPtr GetNode() const { return node_; }
+  std::shared_ptr<rclcpp::Node> GetNode() const { return node_; }
+
+  // Publish contact forces
+  void PublishContactForces(const mjModel* m, mjData* d);
 
  private:
   // ROS2 node
-  rclcpp::Node::SharedPtr node_;
+  std::shared_ptr<rclcpp::Node> node_;
 
   // Publishers
   rclcpp::Publisher<interface_protocol::msg::JointState>::SharedPtr joint_state_pub_;
   rclcpp::Publisher<interface_protocol::msg::ImuInfo>::SharedPtr imu_pub_;
   rclcpp::Publisher<interface_protocol::msg::MotionState>::SharedPtr motion_state_pub_;
+  rclcpp::Publisher<interface_protocol::msg::ContactForce>::SharedPtr contact_force_pub_;
 
   // Subscribers
   rclcpp::Subscription<interface_protocol::msg::JointCommand>::SharedPtr joint_cmd_sub_;
@@ -78,8 +84,19 @@ class RosInterface {
   // Motion state timer callback
   void MotionStateTimerCallback();
 
+  // Contact force publishing parameters
+  bool export_contact_ = false;
+  std::string contact_topic_ = "/mujoco/contact_forces";
+
+  // CSV logging parameters
+  bool save_contact_csv_ = false;
+  std::string csv_file_path_;
+  std::ofstream csv_file_;
+  std::mutex csv_mutex_;
+  int csv_save_frequency_ = 1;  // 保存频率，1表示每帧都保存
+
   // Mutex for thread safety
-  std::mutex mtx_;
+  mutable std::mutex mtx_;
 
   // Flag indicating if we have a floating base robot
   bool is_floating_base_;

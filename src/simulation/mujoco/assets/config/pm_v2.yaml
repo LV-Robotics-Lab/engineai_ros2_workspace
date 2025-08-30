@@ -1,14 +1,39 @@
-urdf: serial_pm_v2.urdf
-xml: pm_v2.xml
+# PM_v2人形机器人MuJoCo仿真配置文件
+# 该文件定义了机器人在仿真环境中的各种参数设置
 
-model_param:
-  num_total_joints: 24
-  num_contacts: 4
-  num_single_contact_dimensions: 2
-
-sensor:
-  imu_topic: /hardware/imu_info
-
+# 执行器配置 - 定义关节控制相关的话题
 actuator:
-  joint_state_topic: /hardware/joint_state
-  joint_command_topic: /hardware/joint_command
+  joint_command_topic: /hardware/joint_command  # 关节命令话题，用于发送关节角度/速度/力矩控制指令
+  joint_state_topic: /hardware/joint_state      # 关节状态话题，用于接收关节当前角度、速度、力矩等状态信息
+
+# 碰撞模型配置 - 定义碰撞检测的几何体类型
+collision_model:
+  use_simplified_geometry: false  # 碰撞检测几何体类型选择
+  # true = 使用简化几何体（如球体、圆柱体、立方体，计算速度快但精度较低）
+  # false = 使用真实mesh（高精度网格模型，计算精度高但速度较慢）
+  
+  # XML文件选择配置
+  xml_files:
+    simplified: serial_pm_v2_simplified.xml  # 简化几何体版本
+    mesh: serial_pm_v2_mesh.xml              # 真实mesh版本
+
+# 接触力可视化配置 - 用于在仿真界面中显示接触力
+contact_visualization:
+  enabled: true        # 是否启用接触力可视化功能
+  force_scale: 0.01   # 力矢量显示的比例因子（0.01表示将实际力缩小100倍显示，便于观察）
+  marker_size: 0.1    # 可视化标记的大小（箭头、球体等标记的尺寸）
+  position_offset: 0.0 # 位置偏移量（用于调整可视化标记的位置）
+
+# 模型参数 - 定义机器人的基本结构参数
+model_param:
+  num_contacts: 4                    # 机器人接触点的数量（通常是脚部的4个接触点）
+  num_single_contact_dimensions: 2   # 单个接触点的维度数（2表示2D平面接触，如脚底与地面）
+  num_total_joints: 24              # 机器人总关节数量（包括所有可控制的关节）
+
+# 传感器配置 - 定义传感器数据的话题
+sensor:
+  imu_topic: /hardware/imu_info  # IMU传感器数据的话题名称（用于获取姿态、角速度、加速度等信息）
+
+# 模型文件配置 - 指定机器人的模型文件路径
+urdf: serial_pm_v2.urdf  # URDF模型文件路径（机器人描述文件，包含关节、连杆等信息）
+xml: pm_v2.xml          # MuJoCo XML模型文件路径（MuJoCo专用的仿真模型文件）

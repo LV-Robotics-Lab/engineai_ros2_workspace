@@ -1,0 +1,14 @@
+std_msgs/Header header
+string[] contact_names
+float64[] contact_positions_x
+float64[] contact_positions_y
+float64[] contact_positions_z
+float64[] contact_forces_x
+float64[] contact_forces_y
+float64[] contact_forces_z
+float64[] contact_torques_x
+float64[] contact_torques_y
+float64[] contact_torques_z
+float64[] contact_gaps
+int32[] contact_bodies_1
+int32[] contact_bodies_2 

@@ -82,10 +82,59 @@ Joystick Control is the simplest mode with which the user can enjoy the default 
 ```bash
 # in host
 # terminal 1
+cd /home/wang22/engineai/engineai_ros2_workspace && conda activate engineai_ros2
 ./src/third_party/install.sh
-./scripts/build_nodes.sh sim
+./scripts/build_nodes.sh sim    # or colcon build --packages-select mujoco_simulator
 source install/setup.bash
-ros2 launch mujoco_simulator mujoco_simulator.launch.py
+# ros2 launch mujoco_simulator mujoco_simulator.launch.py
+ros2 launch mujoco_simulator mujoco_simulator.launch.py save_contact_csv:=true csv_save_frequency:=1
+
+# terminal 2
+# choose mesh or geometry: in src/simulation/mujoco/assets/config/pm_v2.yaml
+# change "use_simplified_geometry: true"
+cd /home/wang22/engineai/engineai_ros2_workspace
+conda activate engineai_ros2
+# plot contact force max
+python3 scripts/analyze_contact_forces.py /home/wang22/engineai/engineai_ros2_workspace/logs/contact_data_20250805_152300.csv
+# plot contact point with force
+# 使用现有的XML文件
+python3 scripts/mujoco_urdf_contact_display.py logs/contact_data_20250805_152300.csv src/simulation/mujoco/assets/resource/pm_v2.xml
+
+# 或者使用URDF文件（会自动转换）
+python3 scripts/mujoco_urdf_contact_display.py logs/contact_data_20250804_132251.csv src/simulation/mujoco/assets/resource/robot/pm_v2/urdf/serial_pm_v2.urdf
+
+# 使用球体可视化（推荐）
+python3 scripts/mujoco_urdf_contact_display.py logs/contact_data_20250805_152300.csv src/simulation/mujoco/assets/resource/robot/pm_v2/urdf/serial_pm_v2.urdf sphere
+
+# 使用球体可视化 + 世界坐标
+python3 scripts/mujoco_urdf_contact_display.py logs/contact_data_20250729_214158.csv src/simulation/mujoco/assets/resource/robot/pm_v2/urdf/serial_pm_v2.urdf sphere world
+
+# 使用圆柱体可视化（Mujoco内置）
+python3 scripts/mujoco_urdf_contact_display.py logs/contact_data_20250729_214158.csv src/simulation/mujoco/assets/resource/pm_v2.xml cylinder
+
+# 完整参数说明
+# 参数1: CSV文件路径
+# 参数2: XML或URDF文件路径
+# 参数3: 可视化类型 (sphere|cylinder) - 可选，默认为cylinder
+# 参数4: 坐标系统 (world|urdf) - 可选，默认为urdf
+
+# terminal 3
+# 小球撞地测试
+conda activate engineai_ros2
+python /home/wang22/engineai/engineai_ros2_workspace/scripts/FreeBallTest/iron_ball_drop_bySensor.py
+
+
+# terminal 4
+# 根据urdf和xml里的初始位置，把机器人多link的mesh合成一个整体mesh
+# main中，urdf提供机器人link父子关系，xml提供初始位姿，
+chmod +x ./scripts/MeshCombine/install_dependencies.sh
+./scripts/MeshCombine/install_dependencies.sh
+python ./scripts/MeshCombine/urdf_mesh_combiner.py
+
+git push origin bench
+
+# terminal 2
+# ros2 launch interface_example contact_viz.launch.py
 ```
 > **IMPORTANT**: When running simulation, either do not connect to the physical robot or set `ROS_LOCALHOST_ONLY=1` in your environment to prevent accidental connections.
 

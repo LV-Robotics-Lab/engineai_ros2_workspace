@@ -1,29 +1,130 @@
+<!-- ==================== PM V2 机器人传感器配置文件 ==================== -->
+<!-- 文件名: serial_sensors.xml -->
+<!-- 描述: 定义PM V2双足机器人的所有传感器配置 -->
+<!-- 用途: 配置IMU、力传感器、扭矩传感器等，用于状态估计和反馈控制 -->
+
+<!-- 根元素：定义传感器模型 -->
+<!-- model="serial_sensor": 传感器模型名称 -->
 <mujoco model = "serial_sensor">
 
-    <!-- !!! Do not change the order of these sensors unless you want to modify the mujuco `main.cc` -->
+    <!-- ==================== 传感器组 (Sensor Group) ==================== -->
+    <!-- 重要警告：除非要修改mujoco main.cc文件，否则不要改变这些传感器的顺序 -->
+    <!-- 传感器顺序在代码中被硬编码，改变顺序会导致数据读取错误 -->
     <sensor>
-        <!-- Sets base link states to the base site -->
+        <!-- ==================== 基座链接状态传感器 (Base Link State Sensors) ==================== -->
+        <!-- 将基座链接的状态信息绑定到基座站点 -->
+        <!-- 这些传感器提供机器人的全局位置和姿态信息 -->
+        
+        <!-- 基座链接四元数传感器 -->
+        <!-- name="base_link_quaternion": 传感器名称，提供基座姿态四元数
+             objtype="site": 对象类型为站点
+             objname="base": 目标对象为基座站点 -->
         <framequat name="base_link_quaternion" objtype="site" objname="base"/>
+        
+        <!-- 基座链接位置传感器 -->
+        <!-- name="base_link_position": 传感器名称，提供基座位置坐标 (x, y, z)
+             objtype="site": 对象类型为站点
+             objname="base": 目标对象为基座站点 -->
         <framepos name="base_link_position" objtype="site" objname="base"/>
+        
+        <!-- 基座链接线速度传感器 -->
+        <!-- name="base_link_linear_velocity": 传感器名称，提供基座线速度 (vx, vy, vz)
+             objtype="site": 对象类型为站点
+             objname="base": 目标对象为基座站点 -->
         <framelinvel name="base_link_linear_velocity" objtype="site" objname="base"/>
+        
+        <!-- 基座链接角速度传感器 -->
+        <!-- name="base_link_angular_velocity": 传感器名称，提供基座角速度 (wx, wy, wz)
+             objtype="site": 对象类型为站点
+             objname="base": 目标对象为基座站点 -->
         <frameangvel name="base_link_angular_velocity" objtype="site" objname="base"/>
 
-        <!-- Sets imu link states to the imu site -->
+        <!-- ==================== IMU链接状态传感器 (IMU Link State Sensors) ==================== -->
+        <!-- 将IMU链接的状态信息绑定到IMU站点 -->
+        <!-- 这些传感器提供IMU安装位置的完整状态信息 -->
+        
+        <!-- IMU链接四元数传感器 -->
+        <!-- name="imu_link_quaternion": 传感器名称，提供IMU安装位置的姿态四元数
+             objtype="site": 对象类型为站点
+             objname="imu": 目标对象为IMU站点 -->
         <framequat name="imu_link_quaternion" objtype="site" objname="imu"/>
+        
+        <!-- IMU链接位置传感器 -->
+        <!-- name="imu_link_position": 传感器名称，提供IMU安装位置坐标 (x, y, z)
+             objtype="site": 对象类型为站点
+             objname="imu": 目标对象为IMU站点 -->
         <framepos name="imu_link_position" objtype="site" objname="imu"/>
+        
+        <!-- IMU链接线速度传感器 -->
+        <!-- name="imu_link_linear_velocity": 传感器名称，提供IMU安装位置线速度 (vx, vy, vz)
+             objtype="site": 对象类型为站点
+             objname="imu": 目标对象为IMU站点 -->
         <framelinvel name="imu_link_linear_velocity" objtype="site" objname="imu"/>
+        
+        <!-- IMU链接角速度传感器 -->
+        <!-- name="imu_link_angular_velocity": 传感器名称，提供IMU安装位置角速度 (wx, wy, wz)
+             objtype="site": 对象类型为站点
+             objname="imu": 目标对象为IMU站点 -->
         <frameangvel name="imu_link_angular_velocity" objtype="site" objname="imu"/>
 
-        <!-- Sets imu states to the imu site -->
+        <!-- ==================== IMU传感器 (IMU Sensors) ==================== -->
+        <!-- 将IMU传感器数据绑定到IMU站点 -->
+        <!-- 这些传感器模拟真实的IMU硬件，提供姿态、加速度和角速度数据 -->
+        
+        <!-- IMU四元数传感器 -->
+        <!-- name="imu_quaternion": 传感器名称，提供IMU姿态四元数
+             objtype="site": 对象类型为站点
+             objname="imu": 目标对象为IMU站点 -->
         <framequat name="imu_quaternion" objtype="site" objname="imu"/>
+        
+        <!-- IMU加速度计传感器 -->
+        <!-- name="imu_linear_acceleration": 传感器名称，提供IMU线性加速度
+             noise="0": 噪声参数，0表示无噪声（理想传感器）
+             cutoff="0": 截止频率，0表示无滤波
+             site="imu": 传感器安装站点 -->
         <accelerometer name="imu_linear_acceleration" noise="0" cutoff="0" site="imu"/>
+        
+        <!-- IMU陀螺仪传感器 -->
+        <!-- name="imu_angular_velocity": 传感器名称，提供IMU角速度
+             noise="0": 噪声参数，0表示无噪声（理想传感器）
+             cutoff="0": 截止频率，0表示无滤波
+             site="imu": 传感器安装站点 -->
         <gyro name="imu_angular_velocity" noise="0" cutoff="0" site="imu"/>
 
-        <!-- Sets force/torque states to the force/torque sensor site -->
+        <!-- ==================== 力/扭矩传感器 (Force/Torque Sensors) ==================== -->
+        <!-- 将力/扭矩传感器数据绑定到对应的传感器站点 -->
+        <!-- 这些传感器用于检测脚部与地面的接触力和扭矩，对步态控制至关重要 -->
+        
+        <!-- 左脚力传感器 -->
+        <!-- name="force_left_foot": 传感器名称，提供左脚接触力
+             site="force_sensor_left_foot": 力传感器安装站点 -->
         <force name="force_left_foot" site="force_sensor_left_foot"/>
+        
+        <!-- 左脚扭矩传感器 -->
+        <!-- name="torque_left_foot": 传感器名称，提供左脚接触扭矩
+             site="torque_sensor_left_foot": 扭矩传感器安装站点 -->
         <torque name="torque_left_foot" site="torque_sensor_left_foot"/>
+        
+        <!-- 右脚力传感器 -->
+        <!-- name="force_right_foot": 传感器名称，提供右脚接触力
+             site="force_sensor_right_foot": 力传感器安装站点 -->
         <force name="force_right_foot" site="force_sensor_right_foot"/>
+        
+        <!-- 右脚扭矩传感器 -->
+        <!-- name="torque_right_foot": 传感器名称，提供右脚接触扭矩
+             site="torque_sensor_right_foot": 扭矩传感器安装站点 -->
         <torque name="torque_right_foot" site="torque_sensor_right_foot"/>
     </sensor>
 
+    <!-- ==================== 文件结束 ==================== -->
+    <!-- 此文件定义了PM V2双足机器人的所有传感器配置 -->
+    <!-- 包含以下传感器类型： -->
+    <!-- - 基座状态传感器：位置、姿态、线速度、角速度 -->
+    <!-- - IMU链接状态传感器：IMU安装位置的完整状态信息 -->
+    <!-- - IMU传感器：姿态四元数、线性加速度、角速度 -->
+    <!-- - 力/扭矩传感器：左右脚的接触力和扭矩 -->
+    <!-- 传感器配置特点： -->
+    <!-- - 理想传感器：无噪声、无滤波，提供精确数据 -->
+    <!-- - 顺序固定：传感器顺序在代码中硬编码，不能随意改变 -->
+    <!-- - 双重IMU数据：同时提供链接状态和IMU传感器数据 -->
 </mujoco>

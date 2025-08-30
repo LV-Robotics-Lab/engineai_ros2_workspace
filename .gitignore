@@ -3,7 +3,28 @@
 .cache/
 /install/
 /build/
+/venv/
 /log/
 /rosbag2_*/
 __pycache__/
 *.pyc
+
+
+# 忽略CSV数据文件
+logs/contact_data_*.csv
+logs/*.png
+logs/*.jpg
+logs/*.jpeg
+
+# 忽略编译文件
+log/
+install/
+build/  
+
+# 忽略分析结果图片
+logs/*.png
+logs/*.jpg
+logs/*.jpeg
+
+# 保留logs目录但忽略数据文件
+!logs/.gitkeep
