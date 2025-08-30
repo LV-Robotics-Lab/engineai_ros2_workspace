@@ -66,7 +66,7 @@ Normally, a default process is running. Users can control the robot with EngineA
 
 The FSM which includes Joystick Mode, High-level development and Low-level development is depicted as follows, please check through carefully to safely activate the specific mode.
 
-<img src="docs/images/FSM.png" alt="EngineAI Logo" width="600">
+<img src="docs/images/FSM.jpg" alt="EngineAI Logo" width="600">
 
 ### Joystick Control
 Joystick Control is the simplest mode with which the user can enjoy the default motion offered by EngineAI. Please follow the directions below carefully.
@@ -145,6 +145,7 @@ Connect to the robot network by Ethernet
    # in host
    ping 192.168.0.163
    ```
+> **WARNING**: Do not use USB network cards as they may cause ROS2 communication issues. Use built-in Ethernet ports for reliable communication with the robot.
 ### High-level Development
 #### Body Velocity Control Example
 1. Enter Basic Walk mode(Refer to the FSM flow chart)
@@ -218,3 +219,6 @@ source install/setup.bash
 ros2 run plotjuggler plotjuggler -n
 ```
 A default layout file is in `src/interface_protocol/pm_data_layout.xml`
+
+## Get the latest firmware of EngineAI Robot
+Refer to the [EngineAI Firmware](https://github.com/engineai-robotics/engineai_firmware) repository for the latest firmware.
