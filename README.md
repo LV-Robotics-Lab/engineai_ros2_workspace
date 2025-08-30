@@ -222,3 +222,23 @@ A default layout file is in `src/interface_protocol/pm_data_layout.xml`
 
 ## Get the latest firmware of EngineAI Robot
 Refer to the [EngineAI Firmware](https://github.com/engineai-robotics/engineai_firmware) repository for the latest firmware.
+
+
+
+## git 操作
+```bash
+# 定期从EngineAI拉取更新
+git fetch upstream
+
+# 合并到community分支
+git checkout community
+git merge upstream/community
+
+# 同步到bench分支
+git checkout bench
+git merge community
+
+# 推送到您的远程仓库
+git push origin community
+git push origin bench
+```
