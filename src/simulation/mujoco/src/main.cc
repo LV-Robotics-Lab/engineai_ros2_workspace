@@ -1,8 +1,24 @@
 #include <rclcpp/rclcpp.hpp>
 #include <cstring>
+#include <signal.h>
+#include <iostream>
 #include "sim_manager.h"
 
+// 全局变量用于信号处理
+static bool g_shutdown_requested = false;
+
+// 信号处理函数
+void signal_handler(int signal) {
+  std::cout << "\nReceived signal " << signal << ", shutting down gracefully..." << std::endl;
+  g_shutdown_requested = true;
+  rclcpp::shutdown();
+}
+
 int main(int argc, char** argv) {
+  // 设置信号处理
+  signal(SIGINT, signal_handler);
+  signal(SIGTERM, signal_handler);
+  
   // 解析命令行参数
   bool export_contact = false;
   std::string contact_topic = "/mujoco/contact_forces";
@@ -28,7 +44,15 @@ int main(int argc, char** argv) {
     return 1;
   }
 
-  sim_manager.Run();
+  try {
+    sim_manager.Run();
+  } catch (const std::exception& e) {
+    std::cerr << "Exception in simulation: " << e.what() << std::endl;
+  } catch (...) {
+    std::cerr << "Unknown exception in simulation" << std::endl;
+  }
+  
+  std::cout << "Shutting down ROS..." << std::endl;
   rclcpp::shutdown();
   return 0;
 }

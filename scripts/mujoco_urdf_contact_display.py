@@ -247,6 +247,41 @@ def urdf_to_mujoco_xml(urdf_path, original_urdf_path=None, contact_forces=None):
         print(f"Error converting URDF to Mujoco XML: {e}")
         return None
 
+def analyze_csv_data(df):
+    """Analyze CSV data and print statistics"""
+    print("\n=== CSV Data Analysis ===")
+    print(f"Total rows: {len(df)}")
+    print(f"Columns: {list(df.columns)}")
+    
+    # Check for key columns
+    key_columns = {
+        'Time': ['sim_time'],
+        'Contact Info': ['contact_id', 'geom1_name', 'geom2_name'],
+        'World Position': ['pos_x', 'pos_y', 'pos_z'],
+        'Robot Frame Position': ['robot_frame_x', 'robot_frame_y', 'robot_frame_z'],
+        'Forces': ['force_x', 'force_y', 'force_z', 'force_magnitude'],
+        'Torques': ['torque_x', 'torque_y', 'torque_z'],
+        'Base Link': ['base_link_x', 'base_link_y', 'base_link_z', 'base_link_quat_w', 'base_link_quat_x', 'base_link_quat_y', 'base_link_quat_z']
+    }
+    
+    for category, columns in key_columns.items():
+        found_columns = [col for col in columns if col in df.columns]
+        if found_columns:
+            print(f"{category}: {found_columns}")
+            if category == 'Time' and 'sim_time' in df.columns:
+                print(f"  Time range: {df['sim_time'].min():.3f} - {df['sim_time'].max():.3f} seconds")
+            elif category == 'Forces' and 'force_magnitude' in df.columns:
+                print(f"  Force range: {df['force_magnitude'].min():.3f} - {df['force_magnitude'].max():.3f} N")
+        else:
+            print(f"{category}: Not found")
+    
+    # Check for joint angle columns
+    joint_columns = [col for col in df.columns if any(joint_name in col.lower() for joint_name in ['joint', 'qpos'])]
+    if joint_columns:
+        print(f"Joint angles: {len(joint_columns)} columns found")
+    
+    print("=" * 30)
+
 def create_contact_force_visualization(df, x_col, y_col, z_col):
     """Create contact force visualization data with enhanced analysis"""
     print("Processing contact force data...")
@@ -261,9 +296,18 @@ def create_contact_force_visualization(df, x_col, y_col, z_col):
     
     df_valid = df[valid_mask].copy()
     
-    # Calculate force magnitude
-    if 'force_magnitude' not in df_valid.columns:
-        df_valid['force_magnitude'] = np.sqrt(df_valid['force_x']**2 + df_valid['force_y']**2 + df_valid['force_z']**2)
+    # Check if force_magnitude column exists (new format)
+    if 'force_magnitude' in df_valid.columns:
+        print("Using force_magnitude column from CSV")
+    else:
+        # Calculate force magnitude from force components (old format)
+        force_columns = ['force_x', 'force_y', 'force_z']
+        if all(col in df_valid.columns for col in force_columns):
+            df_valid['force_magnitude'] = np.sqrt(df_valid['force_x']**2 + df_valid['force_y']**2 + df_valid['force_z']**2)
+            print("Calculated force_magnitude from force components")
+        else:
+            print("Warning: No force magnitude data found")
+            df_valid['force_magnitude'] = 1.0  # Default value
     
     # Coordinate system analysis
     print(f"Coordinate ranges:")
@@ -283,8 +327,9 @@ def create_contact_force_visualization(df, x_col, y_col, z_col):
         # World coordinates - need to convert to robot base coordinates
         print("Using world coordinates - converting to robot base coordinates...")
         
-        # Check if we have base_link position data
-        if 'base_link_x' in df_valid.columns and 'base_link_y' in df_valid.columns and 'base_link_z' in df_valid.columns:
+        # Check if we have base_link position data (new format)
+        base_link_columns = ['base_link_x', 'base_link_y', 'base_link_z']
+        if all(col in df_valid.columns for col in base_link_columns):
             print("Converting world coordinates to robot base coordinates using base_link position...")
             # Convert world coordinates to robot base coordinates
             df_valid['x_adjusted'] = df_valid[x_col] - df_valid['base_link_x']
@@ -323,12 +368,30 @@ def create_contact_force_visualization(df, x_col, y_col, z_col):
         forces_at_pos = df_valid.loc[mask, 'force_magnitude']
         max_force_at_pos = forces_at_pos.max()
         avg_force_at_pos = forces_at_pos.mean()
-        contact_forces.append({
+        
+        # Get additional information if available
+        contact_info = {
             'position': pos,  # Use adjusted position
             'max_force': max_force_at_pos,
             'avg_force': avg_force_at_pos,
             'contact_count': len(forces_at_pos)
-        })
+        }
+        
+        # Add geometric information if available
+        if 'geom1_name' in df_valid.columns and 'geom2_name' in df_valid.columns:
+            geom1_names = df_valid.loc[mask, 'geom1_name'].unique()
+            geom2_names = df_valid.loc[mask, 'geom2_name'].unique()
+            contact_info['geom1_names'] = list(geom1_names)
+            contact_info['geom2_names'] = list(geom2_names)
+        
+        # Add time information if available
+        if 'sim_time' in df_valid.columns:
+            times = df_valid.loc[mask, 'sim_time']
+            contact_info['first_time'] = times.min()
+            contact_info['last_time'] = times.max()
+            contact_info['duration'] = times.max() - times.min()
+        
+        contact_forces.append(contact_info)
     
     print(f"Created {len(contact_forces)} contact force visualizations")
     return contact_forces
@@ -627,13 +690,31 @@ def main():
     """Main function"""
     if len(sys.argv) < 3 or len(sys.argv) > 5:
         print("Usage: python3 mujoco_urdf_contact_display.py <csv_file> <xml_or_urdf_file> [sphere|cylinder] [world|robot_frame]")
-        print("Example: python3 mujoco_urdf_contact_display.py logs/contact_data_20250723_155151.csv src/simulation/mujoco/assets/resource/robot/pm_v2/xml/serial_pm_v2.xml")
-        print("Example: python3 mujoco_urdf_contact_display.py logs/contact_data_20250723_155151.csv src/simulation/mujoco/assets/resource/pm_v2.xml sphere")
-        print("Example: python3 mujoco_urdf_contact_display.py logs/contact_data_20250723_155151.csv src/simulation/mujoco/assets/resource/robot/pm_v2/urdf/serial_pm_v2.urdf sphere robot_frame")
-        print("Note: The script will automatically detect if you provide an XML file and use it directly")
-        print("      If you provide a URDF file, it will convert it to XML first")
-        print("      Optional third argument: 'sphere' for sphere visualization, 'cylinder' for Mujoco built-in (default)")
-        print("      Optional fourth argument: 'world' for world coordinates (pos_x/y/z), 'robot_frame' for robot frame coordinates (robot_frame_x/y/z) (default)")
+        print("")
+        print("Examples:")
+        print("  # Using new CSV format with robot frame coordinates (recommended)")
+        print("  python3 mujoco_urdf_contact_display.py logs/contact_data_20250804_132251.csv src/simulation/mujoco/assets/resource/robot/pm_v2/urdf/serial_pm_v2.urdf")
+        print("")
+        print("  # Using world coordinates")
+        print("  python3 mujoco_urdf_contact_display.py logs/contact_data_20250804_132251.csv src/simulation/mujoco/assets/resource/robot/pm_v2/urdf/serial_pm_v2.urdf world")
+        print("")
+        print("  # Using sphere visualization")
+        print("  python3 mujoco_urdf_contact_display.py logs/contact_data_20250804_132251.csv src/simulation/mujoco/assets/resource/robot/pm_v2/urdf/serial_pm_v2.urdf sphere")
+        print("")
+        print("  # Using XML file directly")
+        print("  python3 mujoco_urdf_contact_display.py logs/contact_data_20250804_132251.csv src/simulation/mujoco/assets/resource/robot/pm_v2/xml/serial_pm_v2.xml")
+        print("")
+        print("CSV Format Support:")
+        print("  - New format: sim_time, contact_id, geom1_name, geom2_name, pos_x/y/z, robot_frame_x/y/z, force_magnitude, etc.")
+        print("  - Legacy format: pos_x/y/z, force_x/y/z, etc.")
+        print("")
+        print("Arguments:")
+        print("  csv_file: Path to the CSV file with contact force data")
+        print("  xml_or_urdf_file: Path to XML or URDF model file")
+        print("  sphere|cylinder: Visualization type (default: cylinder)")
+        print("  world|robot_frame: Coordinate system (default: robot_frame)")
+        print("")
+        print("Note: The script automatically detects CSV format and coordinate systems")
         return
     
     csv_file = sys.argv[1]
@@ -667,6 +748,9 @@ def main():
     df = pd.read_csv(csv_file)
     print(f"Loaded {len(df)} rows")
     
+    # Analyze CSV data
+    analyze_csv_data(df)
+    
     # Check for coordinate columns
     if coord_type == "world":
         # Use world coordinates
@@ -690,6 +774,19 @@ def main():
         else:
             print("No complete robot frame coordinate sets found")
             return
+    
+    # Print CSV column information for debugging
+    print(f"CSV columns found: {list(df.columns)}")
+    print(f"CSV shape: {df.shape}")
+    
+    # Check for new format columns
+    new_format_columns = ['sim_time', 'contact_id', 'geom1_name', 'geom2_name', 'force_magnitude', 
+                         'base_link_x', 'base_link_y', 'base_link_z']
+    found_new_columns = [col for col in new_format_columns if col in df.columns]
+    if found_new_columns:
+        print(f"New format columns detected: {found_new_columns}")
+    else:
+        print("Using legacy CSV format")
     
     # Create contact force visualization
     contact_forces = create_contact_force_visualization(df, x_col, y_col, z_col)

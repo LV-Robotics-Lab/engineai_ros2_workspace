@@ -23,6 +23,7 @@
 #include <iomanip>
 #include <sstream>
 #include <ctime>
+#include <algorithm>
 
 #include "config_loader.h"
 #include "rclcpp/rclcpp.hpp"
@@ -287,9 +288,8 @@ void RosInterface::UpdateSimState(const mjModel* m, mjData* d) {
   // 发布消息
   joint_state_pub_->publish(std::move(joint_state_msg));
   imu_pub_->publish(std::move(imu_msg));
-  PublishContacts(m, d);
 
-  // 如果启用，发布接触力
+  // 发布接触力（包含接触点发布和RViz可视化功能）
   if (export_contact_) {
     PublishContactForces(m, d);
   }
@@ -502,6 +502,200 @@ void RosInterface::PublishContactForces(const mjModel* m, mjData* d) {
   // 发布接触力消息
   contact_force_pub_->publish(std::move(contact_msg));
 
+  // RViz可视化功能（从PublishContacts移植过来）
+  if (contact_marker_pub_) {
+    visualization_msgs::msg::MarkerArray arr;
+
+    // 先发一个"清空"指令，避免历史残留
+    {
+      visualization_msgs::msg::Marker clear;
+      clear.action = visualization_msgs::msg::Marker::DELETEALL;
+      arr.markers.push_back(clear);
+    }
+
+    // 可选：根据力大小缩放球的尺寸
+    const double base_diameter = 0.03;   // 3 cm 基础直径
+    const double max_diameter  = 0.12;   // 12 cm 上限
+    const double scale_gain    = 1.0/200.0; // 200N -> +1 倍尺寸（按需调）
+
+    // 使用静态变量缓存标准姿态数据，避免重复计算
+    static std::vector<mjtNum> std_xpos_cache;
+    static std::vector<mjtNum> std_xmat_cache;
+    static const mjModel* last_model_ptr = nullptr;
+    
+    // 检查是否需要重新计算标准姿态
+    if (last_model_ptr != m) {
+      // 重新计算标准姿态
+      std_xpos_cache.clear();
+      std_xmat_cache.clear();
+      
+      // 创建临时mjData对象
+      mjData* dstd = mj_makeData(m);
+      if (!dstd) {
+        RCLCPP_ERROR(node_->get_logger(), "Failed to create temporary mjData for standard pose");
+        // 如果创建失败，使用空指针，避免后续访问
+        last_model_ptr = m;
+        return;
+      } else {
+        // 设置标准姿态
+        int key_id = mj_name2id(m, mjOBJ_KEY, "floating_base_homing");
+        if (key_id >= 0) {
+          mj_resetDataKeyframe(m, dstd, key_id);
+        } else {
+          // 兜底：零位
+          mju_zero(dstd->qpos, m->nq);
+          if (m->jnt_type[0] == mjJNT_FREE) {
+            dstd->qpos[0] = 1; dstd->qpos[1] = dstd->qpos[2] = dstd->qpos[3] = 0;
+            dstd->qpos[4] = dstd->qpos[5] = dstd->qpos[6] = 0;
+          }
+        }
+        
+        mj_forward(m, dstd);
+        
+        // 缓存数据 - 添加边界检查
+        if (m->nbody > 0) {
+          std_xpos_cache.assign(dstd->xpos, dstd->xpos + 3*m->nbody);
+          std_xmat_cache.assign(dstd->xmat, dstd->xmat + 9*m->nbody);
+        }
+        
+        // 正确释放mjData对象
+        mj_deleteData(dstd);
+      }
+      
+      last_model_ptr = m;
+    }
+    
+    // 检查缓存是否有效
+    if (std_xpos_cache.empty() || std_xmat_cache.empty()) {
+      RCLCPP_WARN(node_->get_logger(), "Standard pose cache is empty, skipping visualization");
+      return;
+    }
+    
+    const mjtNum* std_xpos = std_xpos_cache.data();
+    const mjtNum* std_xmat = std_xmat_cache.data();
+
+    for (int i = 0; i < ncon; ++i) {
+      const mjContact& contact = d->contact[i];
+
+      // 取 6D 接触力
+      double w[6] = {0};
+      mj_contactForce(m, d, i, w);
+
+      // contact -> world
+      double R[9];
+      if (contact.dim > 0) std::memcpy(R, contact.frame, sizeof(R));
+      else { R[0]=1;R[1]=0;R[2]=0; R[3]=0;R[4]=1;R[5]=0; R[6]=0;R[7]=0;R[8]=1; }
+
+      auto rot3 = [](const double* M, const double* v, double* o){
+        o[0]=M[0]*v[0]+M[1]*v[1]+M[2]*v[2];
+        o[1]=M[3]*v[0]+M[4]*v[1]+M[5]*v[2];
+        o[2]=M[6]*v[0]+M[7]*v[1]+M[8]*v[2];
+      };
+      double f_c[3] = {w[0], w[1], w[2]}, f_w[3];
+      rot3(R, f_c, f_w);
+      const double f_mag = std::sqrt(f_w[0]*f_w[0] + f_w[1]*f_w[1] + f_w[2]*f_w[2]);
+
+      // -------------------
+      // 红球：世界系接触点
+      // -------------------
+      visualization_msgs::msg::Marker mkr_red;
+      mkr_red.header.frame_id = "world";
+      mkr_red.header.stamp    = node_->now();
+      mkr_red.ns   = "contact_world";
+      mkr_red.id   = i;
+      mkr_red.type = visualization_msgs::msg::Marker::SPHERE;
+      mkr_red.action = visualization_msgs::msg::Marker::ADD;
+
+      mkr_red.pose.position.x = contact.pos[0];
+      mkr_red.pose.position.y = contact.pos[1];
+      mkr_red.pose.position.z = contact.pos[2];
+      mkr_red.pose.orientation.w = 1.0;
+
+      double dia = base_diameter * (1.0 + std::clamp(f_mag*scale_gain, 0.0, 3.0));
+      dia = std::min(dia, max_diameter);
+      mkr_red.scale.x = mkr_red.scale.y = mkr_red.scale.z = dia;
+
+      mkr_red.color.r = 1.0; mkr_red.color.g = 0.0; mkr_red.color.b = 0.0; mkr_red.color.a = 0.9;
+      mkr_red.lifetime = rclcpp::Duration::from_seconds(0.1);
+
+      arr.markers.push_back(mkr_red);
+
+      // -------------------
+      // 绿球：link局部系下的接触点
+      // -------------------
+      // 先找机器人 body
+      int body = m->geom_bodyid[contact.geom[0]];
+      if (body == 0) body = m->geom_bodyid[contact.geom[1]]; // 如果第一个是 world
+
+      if (body > 0 && body < m->nbody) {  // 添加边界检查
+        // 进一步检查缓存边界
+        if (body * 3 + 2 >= std_xpos_cache.size() || 
+            body * 9 + 8 >= std_xmat_cache.size()) {
+          RCLCPP_WARN(node_->get_logger(), "Body index %d out of cache bounds, skipping visualization", body);
+          continue;
+        }
+        
+        // 当前姿态：世界 -> body 局部
+        const mjtNum* x_BW = d->xpos + 3*body;   // 当前 body 原点（世界）
+        const mjtNum* R_BW = d->xmat + 9*body;   // 当前 body 旋转（行存 3x3）
+
+        auto rotT3 = [](const double* M, const double* v, double* o){
+          // o = R^T v
+          o[0]=M[0]*v[0]+M[3]*v[1]+M[6]*v[2];
+          o[1]=M[1]*v[0]+M[4]*v[1]+M[7]*v[2];
+          o[2]=M[2]*v[0]+M[5]*v[1]+M[8]*v[2];
+        };
+        auto rot3 = [](const double* M, const double* v, double* o){
+          // o = R v
+          o[0]=M[0]*v[0]+M[1]*v[1]+M[2]*v[2];
+          o[1]=M[3]*v[0]+M[4]*v[1]+M[5]*v[2];
+          o[2]=M[6]*v[0]+M[7]*v[1]+M[8]*v[2];
+        };
+
+        // 当前姿态下接触点 → body 局部 p_B
+        double pW_minus_x[3] = {contact.pos[0]-x_BW[0],
+                                contact.pos[1]-x_BW[1],
+                                contact.pos[2]-x_BW[2]};
+        double p_B[3];
+        rotT3(R_BW, pW_minus_x, p_B);
+
+        // 【标准姿态】：body 局部 → 世界 p_W_std
+        const mjtNum* x_BW_std = std_xpos + 3*body;   // 标准姿态 body 原点（世界）
+        const mjtNum* R_BW_std = std_xmat + 9*body;   // 标准姿态 body 旋转
+        double p_W_std[3];
+        rot3(R_BW_std, p_B, p_W_std);
+        p_W_std[0] += x_BW_std[0];
+        p_W_std[1] += x_BW_std[1];
+        p_W_std[2] += x_BW_std[2];
+
+        visualization_msgs::msg::Marker mkr_green;
+        mkr_green.header.frame_id = "world";      // RViz 的 fixed frame（和你系统一致）
+        mkr_green.header.stamp    = node_->now();
+        mkr_green.ns   = "contact_link_stdpose";
+        mkr_green.id   = 10000 + i;               // 避免和红球 id 冲突
+        mkr_green.type = visualization_msgs::msg::Marker::SPHERE;
+        mkr_green.action = visualization_msgs::msg::Marker::ADD;
+
+        mkr_green.pose.position.x = p_W_std[0];
+        mkr_green.pose.position.y = p_W_std[1];
+        mkr_green.pose.position.z = p_W_std[2];
+        mkr_green.pose.orientation.w = 1.0;
+
+        // 尺寸：复用你算好的 dia（或独立给绿球一个固定尺寸）
+        mkr_green.scale.x = mkr_green.scale.y = mkr_green.scale.z = dia;
+
+        // 颜色：绿色
+        mkr_green.color.r = 0.0; mkr_green.color.g = 1.0; mkr_green.color.b = 0.0; mkr_green.color.a = 0.9;
+
+        mkr_green.lifetime = rclcpp::Duration::from_seconds(0.1);
+
+        arr.markers.push_back(mkr_green);
+      }
+    }
+
+    contact_marker_pub_->publish(arr);
+  }
+
   // 保存到CSV文件
   if (save_contact_csv_ && csv_file_.is_open()) {
     // 使用帧计数器控制保存频率
@@ -588,14 +782,43 @@ void RosInterface::PublishContactForces(const mjModel* m, mjData* d) {
           base_link_quat[3] = d->xquat[base_link_id*4+3];
         }
         
-        // 计算碰撞点相对于base_link的位置（机器人坐标系）
-        mjtNum robot_frame_pos[3];
-        // 计算从base_link到接触点的相对位置（世界坐标系）
-        mjtNum relative_to_base[3] = {pos[0] - base_link_pos[0], pos[1] - base_link_pos[1], pos[2] - base_link_pos[2]};
-        // 将相对位置从世界坐标系转换到base_link的局部坐标系（机器人坐标系）
-        mjtNum base_link_quat_conj[4];
-        mju_negQuat(base_link_quat_conj, base_link_quat);
-        mju_rotVecQuat(robot_frame_pos, relative_to_base, base_link_quat_conj);
+        // 使用PublishContacts中正确的坐标系转换方法
+        // 找到机器人body（非world的几何体）
+        auto is_robot_geom = [&](int geom_id)->bool {
+          int b = m->geom_bodyid[geom_id];
+          return b != 0;   // 简单过滤：0通常是world
+        };
+        int robot_geom = is_robot_geom(contact.geom[0]) ? contact.geom[0] :
+                        (is_robot_geom(contact.geom[1]) ? contact.geom[1] : -1);
+
+        int body = -1;
+        if (robot_geom >= 0) {
+          body = m->geom_bodyid[robot_geom];
+        }
+
+        // 如果找到了机器人body，计算局部坐标
+        mjtNum robot_frame_pos[3] = {0, 0, 0};
+        mjtNum robot_frame_force[3] = {0, 0, 0};
+        if (body >= 0) {
+          const mjtNum* x_BW = d->xpos + 3*body;   // body原点世界坐标
+          const mjtNum* R_BW = d->xmat + 9*body;   // body旋转矩阵 (row-major)
+
+          auto rotT3 = [](const double* M, const double* v, double* o){
+            // R^T v
+            o[0]=M[0]*v[0]+M[3]*v[1]+M[6]*v[2];
+            o[1]=M[1]*v[0]+M[4]*v[1]+M[7]*v[2];
+            o[2]=M[2]*v[0]+M[5]*v[1]+M[8]*v[2];
+          };
+
+          // 世界点 -> 局部点
+          double pW_minus_x[3] = {pos[0]-x_BW[0],
+                                  pos[1]-x_BW[1],
+                                  pos[2]-x_BW[2]};
+          rotT3(R_BW, pW_minus_x, robot_frame_pos);
+
+          // 世界力 -> 局部力
+          rotT3(R_BW, world_force, robot_frame_force);
+        }
         
         // 写入CSV行
         csv_file_ << std::fixed << std::setprecision(6)
@@ -669,6 +892,8 @@ void RosInterface::MotionStateTimerCallback() {
   motion_state_pub_->publish(std::move(motion_state_msg));
 }
 
+// 注意：此函数已被 PublishContactForces 替代，功能已整合到 PublishContactForces 中
+// 保留此函数仅用于向后兼容，建议使用 PublishContactForces
 void RosInterface::PublishContacts(const mjModel* m, const mjData* d) {
   if (!contact_pub_) return;
 
