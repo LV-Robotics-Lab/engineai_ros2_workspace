@@ -61,12 +61,36 @@ SimManager::SimManager() {
  * @details 清理资源，包括物理线程、模型数据和ROS接口
  */
 SimManager::~SimManager() {
-  if (physics_thread_.joinable()) {
-    physics_thread_.join();
+  try {
+    // 首先停止仿真
+    if (sim_) {
+      sim_->exitrequest.store(true);
+    }
+    
+    // 等待物理线程结束
+    if (physics_thread_.joinable()) {
+      physics_thread_.join();
+    }
+    
+    // 清理MuJoCo资源（添加空指针检查）
+    if (d_) {
+      mj_deleteData(d_);
+      d_ = nullptr;
+    }
+    
+    if (m_) {
+      mj_deleteModel(m_);
+      m_ = nullptr;
+    }
+    
+    // 清理ROS接口
+    ros_interface_.reset();
+    
+  } catch (const std::exception& e) {
+    std::cerr << "Exception during SimManager destruction: " << e.what() << std::endl;
+  } catch (...) {
+    std::cerr << "Unknown exception during SimManager destruction" << std::endl;
   }
-  mj_deleteData(d_);
-  mj_deleteModel(m_);
-  ros_interface_.reset();
 }
 
 /**
@@ -583,9 +607,28 @@ void SimManager::PhysicsThread(std::string_view filename) {
   }
 
   RCLCPP_INFO(logger, "Starting physics loop");
-  PhysicsLoop();
+  
+  try {
+    PhysicsLoop();
+  } catch (const std::exception& e) {
+    RCLCPP_ERROR(logger, "Exception in physics loop: %s", e.what());
+  } catch (...) {
+    RCLCPP_ERROR(logger, "Unknown exception in physics loop");
+  }
 
   RCLCPP_INFO(logger, "Physics thread ending, cleaning up resources");
+  
+  // 清理线程本地资源
+  try {
+    // 重置ROS接口中的模型和数据指针，避免悬空指针
+    if (ros_interface_) {
+      ros_interface_->SetModelAndData(nullptr, nullptr);
+    }
+  } catch (const std::exception& e) {
+    RCLCPP_ERROR(logger, "Exception during physics thread cleanup: %s", e.what());
+  } catch (...) {
+    RCLCPP_ERROR(logger, "Unknown exception during physics thread cleanup");
+  }
 }
 
 

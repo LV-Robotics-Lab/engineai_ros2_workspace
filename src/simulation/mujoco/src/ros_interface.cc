@@ -109,9 +109,21 @@ bool RosInterface::Initialize() {
       // 写入CSV头部
       csv_file_ << "timestamp,contact_id,geom1_name,geom2_name,pos_x,pos_y,pos_z,robot_frame_x,robot_frame_y,robot_frame_z,force_x,force_y,force_z,force_magnitude,torque_x,torque_y,torque_z,base_link_x,base_link_y,base_link_z,base_link_qw,base_link_qx,base_link_qy,base_link_qz";
       
-      // 添加关节角度列
-      for (int i = 0; i < num_total_joints_; i++) {
-        csv_file_ << ",joint_" << i << "_angle";
+      // 添加完整的31个参数列名
+      if (is_floating_base_) {
+        // 浮动基座位置 (3个参数)
+        csv_file_ << ",floating_base_x,floating_base_y,floating_base_z";
+        // 浮动基座姿态四元数 (4个参数)
+        csv_file_ << ",floating_base_qw,floating_base_qx,floating_base_qy,floating_base_qz";
+        // 24个关节角度
+        for (int i = 0; i < num_total_joints_; i++) {
+          csv_file_ << ",joint_" << i << "_angle";
+        }
+      } else {
+        // 非浮动基座机器人，只添加关节角度
+        for (int i = 0; i < num_total_joints_; i++) {
+          csv_file_ << ",joint_" << i << "_angle";
+        }
       }
       csv_file_ << "\n";
       csv_file_.flush();
@@ -222,6 +234,11 @@ void RosInterface::JointCommandCallback(const interface_protocol::msg::JointComm
  * @details 发布关节状态、IMU数据和接触力数据
  */
 void RosInterface::UpdateSimState(const mjModel* m, mjData* d) {
+  // 添加空指针检查
+  if (!m || !d) {
+    return;
+  }
+  
   is_floating_base_ = (m->nv != m->nu);
 
   // 创建消息
@@ -302,7 +319,8 @@ void RosInterface::UpdateSimState(const mjModel* m, mjData* d) {
  * @details 计算并发布所有接触点的力和力矩信息，同时保存到CSV文件
  */
 void RosInterface::PublishContactForces(const mjModel* m, mjData* d) {
-  if (!contact_force_pub_) {
+  // 添加空指针检查
+  if (!contact_force_pub_ || !m || !d) {
     return;
   }
 
@@ -847,14 +865,21 @@ void RosInterface::PublishContactForces(const mjModel* m, mjData* d) {
                   << base_link_quat[2] << ","
                   << base_link_quat[3];
 
-        // 添加关节角度列
-        for (int i = 0; i < num_total_joints_; i++) {
-          int joint_idx = i;
-          if (is_floating_base_) {
-            // 如果有浮动基座，跳过前6个自由度（3个位置+3个姿态）
-            joint_idx = i + 6;
+        // 添加完整的31个参数（浮动基座位置+姿态+关节角度）
+        if (is_floating_base_) {
+          // 保存浮动基座位置 (前3个参数)
+          csv_file_ << "," << d->qpos[0] << "," << d->qpos[1] << "," << d->qpos[2];
+          // 保存浮动基座姿态四元数 (接下来4个参数)
+          csv_file_ << "," << d->qpos[3] << "," << d->qpos[4] << "," << d->qpos[5] << "," << d->qpos[6];
+          // 保存24个关节角度 (接下来24个参数)
+          for (int i = 0; i < num_total_joints_; i++) {
+            csv_file_ << "," << d->qpos[i + 7];  // 从索引7开始，跳过前7个浮动基座参数
           }
-          csv_file_ << "," << d->qpos[joint_idx];
+        } else {
+          // 非浮动基座机器人，只保存关节角度
+          for (int i = 0; i < num_total_joints_; i++) {
+            csv_file_ << "," << d->qpos[i];
+          }
         }
         csv_file_ << "\n";
       }
@@ -873,8 +898,20 @@ void RosInterface::PublishContactForces(const mjModel* m, mjData* d) {
 
 
 void RosInterface::SetModelAndData(mjModel* model, mjData* data) {
-  model_ = model;
-  data_ = data;
+  try {
+    model_ = model;
+    data_ = data;
+    
+    if (model && data) {
+      RCLCPP_INFO(node_->get_logger(), "Model and data pointers set successfully");
+    } else {
+      RCLCPP_INFO(node_->get_logger(), "Model and data pointers cleared");
+    }
+  } catch (const std::exception& e) {
+    RCLCPP_ERROR(node_->get_logger(), "Exception in SetModelAndData: %s", e.what());
+  } catch (...) {
+    RCLCPP_ERROR(node_->get_logger(), "Unknown exception in SetModelAndData");
+  }
 }
 
 /**

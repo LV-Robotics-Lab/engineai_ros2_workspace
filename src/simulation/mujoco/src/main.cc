@@ -11,7 +11,15 @@ static bool g_shutdown_requested = false;
 void signal_handler(int signal) {
   std::cout << "\nReceived signal " << signal << ", shutting down gracefully..." << std::endl;
   g_shutdown_requested = true;
-  rclcpp::shutdown();
+  
+  // 强制关闭ROS上下文
+  try {
+    rclcpp::shutdown();
+  } catch (const std::exception& e) {
+    std::cerr << "Exception during shutdown: " << e.what() << std::endl;
+  } catch (...) {
+    std::cerr << "Unknown exception during shutdown" << std::endl;
+  }
 }
 
 int main(int argc, char** argv) {
@@ -53,6 +61,18 @@ int main(int argc, char** argv) {
   }
   
   std::cout << "Shutting down ROS..." << std::endl;
-  rclcpp::shutdown();
+  
+  // 强制清理资源
+  try {
+    rclcpp::shutdown();
+  } catch (const std::exception& e) {
+    std::cerr << "Exception during ROS shutdown: " << e.what() << std::endl;
+  } catch (...) {
+    std::cerr << "Unknown exception during ROS shutdown" << std::endl;
+  }
+  
+  // 等待一段时间确保资源清理完成
+  std::this_thread::sleep_for(std::chrono::milliseconds(100));
+  
   return 0;
 }

@@ -97,6 +97,15 @@ conda activate engineai_ros2
 # plot contact force max
 python3 scripts/analyze_contact_forces.py /home/wang22/engineai/engineai_ros2_workspace/logs/contact_data_20250831_124107.csv
 # plot contact point with force
+# 使用新CSV格式和机器人坐标系（推荐）
+python3 scripts/mujoco_urdf_contact_display.py engineai_ros2_workspace/logs/contact_data_20250831_125541.csv src/simulation/mujoco/assets/resource/robot/pm_v2/urdf/serial_pm_v2.urdf
+
+# 使用世界坐标系
+python3 scripts/mujoco_urdf_contact_display.py logs/contact_data_20250831_124107.csv src/simulation/mujoco/assets/resource/robot/pm_v2/urdf/serial_pm_v2.urdf world
+
+# 使用球体可视化
+python3 scripts/mujoco_urdf_contact_display.py logs/contact_data_20250831_124107.csv src/simulation/mujoco/assets/resource/robot/pm_v2/urdf/serial_pm_v2.urdf sphere
+
 # 使用现有的XML文件
 python3 scripts/mujoco_urdf_contact_display.py logs/contact_data_20250805_152300.csv src/simulation/mujoco/assets/resource/pm_v2.xml
 

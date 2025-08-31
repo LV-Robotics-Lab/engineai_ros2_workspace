@@ -280,6 +280,12 @@ def analyze_csv_data(df):
     if joint_columns:
         print(f"Joint angles: {len(joint_columns)} columns found")
     
+    # Check for floating base columns
+    floating_base_columns = [col for col in df.columns if 'floating_base' in col.lower()]
+    if floating_base_columns:
+        print(f"Floating base parameters: {len(floating_base_columns)} columns found")
+        print(f"  Floating base columns: {floating_base_columns}")
+    
     print("=" * 30)
 
 def create_contact_force_visualization(df, x_col, y_col, z_col):
@@ -787,6 +793,16 @@ def main():
         print(f"New format columns detected: {found_new_columns}")
     else:
         print("Using legacy CSV format")
+    
+    # Check for floating base parameters (new 31-parameter format)
+    floating_base_columns = ['floating_base_x', 'floating_base_y', 'floating_base_z', 
+                           'floating_base_qw', 'floating_base_qx', 'floating_base_qy', 'floating_base_qz']
+    found_floating_base = [col for col in floating_base_columns if col in df.columns]
+    if found_floating_base:
+        print(f"Floating base parameters detected: {found_floating_base}")
+        print("Using new 31-parameter format (floating base + 24 joints)")
+    else:
+        print("Using 24-parameter format (joints only)")
     
     # Create contact force visualization
     contact_forces = create_contact_force_visualization(df, x_col, y_col, z_col)
