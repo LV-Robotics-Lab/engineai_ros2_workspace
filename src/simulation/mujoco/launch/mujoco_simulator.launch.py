@@ -141,8 +141,17 @@ def generate_launch_description():
             }]
         )
 
+        # 定义静态变换发布器，发布从world到LINK_BASE的变换
+        static_transform_publisher_node = Node(
+            package='tf2_ros',
+            executable='static_transform_publisher',
+            name='static_transform_publisher',
+            arguments=['0', '0', '0', '0', '0', '0', 'world', 'LINK_BASE'],
+            output='screen'
+        )
+
         # 返回节点对象列表
-        return [mujoco_node, joint_state_converter_node, robot_state_publisher_node]
+        return [mujoco_node, joint_state_converter_node, robot_state_publisher_node, static_transform_publisher_node]
 
     # 使用OpaqueFunction以便在launch时动态获取参数
     mujoco_launch = OpaqueFunction(function=launch_setup)
