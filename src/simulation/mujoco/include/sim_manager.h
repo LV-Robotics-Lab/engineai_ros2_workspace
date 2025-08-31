@@ -54,14 +54,4 @@ class SimManager {
 
   std::array<char, 1024> mj_load_error_;
 
-  //
-  // === 新增：标准姿态下每个 body 的世界位姿缓存 ===
-  std::vector<mjtNum> std_xpos_;  // 大小 3 * nbody
-  std::vector<mjtNum> std_xmat_;  // 大小 9 * nbody
-  // 用 keyframe 计算“标准姿态”
-  void ComputeStandardPoseWorldTransformsFromKey(mjModel* m, const char* key_name);
-
-  // 每步渲染：红球(当前接触) + 绿球(映射到标准姿态)
-  void DrawContactMarkersMappedToStandard(const mjModel* m, const mjData* d);
-
 };

@@ -776,7 +776,7 @@ void RosInterface::PublishContacts(const mjModel* m, const mjData* d) {
 
   visualization_msgs::msg::MarkerArray arr;
 
-  // 先发一个“清空”指令，避免历史残留
+  // 先发一个"清空"指令，避免历史残留
   {
     visualization_msgs::msg::Marker clear;
     clear.action = visualization_msgs::msg::Marker::DELETEALL;
@@ -788,25 +788,54 @@ void RosInterface::PublishContacts(const mjModel* m, const mjData* d) {
   const double max_diameter  = 0.12;   // 12 cm 上限
   const double scale_gain    = 1.0/200.0; // 200N -> +1 倍尺寸（按需调）
 
-  //加“标准姿态”准备（一次性）
-  // === 用 keyframe 'floating_base_homing' 得到【标准姿态】每个 body 的世界位姿 ===
-  int key_id = mj_name2id(m, mjOBJ_KEY, "floating_base_homing");
-  mjData* dstd = mj_makeData(m);
-  if (key_id >= 0) {
-    // 直接把 qpos/qvel/act 设为 keyframe
-    mj_resetDataKeyframe(m, dstd, key_id);
-  } else {
-    // 兜底：零位（如需把 free-base z 设成 0.82 可在此设置）
-    mju_zero(dstd->qpos, m->nq);
-    if (m->jnt_type[0] == mjJNT_FREE) {
-      dstd->qpos[0] = 1; dstd->qpos[1] = dstd->qpos[2] = dstd->qpos[3] = 0; // quat = [1,0,0,0]
-      dstd->qpos[4] = dstd->qpos[5] = dstd->qpos[6] = 0;                     // base at origin
-      // dstd->qpos[6] = 0.82; // 如需固定到 0.82，可按你的模型顺序解开
+  // 修复：将dstd的创建和释放移到函数外部，避免内存泄漏
+  // 使用静态变量缓存标准姿态数据，避免重复计算
+  static std::vector<mjtNum> std_xpos_cache;
+  static std::vector<mjtNum> std_xmat_cache;
+  static int last_model_id = -1;
+  
+  // 检查是否需要重新计算标准姿态
+  // 使用模型地址作为唯一标识符，因为mjModel没有id字段
+  static const mjModel* last_model_ptr = nullptr;
+  if (last_model_ptr != m) {
+    // 重新计算标准姿态
+    std_xpos_cache.clear();
+    std_xmat_cache.clear();
+    
+    // 创建临时mjData对象
+    mjData* dstd = mj_makeData(m);
+    if (!dstd) {
+      RCLCPP_ERROR(node_->get_logger(), "Failed to create temporary mjData for standard pose");
+      return;
     }
+    
+    // 设置标准姿态
+    int key_id = mj_name2id(m, mjOBJ_KEY, "floating_base_homing");
+    if (key_id >= 0) {
+      mj_resetDataKeyframe(m, dstd, key_id);
+    } else {
+      // 兜底：零位
+      mju_zero(dstd->qpos, m->nq);
+      if (m->jnt_type[0] == mjJNT_FREE) {
+        dstd->qpos[0] = 1; dstd->qpos[1] = dstd->qpos[2] = dstd->qpos[3] = 0;
+        dstd->qpos[4] = dstd->qpos[5] = dstd->qpos[6] = 0;
+      }
+    }
+    
+    mj_forward(m, dstd);
+    
+    // 缓存数据
+    std_xpos_cache.assign(dstd->xpos, dstd->xpos + 3*m->nbody);
+    std_xmat_cache.assign(dstd->xmat, dstd->xmat + 9*m->nbody);
+    
+    // 正确释放mjData对象
+    mj_deleteData(dstd);
+    
+    last_model_ptr = m;
   }
-  mj_forward(m, dstd);
-  const mjtNum* std_xpos = dstd->xpos;  // 3 * nbody
-  const mjtNum* std_xmat = dstd->xmat;  // 9 * nbody
+  
+  const mjtNum* std_xpos = std_xpos_cache.data();
+  const mjtNum* std_xmat = std_xmat_cache.data();
 
   for (int i = 0; i < d->ncon; ++i) {
   const mjContact& con = d->contact[i];
@@ -861,7 +890,7 @@ void RosInterface::PublishContacts(const mjModel* m, const mjData* d) {
   int body = m->geom_bodyid[con.geom1];
   if (body == 0) body = m->geom_bodyid[con.geom2]; // 如果第一个是 world
 
-  if (body > 0) {
+  if (body > 0 && body < m->nbody) {  // 添加边界检查
     // 当前姿态：世界 -> body 局部
     const mjtNum* x_BW = d->xpos + 3*body;   // 当前 body 原点（世界）
     const mjtNum* R_BW = d->xmat + 9*body;   // 当前 body 旋转（行存 3x3）
