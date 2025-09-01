@@ -636,6 +636,44 @@ void RosInterface::PublishContactForces(const mjModel* m, mjData* d) {
 
       // -------------------
       // 绿球：link局部系下的接触点
+      // p_W: 当前姿态下接触点在世界坐标系下的位置
+      // p_W_std: 标准姿态下接触点在世界坐标系下的位置
+      // p_B: 当前姿态下接触点在body局部坐标系下的位置
+      // p_B_std: 标准姿态下接触点在body局部坐标系下的位置
+      // R_BW: 当前姿态下body的旋转矩阵
+      // R_BW_std: 标准姿态下body的旋转矩阵
+      // f_B: 当前姿态下接触力在body局部坐标系下的力
+      // f_B_std: 标准姿态下接触力在body局部坐标系下的力
+      // t_B: 当前姿态下接触力在body局部坐标系下的力矩
+      // t_B_std: 标准姿态下接触力在body局部坐标系下的力矩
+      // f_norm: 接触力的法向分量（接触系x方向，正值，即正压力）
+      // f_mag: 接触力的总大小（世界坐标系下）
+      // f_norm_std: 标准姿态下接触力的法向分量（正压力）
+      // f_mag_std: 标准姿态下接触力的总大小
+      // dia: 接触点的大小
+      // dia_std: 标准姿态下接触点的大小
+      // color: 接触点的颜色
+      // lifetime: 接触点的生存时间
+      // ns: 接触点的名称空间
+      // id: 接触点的ID
+      // type: 接触点的类型
+      // action: 接触点的动作
+      // pose: 接触点的位置和姿态
+      // scale: 接触点的大小
+      // color: 接触点的颜色
+      // lifetime: 接触点的生存时间
+      // -------------------
+      // 计算公式
+      // p_W = R_BW * p_B + x_BW
+      // p_W_std = R_BW_std * p_B_std + x_BW_std
+      // f_B = R_BW * f_w
+      // f_B_std = R_BW_std * f_w
+      // t_B = R_BW * t_w
+      // t_B_std = R_BW_std * t_w
+      // f_norm = norm(f_B)
+      // f_mag = norm(f_B)
+      // f_norm_std = norm(f_B_std)
+      // f_mag_std = norm(f_B_std)
       // -------------------
       // 先找机器人 body
       int body = m->geom_bodyid[contact.geom[0]];
