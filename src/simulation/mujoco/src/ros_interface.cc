@@ -27,7 +27,7 @@
 
 #include "config_loader.h"
 #include "rclcpp/rclcpp.hpp"
-// #include <mujoco/mujoco.h>
+#include <mujoco/mujoco.h>
 
 
 // 常量定义
@@ -107,7 +107,7 @@ bool RosInterface::Initialize() {
       num_total_joints_ = config_loader_->GetNumTotalJoints();
       
       // 写入CSV头部
-      csv_file_ << "timestamp,contact_id,geom1_name,geom2_name,pos_x,pos_y,pos_z,robot_frame_x,robot_frame_y,robot_frame_z,force_x,force_y,force_z,force_magnitude,torque_x,torque_y,torque_z,base_link_x,base_link_y,base_link_z,base_link_qw,base_link_qx,base_link_qy,base_link_qz";
+      csv_file_ << "timestamp,contact_id,body1_name,body2_name,pos_x,pos_y,pos_z,robot_frame_x,robot_frame_y,robot_frame_z,force_x,force_y,force_z,force_magnitude,torque_x,torque_y,torque_z,base_link_x,base_link_y,base_link_z,base_link_qw,base_link_qx,base_link_qy,base_link_qz";
       
       // 添加完整的31个参数列名
       if (is_floating_base_) {
@@ -318,17 +318,31 @@ void RosInterface::UpdateSimState(const mjModel* m, mjData* d) {
  * @param d MuJoCo数据指针
  * @details 计算并发布所有接触点的力和力矩信息，同时保存到CSV文件
  */
+/**
+ * @brief 发布接触力信息到ROS话题
+ * 
+ * 该函数从MuJoCo仿真器中提取接触力数据，包括：
+ * - 接触点位置
+ * - 接触力（世界坐标系）
+ * - 接触力矩（世界坐标系）
+ * - 接触间隙
+ * - 接触体信息
+ * 
+ * @param m MuJoCo模型指针
+ * @param d MuJoCo数据指针
+ */
 void RosInterface::PublishContactForces(const mjModel* m, mjData* d) {
-  // 添加空指针检查
+  // 添加空指针检查，确保发布器和数据有效
   if (!contact_force_pub_ || !m || !d) {
     return;
   }
 
+  // 创建接触力消息并设置时间戳和坐标系
   auto contact_msg = std::make_unique<interface_protocol::msg::ContactForce>();
   contact_msg->header.stamp = node_->now();
   contact_msg->header.frame_id = "world";
 
-  // 获取接触数量
+  // 获取当前仿真中的接触数量
   int ncon = d->ncon;
   
   // 添加调试信息，每1000帧打印一次（在10kHz频率下约每0.1秒一次）
@@ -336,159 +350,107 @@ void RosInterface::PublishContactForces(const mjModel* m, mjData* d) {
   frame_count++;
   if (frame_count % 1000 == 0) {
     RCLCPP_INFO(node_->get_logger(), "Current contacts: %d", ncon);
-    
-    // 统计所有接触的力大小
-    double total_force_magnitude = 0.0;
-    double max_force_magnitude = 0.0;
-    int contacts_with_force = 0;
-    
-    // 计算所有接触的合力
-    mjtNum total_world_force[3] = {0.0, 0.0, 0.0};
-    mjtNum total_world_torque[3] = {0.0, 0.0, 0.0};
-    
-    for (int i = 0; i < ncon; ++i) {
-      const mjContact& contact = d->contact[i];
-      mjtNum contact_force[6] = {0.0, 0.0, 0.0, 0.0, 0.0, 0.0};
-      mj_contactForce(m, d, i, contact_force);
-      
-      // 转换到世界坐标系
-      mjtNum world_force[3] = {0.0, 0.0, 0.0};
-      mjtNum world_torque[3] = {0.0, 0.0, 0.0};
-      
-      for (int j = 0; j < 3; j++) {
-        world_force[j] = contact.frame[j*3 + 0] * contact_force[0] + 
-                         contact.frame[j*3 + 1] * contact_force[1] + 
-                         contact.frame[j*3 + 2] * contact_force[2];
-        
-        world_torque[j] = contact.frame[j*3 + 0] * contact_force[3] + 
-                          contact.frame[j*3 + 1] * contact_force[4] + 
-                          contact.frame[j*3 + 2] * contact_force[5];
-      }
-      
-      // 累加到合力
-      for (int j = 0; j < 3; j++) {
-        total_world_force[j] += world_force[j];
-        total_world_torque[j] += world_torque[j];
-      }
-      
-      double force_magnitude = sqrt(contact_force[0]*contact_force[0] + 
-                                   contact_force[1]*contact_force[1] + 
-                                   contact_force[2]*contact_force[2]);
-      
-      if (force_magnitude > 0.1) {  // 只统计有意义的力
-        contacts_with_force++;
-        total_force_magnitude += force_magnitude;
-        if (force_magnitude > max_force_magnitude) {
-          max_force_magnitude = force_magnitude;
-        }
-      }
-    }
-    
-    double total_force_magnitude_world = sqrt(total_world_force[0]*total_world_force[0] + 
-                                             total_world_force[1]*total_world_force[1] + 
-                                             total_world_force[2]*total_world_force[2]);
-    
-    RCLCPP_INFO(node_->get_logger(), 
-                "Force stats: total=%.3f, max=%.3f, contacts_with_force=%d/%d, total_world_force=(%.3f,%.3f,%.3f), magnitude=%.3f", 
-                total_force_magnitude, max_force_magnitude, contacts_with_force, ncon,
-                total_world_force[0], total_world_force[1], total_world_force[2], total_force_magnitude_world);
   }
   
+  // 如果没有接触点，发布空消息并返回
   if (ncon == 0) {
-    // 没有接触，发布空消息
     contact_force_pub_->publish(std::move(contact_msg));
     return;
   }
 
-  // 调整向量大小以容纳接触数据
-  contact_msg->contact_names.resize(ncon);
-  contact_msg->contact_positions_x.resize(ncon);
-  contact_msg->contact_positions_y.resize(ncon);
-  contact_msg->contact_positions_z.resize(ncon);
-  contact_msg->contact_forces_x.resize(ncon);
-  contact_msg->contact_forces_y.resize(ncon);
-  contact_msg->contact_forces_z.resize(ncon);
-  contact_msg->contact_torques_x.resize(ncon);
-  contact_msg->contact_torques_y.resize(ncon);
-  contact_msg->contact_torques_z.resize(ncon);
-  contact_msg->contact_gaps.resize(ncon);
-  contact_msg->contact_bodies_1.resize(ncon);
-  contact_msg->contact_bodies_2.resize(ncon);
+  // 预分配消息中所有向量的空间，避免动态扩容
+  contact_msg->contact_names.resize(ncon);           // 接触点名称
+  contact_msg->contact_positions_x.resize(ncon);     // 接触点X坐标
+  contact_msg->contact_positions_y.resize(ncon);     // 接触点Y坐标
+  contact_msg->contact_positions_z.resize(ncon);     // 接触点Z坐标
+  contact_msg->contact_forces_x.resize(ncon);        // 接触力X分量
+  contact_msg->contact_forces_y.resize(ncon);        // 接触力Y分量
+  contact_msg->contact_forces_z.resize(ncon);        // 接触力Z分量
+  contact_msg->contact_torques_x.resize(ncon);       // 接触力矩X分量
+  contact_msg->contact_torques_y.resize(ncon);       // 接触力矩Y分量
+  contact_msg->contact_torques_z.resize(ncon);       // 接触力矩Z分量
+  contact_msg->contact_gaps.resize(ncon);            // 接触间隙
+  contact_msg->contact_bodies_1.resize(ncon);        // 第一个接触体ID
+  contact_msg->contact_bodies_2.resize(ncon);        // 第二个接触体ID
 
-  // 计算所有接触的合力
-  mjtNum total_world_force[3] = {0.0, 0.0, 0.0};
-  mjtNum total_world_torque[3] = {0.0, 0.0, 0.0};
 
-  // 填充接触数据
+
+  // 遍历所有接触点，填充消息数据
   for (int i = 0; i < ncon; ++i) {
     const mjContact& contact = d->contact[i];
     
-    // 接触名称（使用几何体名称）
-    std::string geom1_name = m->names + m->name_geomadr[contact.geom[0]];
-    std::string geom2_name = m->names + m->name_geomadr[contact.geom[1]];
-    contact_msg->contact_names[i] = geom1_name + "_" + geom2_name;
+    // 生成接触点名称：使用两个接触几何体对应的body名称组合
+    int body1_id = m->geom_bodyid[contact.geom[0]];
+    int body2_id = m->geom_bodyid[contact.geom[1]];
+    
+    const char* body1_name = mj_id2name(m, mjOBJ_BODY, body1_id);
+    const char* body2_name = mj_id2name(m, mjOBJ_BODY, body2_id);
+    
+    // 如果body没有名称，使用ID作为名称
+    std::string name1 = body1_name ? body1_name : "body" + std::to_string(body1_id);
+    std::string name2 = body2_name ? body2_name : "body" + std::to_string(body2_id);
+    contact_msg->contact_names[i] = name1 + "_" + name2;
 
-    // 改进的接触点位置计算
+    // 计算接触点在世界坐标系中的位置
     mjtNum pos[3];
     
-    // 获取接触的两个几何体
+    // 获取接触的两个几何体ID
     int geom1 = contact.geom[0];
     int geom2 = contact.geom[1];
     
-    // 获取接触点的法向量和距离
+    // 获取接触点的法向量（接触坐标系的第一轴）
     mjtNum normal[3] = {contact.frame[0], contact.frame[1], contact.frame[2]};
-    mjtNum dist = contact.dist;
+    mjtNum dist = contact.dist;  // 接触间隙距离
     
-    // 使用MuJoCo内部计算的接触点位置（通常最准确）
-    // contact.pos 是MuJoCo内部计算的接触点，考虑了几何体的实际形状
+    // 使用MuJoCo内部计算的接触点位置（最准确）
+    // contact.pos 是MuJoCo内部计算的接触点，考虑了几何体的实际形状和接触算法
     pos[0] = contact.pos[0];
     pos[1] = contact.pos[1];
     pos[2] = contact.pos[2];
     
-    // 使用配置文件中的位置偏移量
+    // 应用配置文件中的位置偏移量（用于可视化调整）
     double position_offset = config_loader_->GetContactPositionOffset();
     if (position_offset != 0.0) {
+      // 沿法向量方向偏移接触点位置
       pos[0] += normal[0] * position_offset;
       pos[1] += normal[1] * position_offset;
       pos[2] += normal[2] * position_offset;
     }
     
+    // 将计算得到的接触点位置存储到消息中
     contact_msg->contact_positions_x[i] = pos[0];
     contact_msg->contact_positions_y[i] = pos[1];
     contact_msg->contact_positions_z[i] = pos[2];
 
-    // 使用mj_contactForce获取完整的6D接触力
+    // 获取接触坐标系下的6D接触力 [fx, fy, fz, tx, ty, tz]
     mjtNum contact_force[6] = {0.0, 0.0, 0.0, 0.0, 0.0, 0.0};
     mj_contactForce(m, d, i, contact_force);
     
-    // 将接触坐标系下的力转换为世界坐标系
-    // contact_force[0:2] 是力，contact_force[3:5] 是力矩
+    // 将接触坐标系下的力和力矩转换为世界坐标系
+    // contact_force[0:2] 是力向量，contact_force[3:5] 是力矩向量
     mjtNum world_force[3] = {0.0, 0.0, 0.0};
     mjtNum world_torque[3] = {0.0, 0.0, 0.0};
     
-    // 正确的坐标系转换
-    // contact.frame 在MuJoCo中存储为转置形式，轴在行中
-    // frame[0-2]: X轴 (法向量)
+    // 坐标系转换：从接触坐标系到世界坐标系
+    // contact.frame 在MuJoCo中存储为3x3旋转矩阵，表示接触坐标系到世界坐标系的变换
+    // frame[0-2]: X轴 (法向量，指向接触点)
     // frame[3-5]: Y轴 (第一个切向量)  
     // frame[6-8]: Z轴 (第二个切向量)
     for (int j = 0; j < 3; j++) {
-      // 转换力：world_force = frame^T * contact_force
+      // 转换力向量：world_force = frame^T * contact_force[0:2]
       world_force[j] = contact.frame[j*3 + 0] * contact_force[0] + 
                        contact.frame[j*3 + 1] * contact_force[1] + 
                        contact.frame[j*3 + 2] * contact_force[2];
       
-      // 转换力矩：world_torque = frame^T * contact_torque
+      // 转换力矩向量：world_torque = frame^T * contact_force[3:5]
       world_torque[j] = contact.frame[j*3 + 0] * contact_force[3] + 
                         contact.frame[j*3 + 1] * contact_force[4] + 
                         contact.frame[j*3 + 2] * contact_force[5];
     }
     
-    // 累加到合力
-    for (int j = 0; j < 3; j++) {
-      total_world_force[j] += world_force[j];
-      total_world_torque[j] += world_torque[j];
-    }
+
     
+    // 将世界坐标系下的力和力矩存储到消息中
     contact_msg->contact_forces_x[i] = world_force[0];
     contact_msg->contact_forces_y[i] = world_force[1];
     contact_msg->contact_forces_z[i] = world_force[2];
@@ -497,118 +459,126 @@ void RosInterface::PublishContactForces(const mjModel* m, mjData* d) {
     contact_msg->contact_torques_y[i] = world_torque[1];
     contact_msg->contact_torques_z[i] = world_torque[2];
 
-    // 接触间隙（距离）
+    // 存储接触间隙距离（正值表示分离，负值表示穿透）
     contact_msg->contact_gaps[i] = contact.dist;
 
-    // 接触体索引
+    // 存储接触的两个刚体ID
     contact_msg->contact_bodies_1[i] = m->geom_bodyid[contact.geom[0]];
     contact_msg->contact_bodies_2[i] = m->geom_bodyid[contact.geom[1]];
   }
 
-  // 添加合力信息到消息中（如果有接触的话）
-  if (ncon > 0) {
-    // 可以在这里添加合力字段，如果消息类型支持的话
-    // 或者通过其他方式发布合力信息
-    RCLCPP_INFO(node_->get_logger(), 
-                "Total contact force: (%.3f, %.3f, %.3f), magnitude: %.3f", 
-                total_world_force[0], total_world_force[1], total_world_force[2],
-                sqrt(total_world_force[0]*total_world_force[0] + 
-                     total_world_force[1]*total_world_force[1] + 
-                     total_world_force[2]*total_world_force[2]));
-  }
 
-  // 发布接触力消息
+
+  // 发布接触力消息到ROS话题
   contact_force_pub_->publish(std::move(contact_msg));
 
-  // RViz可视化功能（从PublishContacts移植过来）
+  // RViz可视化功能：在RViz中显示接触点
   if (contact_marker_pub_) {
     visualization_msgs::msg::MarkerArray arr;
 
-    // 先发一个"清空"指令，避免历史残留
+    // 先发送"清空"指令，清除之前的可视化标记，避免历史残留
     {
       visualization_msgs::msg::Marker clear;
       clear.action = visualization_msgs::msg::Marker::DELETEALL;
       arr.markers.push_back(clear);
     }
 
-    // 可选：根据力大小缩放球的尺寸
+    // 可视化参数：根据力大小动态缩放球的尺寸
     const double base_diameter = 0.03;   // 3 cm 基础直径
-    const double max_diameter  = 0.12;   // 12 cm 上限
-    const double scale_gain    = 1.0/200.0; // 200N -> +1 倍尺寸（按需调）
+    const double max_diameter  = 0.12;   // 12 cm 最大直径
+    const double scale_gain    = 1.0/200.0; // 200N对应1倍尺寸缩放
 
     // 使用静态变量缓存标准姿态数据，避免重复计算
-    static std::vector<mjtNum> std_xpos_cache;
-    static std::vector<mjtNum> std_xmat_cache;
-    static const mjModel* last_model_ptr = nullptr;
+    // 标准姿态用于计算接触点相对于机器人的位置
+    static std::vector<mjtNum> std_xpos_cache;    // 缓存标准位置
+    static std::vector<mjtNum> std_xmat_cache;    // 缓存标准旋转矩阵
+    static const mjModel* last_model_ptr = nullptr;  // 记录上次使用的模型
     
-    // 检查是否需要重新计算标准姿态
+    // 检查是否需要重新计算标准姿态（当模型改变时）
     if (last_model_ptr != m) {
-      // 重新计算标准姿态
+      // 模型改变，重新计算标准姿态
       std_xpos_cache.clear();
       std_xmat_cache.clear();
       
-      // 创建临时mjData对象
+      // 创建临时mjData对象用于计算标准姿态
       mjData* dstd = mj_makeData(m);
       if (!dstd) {
         RCLCPP_ERROR(node_->get_logger(), "Failed to create temporary mjData for standard pose");
-        // 如果创建失败，使用空指针，避免后续访问
+        // 如果创建失败，记录模型指针并返回，避免后续访问错误
         last_model_ptr = m;
         return;
       } else {
-        // 设置标准姿态
+        // 设置标准姿态：优先使用关键帧，否则使用零位
         int key_id = mj_name2id(m, mjOBJ_KEY, "floating_base_homing");
         if (key_id >= 0) {
+          // 使用预定义的关键帧作为标准姿态
           mj_resetDataKeyframe(m, dstd, key_id);
         } else {
-          // 兜底：零位
+          // 兜底方案：设置为零位姿态
           mju_zero(dstd->qpos, m->nq);
           if (m->jnt_type[0] == mjJNT_FREE) {
-            dstd->qpos[0] = 1; dstd->qpos[1] = dstd->qpos[2] = dstd->qpos[3] = 0;
-            dstd->qpos[4] = dstd->qpos[5] = dstd->qpos[6] = 0;
+            // 对于自由关节，设置四元数为单位四元数，位置为原点
+            dstd->qpos[0] = 1; dstd->qpos[1] = dstd->qpos[2] = dstd->qpos[3] = 0; // quat = [1,0,0,0]
+            dstd->qpos[4] = dstd->qpos[5] = dstd->qpos[6] = 0; // base at origin (0,0,0) 
+            // 如需固定到特定高度（如0.82），可按模型顺序设置
           }
         }
         
+        // 执行前向运动学计算，更新所有刚体的位置和姿态
         mj_forward(m, dstd);
         
-        // 缓存数据 - 添加边界检查
+        // 缓存标准姿态数据 - 添加边界检查确保安全
         if (m->nbody > 0) {
+          // 缓存所有刚体的位置 (xpos: 3*nbody)
           std_xpos_cache.assign(dstd->xpos, dstd->xpos + 3*m->nbody);
+          // 缓存所有刚体的旋转矩阵 (xmat: 9*nbody)
           std_xmat_cache.assign(dstd->xmat, dstd->xmat + 9*m->nbody);
         }
         
-        // 正确释放mjData对象
+        // 正确释放临时mjData对象，避免内存泄漏
         mj_deleteData(dstd);
       }
       
+      // 更新模型指针，标记已处理
       last_model_ptr = m;
     }
     
-    // 检查缓存是否有效
+    // 检查缓存是否有效，如果无效则跳过可视化
     if (std_xpos_cache.empty() || std_xmat_cache.empty()) {
       RCLCPP_WARN(node_->get_logger(), "Standard pose cache is empty, skipping visualization");
       return;
     }
     
-    const mjtNum* std_xpos = std_xpos_cache.data();
-    const mjtNum* std_xmat = std_xmat_cache.data();
+    // 获取缓存数据的指针，用于后续计算
+    const mjtNum* std_xpos = std_xpos_cache.data();  // 标准姿态下的位置数据
+    const mjtNum* std_xmat = std_xmat_cache.data();  // 标准姿态下的旋转矩阵数据
 
+    // 遍历所有接触点，创建可视化标记
     for (int i = 0; i < ncon; ++i) {
       const mjContact& contact = d->contact[i];
 
-      // 取 6D 接触力
+      // 获取6D接触力 [fx, fy, fz, tx, ty, tz]
       double w[6] = {0};
       mj_contactForce(m, d, i, w);
 
-      // contact -> world
+      // 获取接触坐标系到世界坐标系的旋转矩阵
       double R[9];
-      if (contact.dim > 0) std::memcpy(R, contact.frame, sizeof(R));
-      else { R[0]=1;R[1]=0;R[2]=0; R[3]=0;R[4]=1;R[5]=0; R[6]=0;R[7]=0;R[8]=1; }
+      if (contact.dim > 0) {
+        // 复制接触坐标系变换矩阵
+        std::memcpy(R, contact.frame, sizeof(R));
+      } else {
+        // 如果没有接触维度，使用单位矩阵
+        R[0]=1;R[1]=0;R[2]=0; R[3]=0;R[4]=1;R[5]=0; R[6]=0;R[7]=0;R[8]=1;
+      }
 
+      // 定义3D旋转变换的lambda函数
       auto rot3 = [](const double* M, const double* v, double* o){
         o[0]=M[0]*v[0]+M[1]*v[1]+M[2]*v[2];
         o[1]=M[3]*v[0]+M[4]*v[1]+M[5]*v[2];
         o[2]=M[6]*v[0]+M[7]*v[1]+M[8]*v[2];
       };
+      
+      // 将接触坐标系下的力转换到世界坐标系
       double f_c[3] = {w[0], w[1], w[2]}, f_w[3];
       rot3(R, f_c, f_w);
       const double f_mag = std::sqrt(f_w[0]*f_w[0] + f_w[1]*f_w[1] + f_w[2]*f_w[2]);
@@ -731,9 +701,15 @@ void RosInterface::PublishContactForces(const mjModel* m, mjData* d) {
       for (int i = 0; i < ncon; ++i) {
         const mjContact& contact = d->contact[i];
         
-        // 获取几何体名称
-        std::string geom1_name = m->names + m->name_geomadr[contact.geom[0]];
-        std::string geom2_name = m->names + m->name_geomadr[contact.geom[1]];
+        // 获取body名称
+        int body1_id = m->geom_bodyid[contact.geom[0]];
+        int body2_id = m->geom_bodyid[contact.geom[1]];
+        
+        const char* body1_name = mj_id2name(m, mjOBJ_BODY, body1_id);
+        const char* body2_name = mj_id2name(m, mjOBJ_BODY, body2_id);
+        
+        std::string name1 = body1_name ? body1_name : "body" + std::to_string(body1_id);
+        std::string name2 = body2_name ? body2_name : "body" + std::to_string(body2_id);
         
         // 计算接触点位置（与发布消息中相同的逻辑）
         mjtNum pos[3];
@@ -775,8 +751,7 @@ void RosInterface::PublishContactForces(const mjModel* m, mjData* d) {
                                              world_force[2]*world_force[2]);
         
         // 获取body的pose信息并计算URDF坐标系中的位置
-        int body1_id = m->geom_bodyid[contact.geom[0]];
-        int body2_id = m->geom_bodyid[contact.geom[1]];
+        // body1_id 和 body2_id 已经在前面声明过了
         
         // 找到base_link对应的body ID（LINK_BASE）
         int base_link_id = -1;
@@ -842,8 +817,8 @@ void RosInterface::PublishContactForces(const mjModel* m, mjData* d) {
         csv_file_ << std::fixed << std::setprecision(6)
                   << sim_time << ","
                   << i << ","
-                  << "\"" << geom1_name << "\","
-                  << "\"" << geom2_name << "\","
+                  << "\"" << name1 << "\","
+                  << "\"" << name2 << "\","
                   << pos[0] << ","
                   << pos[1] << ","
                   << pos[2] << ","
