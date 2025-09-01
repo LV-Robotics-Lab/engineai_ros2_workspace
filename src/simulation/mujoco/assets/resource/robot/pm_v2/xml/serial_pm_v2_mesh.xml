@@ -38,8 +38,8 @@
                 
                 <!-- 头部碰撞几何体 - 使用mesh模型进行精确碰撞检测 -->
                 <default class="collision_head">
-                    <!-- <geom type="mesh" mesh="LINK_HEAD_YAW" rgba="0.804 0.361 0.031 0.5"/> -->
-                    <geom type="sphere" size="0.09" pos="0.01 0.0 0.11" rgba="0.804 0.361 0.031 0.5"/>
+                    <geom type="mesh" mesh="LINK_HEAD_YAW" rgba="0.804 0.361 0.031 0.5"/>
+                    <!-- <geom type="sphere" size="0.09" pos="0.01 0.0 0.11" rgba="0.804 0.361 0.031 0.5"/> -->
                 </default>
 
                 <!-- 基座上部碰撞几何体 - 使用mesh模型进行精确碰撞检测 -->
