@@ -46,7 +46,7 @@ class RosInterface {
   // Set the current mjModel and mjData
   void SetModelAndData(mjModel* model, mjData* data);
 
-  void PublishContacts(const mjModel* m, const mjData* d);
+  // void PublishContacts(const mjModel* m, const mjData* d);
 
   // Get the ROS node
   std::shared_ptr<rclcpp::Node> GetNode() const { return node_; }
