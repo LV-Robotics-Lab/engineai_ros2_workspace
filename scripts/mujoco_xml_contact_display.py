@@ -21,27 +21,57 @@ def analyze_csv_data(df):
     print(f"Total rows: {len(df)}")
     print(f"Columns: {list(df.columns)}")
     
-    # Check for key columns
+    # Check for key columns based on new CSV format
     key_columns = {
-        'Time': ['sim_time'],
-        'Contact Info': ['contact_id', 'geom1_name', 'geom2_name'],
+        'Time': ['timestamp'],
+        'Contact Info': ['contact_id', 'body1_name', 'body2_name'],
         'World Position': ['pos_x', 'pos_y', 'pos_z'],
         'Robot Frame Position': ['robot_frame_x', 'robot_frame_y', 'robot_frame_z'],
-        'Forces': ['force_x', 'force_y', 'force_z', 'force_magnitude'],
+        'Forces': ['force_x', 'force_y', 'force_z', 'force_magnitude', 'force_normal'],
         'Torques': ['torque_x', 'torque_y', 'torque_z'],
-        'Base Link': ['base_link_x', 'base_link_y', 'base_link_z', 'base_link_quat_w', 'base_link_quat_x', 'base_link_quat_y', 'base_link_quat_z']
+        'Base Link Pose': ['base_link_x', 'base_link_y', 'base_link_z', 'base_link_qw', 'base_link_qx', 'base_link_qy', 'base_link_qz'],
+        'Collision Link Pose': ['collision_link_x', 'collision_link_y', 'collision_link_z', 'collision_link_qw', 'collision_link_qx', 'collision_link_qy', 'collision_link_qz'],
+        'Joint Angles': [col for col in df.columns if 'joint_' in col and '_angle' in col]
     }
     
     for category, columns in key_columns.items():
         found_columns = [col for col in columns if col in df.columns]
         if found_columns:
             print(f"{category}: {found_columns}")
-            if category == 'Time' and 'sim_time' in df.columns:
-                print(f"  Time range: {df['sim_time'].min():.3f} - {df['sim_time'].max():.3f} seconds")
+            if category == 'Time' and 'timestamp' in df.columns:
+                print(f"  Time range: {df['timestamp'].min():.3f} - {df['timestamp'].max():.3f} seconds")
             elif category == 'Forces' and 'force_magnitude' in df.columns:
                 print(f"  Force range: {df['force_magnitude'].min():.3f} - {df['force_magnitude'].max():.3f} N")
+                if 'force_normal' in df.columns:
+                    print(f"  Normal force range: {df['force_normal'].min():.3f} - {df['force_normal'].max():.3f} N")
+            elif category == 'Joint Angles':
+                print(f"  Number of joints: {len(found_columns)}")
         else:
             print(f"{category}: Not found")
+    
+    # Additional analysis for new CSV format
+    print("\n=== Additional Analysis ===")
+    
+    # Contact body analysis
+    if 'body1_name' in df.columns and 'body2_name' in df.columns:
+        print(f"Unique body1 names: {df['body1_name'].nunique()}")
+        print(f"Unique body2 names: {df['body2_name'].nunique()}")
+        print(f"Most common body1: {df['body1_name'].mode().iloc[0] if not df['body1_name'].mode().empty else 'N/A'}")
+        print(f"Most common body2: {df['body2_name'].mode().iloc[0] if not df['body2_name'].mode().empty else 'N/A'}")
+    
+    # Force analysis
+    if 'force_magnitude' in df.columns and 'force_normal' in df.columns:
+        print(f"\nForce Analysis:")
+        print(f"  Total force magnitude: {df['force_magnitude'].sum():.3f} N")
+        print(f"  Total normal force: {df['force_normal'].sum():.3f} N")
+        print(f"  Average force per contact: {df['force_magnitude'].mean():.3f} N")
+        print(f"  Average normal force per contact: {df['force_normal'].mean():.3f} N")
+        
+        # Contact quality analysis
+        if 'force_normal' in df.columns:
+            positive_normal = (df['force_normal'] > 0).sum()
+            total_contacts = len(df)
+            print(f"  Contact quality: {positive_normal}/{total_contacts} ({100*positive_normal/total_contacts:.1f}% positive normal forces)")
     
     print("=" * 30)
 
@@ -67,10 +97,13 @@ def create_contact_force_visualization(df, x_col, y_col, z_col):
         pos = (row[x_col], row[y_col], row[z_col])
         
         # Use force magnitude if available, otherwise calculate from components
-        if 'force_magnitude' in row:
+        if 'force_magnitude' in row and pd.notna(row['force_magnitude']):
             force_mag = row['force_magnitude']
-        elif all(col in row for col in ['force_x', 'force_y', 'force_z']):
+        elif all(col in row for col in ['force_x', 'force_y', 'force_z']) and all(pd.notna(row[col]) for col in ['force_x', 'force_y', 'force_z']):
             force_mag = np.sqrt(row['force_x']**2 + row['force_y']**2 + row['force_z']**2)
+        elif 'force_normal' in row and pd.notna(row['force_normal']):
+            # Use normal force as fallback
+            force_mag = abs(row['force_normal'])
         else:
             force_mag = 1.0  # Default force if not available
         
@@ -108,6 +141,15 @@ def create_contact_force_visualization(df, x_col, y_col, z_col):
         max_force = max(cf['max_force'] for cf in contact_forces)
         min_force = min(cf['max_force'] for cf in contact_forces)
         print(f"Force range: {min_force:.3f} - {max_force:.3f} N")
+        
+        # Debug: Show first few contact forces
+        print(f"First 5 contact forces:")
+        for i, cf in enumerate(contact_forces[:5]):
+            print(f"  {i}: pos={cf['position']}, force={cf['max_force']:.3f}N, count={cf['count']}")
+        
+        # Debug: Show force distribution
+        forces = [cf['max_force'] for cf in contact_forces]
+        print(f"Force statistics: mean={np.mean(forces):.3f}, std={np.std(forces):.3f}, median={np.median(forces):.3f}")
     
     return contact_forces
 
@@ -298,16 +340,22 @@ def load_mujoco_model_with_contact_spheres(xml_file, contact_forces):
         print(f"Max force: {max_force:.3f} N")
         
         for i, cf in enumerate(contact_forces):
-            # Calculate sphere radius based on force magnitude
-            radius = 0.01 + 0.04 * (cf['max_force'] / max_force) if max_force > 0 else 0.01
+            # Calculate sphere radius based on force magnitude (improved scaling)
+            force_ratio = cf['max_force'] / max_force if max_force > 0 else 0
+            # Use logarithmic scaling for better visualization
+            log_ratio = np.log10(1 + 9 * force_ratio) / np.log10(10)  # Maps 0-1 to 0-1 with log scaling
+            radius = 0.005 + 0.045 * log_ratio  # Range: 0.005 - 0.05 meters
             pos = cf['position']
             
-            # Color based on force magnitude (red to yellow)
-            force_ratio = cf['max_force'] / max_force if max_force > 0 else 0
+            # Color based on force magnitude (red to yellow with better contrast)
             r = 1.0
-            g = force_ratio
+            g = 0.2 + 0.8 * force_ratio  # Range: 0.2 - 1.0 for better yellow visibility
             b = 0.0
             a = 0.8
+            
+            # Debug: Print sphere info for first few spheres
+            if i < 5:
+                print(f"  Sphere {i}: force={cf['max_force']:.3f}N, ratio={force_ratio:.3f}, radius={radius:.4f}m, color=({r:.2f},{g:.2f},{b:.2f})")
             
             spheres_xml += f'''    <body name="contact_sphere_{i}" pos="{pos[0]:.6f} {pos[1]:.6f} {pos[2]:.6f}">
       <geom name="contact_geom_{i}" type="sphere" size="{radius:.6f}" rgba="{r:.2f} {g:.2f} {b:.2f} {a:.2f}"/>
@@ -365,8 +413,8 @@ def main():
         print("  python3 mujoco_xml_contact_display.py logs/contact_data.csv src/simulation/mujoco/assets/resource/pm_v2_mesh.xml world")
         print("")
         print("CSV Format Support:")
-        print("  - New format: sim_time, contact_id, geom1_name, geom2_name, pos_x/y/z, robot_frame_x/y/z, force_magnitude, etc.")
-        print("  - Legacy format: pos_x/y/z, force_x/y/z, etc.")
+        print("  - New format: timestamp, contact_id, body1_name, body2_name, pos_x/y/z, robot_frame_x/y/z, force_magnitude, force_normal, etc.")
+        print("  - Includes: base_link pose, collision_link pose, joint angles")
         print("")
         print("Arguments:")
         print("  csv_file: Path to the CSV file with contact force data")
@@ -413,13 +461,20 @@ def main():
             print("World coordinates (pos_x/y/z) not found in CSV")
             return
     else:
-        # Use robot frame coordinates
+        # Use robot frame coordinates (default)
         if 'robot_frame_x' in df.columns and 'robot_frame_y' in df.columns and 'robot_frame_z' in df.columns:
             x_col, y_col, z_col = 'robot_frame_x', 'robot_frame_y', 'robot_frame_z'
             print("Using robot frame coordinates (robot_frame_x/y/z)")
         else:
             print("Robot frame coordinates (robot_frame_x/y/z) not found in CSV")
-            return
+            print("Falling back to world coordinates (pos_x/y/z)")
+            if 'pos_x' in df.columns and 'pos_y' in df.columns and 'pos_z' in df.columns:
+                x_col, y_col, z_col = 'pos_x', 'pos_y', 'pos_z'
+                coord_type = "world"
+                print("Using world coordinates (pos_x/y/z)")
+            else:
+                print("No valid coordinate columns found")
+                return
     
     # Create contact force visualization
     contact_forces = create_contact_force_visualization(df, x_col, y_col, z_col)

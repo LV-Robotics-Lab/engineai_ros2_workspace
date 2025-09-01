@@ -170,7 +170,7 @@
 
             <!-- 包含其他链接文件 -->
             <!-- file="serial_links.xml": 包含机器人其他链接的定义文件 -->
-            <include file="serial_links.xml"/>
+            <include file="serial_links_simplified.xml"/>
         </body>
     </worldbody>
 

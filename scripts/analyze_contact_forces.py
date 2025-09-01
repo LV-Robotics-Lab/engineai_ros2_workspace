@@ -185,10 +185,11 @@ def analyze_force_components(df):
     
     # Time-based statistics
     print(f"\nTime-based Force Statistics:")
-    time_stats = df.groupby('timestamp')['force_magnitude'].agg(['mean', 'max', 'sum'])
+    time_stats = df.groupby('timestamp')['force_magnitude'].agg(['mean', 'max', 'count'])
     print(f"  Average force per frame: {time_stats['mean'].mean():.3f} N")
     print(f"  Maximum force per frame: {time_stats['max'].max():.3f} N")
-    print(f"  Total force over time: {time_stats['sum'].sum():.3f} N")
+    print(f"  Average contact points per frame: {time_stats['count'].mean():.1f}")
+    print(f"  Total frames analyzed: {len(time_stats)}")
     
     return df
 
@@ -463,11 +464,12 @@ def generate_summary_report(df, csv_file):
         print(f"Contact quality: {positive_normal}/{total_contacts} ({100*positive_normal/total_contacts:.1f}% positive normal forces)")
     
     # Time-based statistics
-    time_stats = df.groupby('timestamp')['force_magnitude'].agg(['mean', 'max', 'sum'])
+    time_stats = df.groupby('timestamp')['force_magnitude'].agg(['mean', 'max', 'count'])
     print(f"\nTime-based Statistics:")
     print(f"Average force per frame: {time_stats['mean'].mean():.3f} N")
     print(f"Maximum force per frame: {time_stats['max'].max():.3f} N")
-    print(f"Total force over time: {time_stats['sum'].sum():.3f} N")
+    print(f"Average contact points per frame: {time_stats['count'].mean():.1f}")
+    print(f"Total frames analyzed: {len(time_stats)}")
     
     # Robot frame coordinate statistics
     robot_frame_columns = [col for col in df.columns if 'robot_frame' in col.lower()]
