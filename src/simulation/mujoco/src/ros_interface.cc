@@ -35,6 +35,31 @@ const int kDofFloatingBase = 6;        // 浮动基座的自由度数量
 const int kNumFloatingBaseJoints = 7;  // 浮动基座的关节数量（四元数 + xyz位置）
 const int kDimQuaternion = 4;          // 四元数的维度
 
+// 3D旋转变换函数
+/**
+ * @brief 矩阵转置乘以向量：o = R^T * v
+ * @param M 3x3旋转矩阵（按行存储）
+ * @param v 输入向量
+ * @param o 输出向量
+ */
+inline void rotT3(const double* M, const double* v, double* o) {
+    o[0] = M[0]*v[0] + M[3]*v[1] + M[6]*v[2];
+    o[1] = M[1]*v[0] + M[4]*v[1] + M[7]*v[2];
+    o[2] = M[2]*v[0] + M[5]*v[1] + M[8]*v[2];
+}
+
+/**
+ * @brief 矩阵乘以向量：o = R * v
+ * @param M 3x3旋转矩阵（按行存储）
+ * @param v 输入向量
+ * @param o 输出向量
+ */
+inline void rot3(const double* M, const double* v, double* o) {
+    o[0] = M[0]*v[0] + M[1]*v[1] + M[2]*v[2];
+    o[1] = M[3]*v[0] + M[4]*v[1] + M[5]*v[2];
+    o[2] = M[6]*v[0] + M[7]*v[1] + M[8]*v[2];
+}
+
 namespace mujoco {
 
 /**
@@ -571,12 +596,7 @@ void RosInterface::PublishContactForces(const mjModel* m, mjData* d) {
         R[0]=1;R[1]=0;R[2]=0; R[3]=0;R[4]=1;R[5]=0; R[6]=0;R[7]=0;R[8]=1;
       }
 
-      // 定义3D旋转变换的lambda函数
-      auto rot3 = [](const double* M, const double* v, double* o){
-        o[0]=M[0]*v[0]+M[1]*v[1]+M[2]*v[2];
-        o[1]=M[3]*v[0]+M[4]*v[1]+M[5]*v[2];
-        o[2]=M[6]*v[0]+M[7]*v[1]+M[8]*v[2];
-      };
+      // 使用全局定义的rot3函数进行3D旋转变换
       
       // 将接触坐标系下的力转换到世界坐标系
       double f_c[3] = {w[0], w[1], w[2]}, f_w[3];
@@ -599,6 +619,12 @@ void RosInterface::PublishContactForces(const mjModel* m, mjData* d) {
       mkr_red.pose.position.z = contact.pos[2];
       mkr_red.pose.orientation.w = 1.0;
 
+      // 根据接触力大小动态计算球体直径
+      // base_diameter: 基础直径（力为0时的默认大小）
+      // f_mag: 当前接触点的力大小（标量）
+      // scale_gain: 力到尺寸的缩放系数
+      // std::clamp(f_mag*scale_gain, 0.0, 3.0): 限制缩放倍数在[0.0, 3.0]范围内
+      // 最终直径 = 基础直径 × (1.0 + 缩放倍数)
       double dia = base_diameter * (1.0 + std::clamp(f_mag*scale_gain, 0.0, 3.0));
       dia = std::min(dia, max_diameter);
       mkr_red.scale.x = mkr_red.scale.y = mkr_red.scale.z = dia;
@@ -624,21 +650,21 @@ void RosInterface::PublishContactForces(const mjModel* m, mjData* d) {
         }
         
         // 当前姿态：世界 -> body 局部
+        // d->xpos + 3*body：
+        // d->xpos 是 MuJoCo 数据结构中存储所有body当前位置的一维数组
+        // 格式：[body0_x, body0_y, body0_z, body1_x, body1_y, body1_z, ...]
+        // + 3*body 跳转到指定body的位置数据起始地址
+        // x_BW 指向该body当前的 (x,y,z) 坐标
+        // --------------------------------
+        // d->xmat + 9*body：
+        // d->xmat 是 MuJoCo 数据结构中存储所有body当前旋转矩阵的一维数组
+        // 格式：[body0_R00,R01,R02,R10,R11,R12,R20,R21,R22, body1_R00,R01,...]
+        // + 9*body 跳转到指定body的3x3旋转矩阵起始地址
+        // R_BW 指向该body当前的旋转矩阵（按行存储）
         const mjtNum* x_BW = d->xpos + 3*body;   // 当前 body 原点（世界）
         const mjtNum* R_BW = d->xmat + 9*body;   // 当前 body 旋转（行存 3x3）
 
-        auto rotT3 = [](const double* M, const double* v, double* o){
-          // o = R^T v
-          o[0]=M[0]*v[0]+M[3]*v[1]+M[6]*v[2];
-          o[1]=M[1]*v[0]+M[4]*v[1]+M[7]*v[2];
-          o[2]=M[2]*v[0]+M[5]*v[1]+M[8]*v[2];
-        };
-        auto rot3 = [](const double* M, const double* v, double* o){
-          // o = R v
-          o[0]=M[0]*v[0]+M[1]*v[1]+M[2]*v[2];
-          o[1]=M[3]*v[0]+M[4]*v[1]+M[5]*v[2];
-          o[2]=M[6]*v[0]+M[7]*v[1]+M[8]*v[2];
-        };
+        // 使用全局定义的rotT3和rot3函数进行3D旋转变换
 
         // 当前姿态下接触点 → body 局部 p_B
         double pW_minus_x[3] = {contact.pos[0]-x_BW[0],
