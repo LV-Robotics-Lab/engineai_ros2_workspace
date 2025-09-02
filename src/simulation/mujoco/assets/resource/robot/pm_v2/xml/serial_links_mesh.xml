@@ -137,13 +137,23 @@
                                  axis="1 0 0": 绕X轴旋转
                                  range: 关节角度范围，-0.2618到0.2618弧度（±15度）
                                  actuatorfrcrange: 执行器力矩范围，±61牛米 -->
+                            <!-- 左踝关节滚动轴 -->
                             <joint name="J05_ANKLE_ROLL_L" pos="0 0 0" axis="1 0 0" range="-0.2618 0.2618" actuatorfrcrange="-61 61" class="joint" armature="0.039175"/>
+                            <!-- 
+                                name: 关节名称，表示左踝关节滚动轴
+                                pos: 关节位置，相对于父链接的偏移量 (0, 0, 0)
+                                axis: 关节旋转轴方向，沿X轴正方向 (1, 0, 0)
+                                range: 关节角度范围，-0.2618到0.2618弧度（约±15度）
+                                actuatorfrcrange: 执行器力矩范围，-61到61 N⋅m
+                                class: 关节类型，使用预定义的"joint"类
+                                armature: 电机转子惯量，0.039175 kg⋅m²，影响关节动态响应
+                            -->
                             
                             <!-- 视觉几何体 -->
                             <geom type="mesh" rgba="0.75294 0.75294 0.75294 1" mesh="LINK_ANKLE_ROLL_L" class="visual"/>
                             
                             <!-- 碰撞几何体 - 使用mesh模型 -->
-                            <!-- <geom class="collision_left_foot"/> -->
+                            <geom class="collision_left_foot"/>
                             
                             <!-- 左脚链接（末端执行器） -->
                             <!-- name="LINK_FOOT_L": 左脚链接名称，作为末端执行器 -->
@@ -154,7 +164,7 @@
                                 
                                 <!-- 碰撞几何体 -->
                                 <!-- class="collision_left_foot": 左脚碰撞几何体 -->
-                                <geom class="collision_left_foot"/>
+                                <!-- <geom class="collision_left_foot"/> -->
                                 <!-- class="collision_left_foot_toe": 左脚脚趾碰撞几何体 -->
                                 <!-- <geom class="collision_left_foot_toe"/> -->
                                 
@@ -230,11 +240,11 @@
                             <geom type="mesh" rgba="0.75294 0.75294 0.75294 1" mesh="LINK_ANKLE_ROLL_R" class="visual"/>
                             
                             <!-- 碰撞几何体 - 使用mesh模型 -->
-                            <!-- <geom class="collision_right_foot"/> -->
+                            <geom class="collision_right_foot"/>
                             
                             <body name="LINK_FOOT_R">
                                 <inertial pos="0 0 0" mass="1e-3" diaginertia="1e-12 1e-12 1e-12"/>
-                                <geom class="collision_right_foot"/>
+                                <!-- <geom class="collision_right_foot"/> -->
                                 <!-- <geom class="collision_right_foot_toe"/> -->
                                 <site name="force_sensor_right_foot"/>
                                 <site name="torque_sensor_right_foot"/>
