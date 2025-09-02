@@ -56,33 +56,56 @@ def parse_xml_joint_positions(xml_path):
     return None
 
 def parse_xml_joint_axes(xml_path):
-    """从XML文件中解析关节轴信息"""
+    """从XML文件中解析关节轴信息，包括include引用的文件"""
     print(f"正在解析XML文件中的关节轴信息: {xml_path}")
-    
-    tree = ET.parse(xml_path)
-    root = tree.getroot()
     
     joint_axes = {}
     
-    # 查找所有joint元素
-    joints = root.findall('.//joint')
-    print(f"找到 {len(joints)} 个关节定义")
+    def parse_xml_file(file_path, base_dir):
+        """递归解析XML文件，处理include引用"""
+        try:
+            # 构建绝对路径
+            if not os.path.isabs(file_path):
+                file_path = os.path.join(base_dir, file_path)
+            
+            print(f"  解析文件: {file_path}")
+            tree = ET.parse(file_path)
+            root = tree.getroot()
+            
+            # 查找所有joint元素
+            joints = root.findall('.//joint')
+            print(f"  在 {os.path.basename(file_path)} 中找到 {len(joints)} 个关节定义")
+            
+            for joint in joints:
+                joint_name = joint.get('name')
+                axis_str = joint.get('axis')
+                
+                if joint_name and axis_str:
+                    # 解析轴向量
+                    try:
+                        axis_values = [float(x) for x in axis_str.split()]
+                        if len(axis_values) == 3:
+                            joint_axes[joint_name] = np.array(axis_values)
+                            print(f"    {joint_name}: {axis_values}")
+                        else:
+                            print(f"    警告: {joint_name} 的轴向量格式不正确: {axis_str}")
+                    except ValueError as e:
+                        print(f"    错误: 无法解析 {joint_name} 的轴向量: {axis_str}, 错误: {e}")
+            
+            # 查找include元素并递归处理
+            includes = root.findall('.//include')
+            for include in includes:
+                include_file = include.get('file')
+                if include_file:
+                    print(f"  发现include引用: {include_file}")
+                    parse_xml_file(include_file, base_dir)
+                    
+        except Exception as e:
+            print(f"  警告: 无法解析文件 {file_path}: {e}")
     
-    for joint in joints:
-        joint_name = joint.get('name')
-        axis_str = joint.get('axis')
-        
-        if joint_name and axis_str:
-            # 解析轴向量
-            try:
-                axis_values = [float(x) for x in axis_str.split()]
-                if len(axis_values) == 3:
-                    joint_axes[joint_name] = np.array(axis_values)
-                    print(f"  {joint_name}: {axis_values}")
-                else:
-                    print(f"  警告: {joint_name} 的轴向量格式不正确: {axis_str}")
-            except ValueError as e:
-                print(f"  错误: 无法解析 {joint_name} 的轴向量: {axis_str}, 错误: {e}")
+    # 开始解析主文件
+    base_dir = os.path.dirname(xml_path)
+    parse_xml_file(xml_path, base_dir)
     
     print(f"成功解析 {len(joint_axes)} 个关节轴")
     return joint_axes
@@ -98,9 +121,15 @@ def urdf_meshes_to_single(urdf_path, xml_path, output_path):
     joint_positions = parse_xml_joint_positions(xml_path)
     
     # 3. 从XML文件中读取关节轴信息
-    # 关节轴信息在serial_links.xml文件中
-    links_xml_path = xml_path.replace('serial_pm_v2.xml', 'serial_links.xml')
-    joint_axis_mapping = parse_xml_joint_axes(links_xml_path)
+    # 关节轴信息在serial_links_mesh.xml文件中（通过include引用）
+    # 直接解析主XML文件，它会自动处理include引用
+    joint_axis_mapping = parse_xml_joint_axes(xml_path)
+    
+    # 调试：打印关节轴映射
+    print(f"关节轴映射数量: {len(joint_axis_mapping)}")
+    print("关节轴映射内容:")
+    for joint_name, axis in joint_axis_mapping.items():
+        print(f"  {joint_name}: {axis}")
     
     if not joint_axis_mapping:
         print("警告: 无法从XML读取关节轴信息，使用默认轴")
@@ -147,9 +176,9 @@ def urdf_meshes_to_single(urdf_path, xml_path, output_path):
     print(f"根link: {root_link}")
     
     # 遍历关节，计算子link的绝对变换
-    joint_idx = 0
+    revolute_joint_idx = 0  # 只对旋转关节计数
     for joint in robot.joints:
-        print(f"处理关节 {joint_idx+1}/{len(robot.joints)}: {joint.name}")
+        print(f"处理关节 {joint.name}")
         
         parent_link = joint.parent
         child_link = joint.child
@@ -215,10 +244,10 @@ def urdf_meshes_to_single(urdf_path, xml_path, output_path):
         joint_tf[:3, :3] = rot
         joint_tf[:3, 3] = xyz
         
-        # 如果有关节初始位置，应用关节角度
-        if joint_positions and joint_idx < len(joint_positions):
-            joint_angle = joint_positions[joint_idx]
-            print(f"  关节角度: {joint_angle:.3f} rad")
+        # 只对旋转关节应用关节角度
+        if joint.joint_type == 'revolute' and joint_positions and revolute_joint_idx < len(joint_positions):
+            joint_angle = joint_positions[revolute_joint_idx]
+            print(f"  关节角度: {joint_angle:.3f} rad (索引: {revolute_joint_idx})")
             
             # 使用预定义的关节轴
             if joint.name in joint_axis_mapping:
@@ -243,10 +272,15 @@ def urdf_meshes_to_single(urdf_path, xml_path, output_path):
             
             # 组合变换：位置变换 × 关节旋转
             joint_tf = joint_tf @ joint_rot_tf
+            
+            revolute_joint_idx += 1  # 只有旋转关节才增加索引
+        elif joint.joint_type == 'fixed':
+            print(f"  固定关节，跳过关节角度应用")
+        else:
+            print(f"  非旋转关节或超出关节角度数组范围，跳过关节角度应用")
         
         # 子link绝对变换 = 父link绝对变换 × 关节变换
         link_transforms[child_link] = link_transforms[parent_link] @ joint_tf
-        joint_idx += 1
     
     # 4. 加载并变换所有mesh
     print("正在加载和变换mesh文件...")
@@ -309,6 +343,6 @@ def urdf_meshes_to_single(urdf_path, xml_path, output_path):
 if __name__ == "__main__":
     urdf_meshes_to_single(
         urdf_path=r"/home/wang22/engineai/engineai_ros2_workspace/src/simulation/mujoco/assets/resource/robot/pm_v2/urdf/serial_pm_v2_fixed.urdf",  # 使用修复后的URDF路径
-        xml_path=r"/home/wang22/engineai/engineai_ros2_workspace/src/simulation/mujoco/assets/resource/robot/pm_v2/xml/serial_pm_v2.xml",  # XML文件路径
+        xml_path=r"/home/wang22/engineai/engineai_ros2_workspace/src/simulation/mujoco/assets/resource/robot/pm_v2/xml/serial_pm_v2_mesh.xml",  # XML文件路径
         output_path=r"/home/wang22/engineai/engineai_ros2_workspace/src/simulation/mujoco/assets/resource/robot/pm_v2/meshes/serial_pm_v2_combined.stl"       # 输出合并后的mesh路径
     )
