@@ -15,6 +15,10 @@ import xml.etree.ElementTree as ET
 import mediapy as media
 from datetime import datetime
 
+# Set MuJoCo memory limits to avoid stack overflow
+os.environ['MUJOCO_GL'] = 'egl'  # Use EGL for better memory management
+os.environ['MUJOCO_STACK_SIZE'] = '8388608'  # 8MB stack size (reduced from default)
+
 def analyze_csv_data(df):
     """Analyze CSV data and print statistics"""
     print("\n=== CSV Data Analysis ===")
@@ -75,7 +79,7 @@ def analyze_csv_data(df):
     
     print("=" * 30)
 
-def create_contact_force_visualization(df, x_col, y_col, z_col):
+def create_contact_force_visualization(df, x_col, y_col, z_col, max_spheres_override=None):
     """Create contact force visualization data with sphere sizes based on force magnitude"""
     print("Processing contact force data for sphere visualization...")
     
@@ -130,8 +134,21 @@ def create_contact_force_visualization(df, x_col, y_col, z_col):
     # Sort by force magnitude (highest first) and limit the number of spheres
     contact_forces.sort(key=lambda x: x['max_force'], reverse=True)
     
-    # Limit to maximum 1000 spheres to avoid memory issues
-    max_spheres = 1000
+    # Limit to maximum spheres to avoid memory issues
+    if max_spheres_override is not None:
+        max_spheres = max_spheres_override
+        print(f"Using user-specified max spheres: {max_spheres}")
+    else:
+        # 根据数据量动态调整球体数量（禁用碰撞检测后的保守设置）
+        if len(contact_forces) > 10000:
+            max_spheres = 150  # 大量数据时使用较少的球体
+        elif len(contact_forces) > 5000:
+            max_spheres = 200  # 中等数据量
+        elif len(contact_forces) > 1000:
+            max_spheres = 250  # 小数据量
+        else:
+            max_spheres = min(len(contact_forces), 300)  # 数据量小时限制最大数量
+    
     if len(contact_forces) > max_spheres:
         print(f"Too many contact points ({len(contact_forces)}), limiting to {max_spheres} highest force points")
         contact_forces = contact_forces[:max_spheres]
@@ -189,7 +206,7 @@ def add_contact_spheres_to_xml(xml_path, contact_forces):
         a = 0.8
         
         spheres_xml += f'''    <body name="contact_sphere_{i}" pos="{pos[0]:.6f} {pos[1]:.6f} {pos[2]:.6f}">
-      <geom name="contact_geom_{i}" type="sphere" size="{radius:.6f}" rgba="{r:.2f} {g:.2f} {b:.2f} {a:.2f}"/>
+      <geom name="contact_geom_{i}" type="sphere" size="{radius:.6f}" rgba="{r:.2f} {g:.2f} {b:.2f} {a:.2f}" contype="0" conaffinity="0"/>
       <site name="contact_site_{i}" pos="0 0 0" size="0.001"/>
     </body>
 '''
@@ -347,9 +364,9 @@ def load_mujoco_model_with_contact_spheres(xml_file, contact_forces):
             radius = 0.005 + 0.045 * log_ratio  # Range: 0.005 - 0.05 meters
             pos = cf['position']
             
-            # Color based on force magnitude (red to yellow with better contrast)
+            # Color based on force magnitude (red for high force, yellow for low force)
             r = 1.0
-            g = 0.2 + 0.8 * force_ratio  # Range: 0.2 - 1.0 for better yellow visibility
+            g = 0.2 + 0.8 * (1.0 - force_ratio)  # Range: 1.0 - 0.2 (yellow to red)
             b = 0.0
             a = 0.8
             
@@ -358,7 +375,7 @@ def load_mujoco_model_with_contact_spheres(xml_file, contact_forces):
                 print(f"  Sphere {i}: force={cf['max_force']:.3f}N, ratio={force_ratio:.3f}, radius={radius:.4f}m, color=({r:.2f},{g:.2f},{b:.2f})")
             
             spheres_xml += f'''    <body name="contact_sphere_{i}" pos="{pos[0]:.6f} {pos[1]:.6f} {pos[2]:.6f}">
-      <geom name="contact_geom_{i}" type="sphere" size="{radius:.6f}" rgba="{r:.2f} {g:.2f} {b:.2f} {a:.2f}"/>
+      <geom name="contact_geom_{i}" type="sphere" size="{radius:.6f}" rgba="{r:.2f} {g:.2f} {b:.2f} {a:.2f}" contype="0" conaffinity="0"/>
       <site name="contact_site_{i}" pos="0 0 0" size="0.001"/>
     </body>
 '''
@@ -377,6 +394,15 @@ def load_mujoco_model_with_contact_spheres(xml_file, contact_forces):
     try:
         model = mj.MjModel.from_xml_path(xml_temp.name)
         data = mj.MjData(model)
+        
+        # Set MuJoCo memory options for better performance with many spheres
+        # Note: These options may not be available in all MuJoCo versions
+        try:
+            mj.mj_setOption(model, mj.mjtOption.mjOptionStack, 1)  # Use smaller stack
+            mj.mj_setOption(model, mj.mjtOption.mjOptionMemory, 1)  # Use smaller memory
+        except AttributeError:
+            print("Note: MuJoCo memory optimization options not available in this version")
+        
         print("Successfully loaded Mujoco model")
         
         # Apply keyframe pose if available
@@ -403,7 +429,7 @@ def load_mujoco_model_with_contact_spheres(xml_file, contact_forces):
 def main():
     """Main function"""
     if len(sys.argv) < 3:
-        print("Usage: python3 mujoco_xml_contact_display.py <csv_file> <xml_file> [world|robot_frame]")
+        print("Usage: python3 mujoco_xml_contact_display.py <csv_file> <xml_file> [world|robot_frame] [max_spheres]")
         print("")
         print("Examples:")
         print("  # Using robot frame coordinates (default)")
@@ -411,6 +437,9 @@ def main():
         print("")
         print("  # Using world coordinates")
         print("  python3 mujoco_xml_contact_display.py logs/contact_data.csv src/simulation/mujoco/assets/resource/pm_v2_mesh.xml world")
+        print("")
+        print("  # Limit to 100 spheres for memory optimization")
+        print("  python3 mujoco_xml_contact_display.py logs/contact_data.csv src/simulation/mujoco/assets/resource/pm_v2_mesh.xml robot_frame 100")
         print("")
         print("CSV Format Support:")
         print("  - New format: timestamp, contact_id, body1_name, body2_name, pos_x/y/z, robot_frame_x/y/z, force_magnitude, force_normal, etc.")
@@ -420,6 +449,7 @@ def main():
         print("  csv_file: Path to the CSV file with contact force data")
         print("  xml_file: Path to XML model file (e.g., pm_v2_mesh.xml)")
         print("  world|robot_frame: Coordinate system (default: robot_frame)")
+        print("  max_spheres: Maximum number of spheres to display (default: auto)")
         print("")
         print("Note: Contact forces will be displayed as spheres with sizes proportional to force magnitude")
         return
@@ -429,10 +459,25 @@ def main():
     
     # Check for coordinate type
     coord_type = "robot_frame"    # default to robot frame coordinates
+    max_spheres_override = None
+    
     if len(sys.argv) >= 4:
-        coord_type = sys.argv[3].lower()
-        if coord_type not in ["world", "robot_frame"]:
-            print("Error: Coordinate type must be 'world' or 'robot_frame'")
+        # Check if the third argument is a number (max_spheres) or coordinate type
+        try:
+            max_spheres_override = int(sys.argv[3])
+            coord_type = "robot_frame"  # default coordinate type
+        except ValueError:
+            coord_type = sys.argv[3].lower()
+            if coord_type not in ["world", "robot_frame"]:
+                print("Error: Coordinate type must be 'world' or 'robot_frame'")
+                return
+    
+    # Check for max_spheres parameter
+    if len(sys.argv) >= 5:
+        try:
+            max_spheres_override = int(sys.argv[4])
+        except ValueError:
+            print("Error: max_spheres must be a number")
             return
     
     if not os.path.exists(csv_file):
@@ -477,7 +522,7 @@ def main():
                 return
     
     # Create contact force visualization
-    contact_forces = create_contact_force_visualization(df, x_col, y_col, z_col)
+    contact_forces = create_contact_force_visualization(df, x_col, y_col, z_col, max_spheres_override)
     
     if not contact_forces:
         print("No contact forces to display")
