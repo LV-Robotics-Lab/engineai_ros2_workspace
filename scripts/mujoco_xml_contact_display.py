@@ -131,27 +131,36 @@ def create_contact_force_visualization(df, x_col, y_col, z_col, max_spheres_over
             'count': data['count']
         })
     
-    # Sort by force magnitude (highest first) and limit the number of spheres
+    # Sort by force magnitude (highest first) - no limit needed for visual spheres
     contact_forces.sort(key=lambda x: x['max_force'], reverse=True)
     
-    # Limit to maximum spheres to avoid memory issues
+    # Since spheres are now visual-only (group="1"), we can display more contact points
+    # But still need reasonable limits to avoid memory issues
     if max_spheres_override is not None:
+        # User specified a limit, respect it
         max_spheres = max_spheres_override
         print(f"Using user-specified max spheres: {max_spheres}")
+        if len(contact_forces) > max_spheres:
+            print(f"Limiting to {max_spheres} highest force points as requested")
+            contact_forces = contact_forces[:max_spheres]
     else:
-        # 根据数据量动态调整球体数量（禁用碰撞检测后的保守设置）
-        if len(contact_forces) > 10000:
-            max_spheres = 150  # 大量数据时使用较少的球体
-        elif len(contact_forces) > 5000:
-            max_spheres = 200  # 中等数据量
-        elif len(contact_forces) > 1000:
-            max_spheres = 250  # 小数据量
+        # Smart limit based on data size - balance between visualization quality and memory usage
+        if len(contact_forces) > 5000:
+            max_spheres = 1000  # Large datasets: show top 3000 points
+            print(f"Large dataset detected ({len(contact_forces)} points), limiting to top {max_spheres} highest force points")
+        elif len(contact_forces) > 2000:
+            max_spheres = 500  # Medium datasets: show top 1500 points
+            print(f"Medium dataset detected ({len(contact_forces)} points), limiting to top {max_spheres} highest force points")
+        elif len(contact_forces) > 500:
+            max_spheres = 200   # Small datasets: show top 800 points
+            print(f"Small dataset detected ({len(contact_forces)} points), limiting to top {max_spheres} highest force points")
         else:
-            max_spheres = min(len(contact_forces), 300)  # 数据量小时限制最大数量
-    
-    if len(contact_forces) > max_spheres:
-        print(f"Too many contact points ({len(contact_forces)}), limiting to {max_spheres} highest force points")
-        contact_forces = contact_forces[:max_spheres]
+            max_spheres = len(contact_forces)  # Very small datasets: show all
+            print(f"Small dataset ({len(contact_forces)} points), displaying all contact points")
+        
+        if len(contact_forces) > max_spheres:
+            contact_forces = contact_forces[:max_spheres]
+            print(f"Limited to {max_spheres} highest force points to ensure stable visualization")
     
     print(f"Created {len(contact_forces)} unique contact points for visualization")
     if contact_forces:
@@ -206,7 +215,7 @@ def add_contact_spheres_to_xml(xml_path, contact_forces):
         a = 0.8
         
         spheres_xml += f'''    <body name="contact_sphere_{i}" pos="{pos[0]:.6f} {pos[1]:.6f} {pos[2]:.6f}">
-      <geom name="contact_geom_{i}" type="sphere" size="{radius:.6f}" rgba="{r:.2f} {g:.2f} {b:.2f} {a:.2f}" contype="0" conaffinity="0"/>
+      <geom name="contact_geom_{i}" type="sphere" size="{radius:.6f}" rgba="{r:.2f} {g:.2f} {b:.2f} {a:.2f}" group="1"/>
       <site name="contact_site_{i}" pos="0 0 0" size="0.001"/>
     </body>
 '''
@@ -375,7 +384,7 @@ def load_mujoco_model_with_contact_spheres(xml_file, contact_forces):
                 print(f"  Sphere {i}: force={cf['max_force']:.3f}N, ratio={force_ratio:.3f}, radius={radius:.4f}m, color=({r:.2f},{g:.2f},{b:.2f})")
             
             spheres_xml += f'''    <body name="contact_sphere_{i}" pos="{pos[0]:.6f} {pos[1]:.6f} {pos[2]:.6f}">
-      <geom name="contact_geom_{i}" type="sphere" size="{radius:.6f}" rgba="{r:.2f} {g:.2f} {b:.2f} {a:.2f}" contype="0" conaffinity="0"/>
+      <geom name="contact_geom_{i}" type="sphere" size="{radius:.6f}" rgba="{r:.2f} {g:.2f} {b:.2f} {a:.2f}" group="1"/>
       <site name="contact_site_{i}" pos="0 0 0" size="0.001"/>
     </body>
 '''
