@@ -13,6 +13,7 @@
 #include "sim_manager.h"
 #include <chrono>
 #include <cstring>
+#include <iostream>
 #include "simulate/array_safety.h"
 #include "simulate/glfw_adapter.h"
 
@@ -37,6 +38,161 @@ const std::chrono::milliseconds kBusyWaitTime(1);  // 忙等待时间
 static void TorqueControllerWrapper(const mjModel* m, mjData* d) { 
   SimManager::GetInstance().TorqueController(m, d); 
 }
+
+/**
+ * @brief 自定义GLFW适配器 - 实现推倒采样的键盘控制
+ * 
+ * 这个类重写了MuJoCo的键盘事件处理，实现了推倒采样的交互式控制。
+ * 用户可以通过键盘快捷键实时控制干扰力的施加，用于测试机器人的平衡能力。
+ */
+class CustomGlfwAdapter : public mj::GlfwAdapter {
+ protected:
+  bool shift_pressed_ = false;  // Shift键状态
+  
+  /**
+   * @brief 键盘事件处理函数
+   * @param key 按键代码
+   * @param scancode 扫描码
+   * @param act 按键动作（按下/释放）
+   * 
+   * 实现推倒采样的键盘控制：
+   * - Shift + F/B: 前后向干扰力
+   * - Shift + L/R: 左右向干扰力  
+   * - Shift + U/D: 上下向干扰力
+   * - Shift + G/J: X轴干扰力矩
+   * - Shift + Y/H: Y轴干扰力矩
+   * - Shift + [/]: Z轴干扰力矩
+   * - Shift + 0: 立即停止干扰力
+   * - Shift + +/-: 调整干扰力大小
+   * - Shift + ,/.: 调整干扰力持续时间
+   */
+  void OnKey(int key, int scancode, int act) override {
+    // 首先调用父类的OnKey方法，保持原有功能
+    mj::GlfwAdapter::OnKey(key, scancode, act);
+
+    // 更新Shift键状态
+    if (key == GLFW_KEY_LEFT_SHIFT || key == GLFW_KEY_RIGHT_SHIFT) {
+      if (act == GLFW_PRESS) {
+        shift_pressed_ = true;
+      } else if (act == GLFW_RELEASE) {
+        shift_pressed_ = false;
+      }
+      return;
+    }
+
+    // 只处理按下事件
+    if (act != GLFW_PRESS) return;
+
+    // 只有在Shift键按下时才处理推倒采样控制
+    if (shift_pressed_) {
+      SimManager& sim_manager = SimManager::GetInstance();
+      
+      switch (key) {
+        case GLFW_KEY_F:  // Shift + F: 前向干扰力
+          sim_manager.SetPerturbationForce(Eigen::Vector3d(20.0, 0.0, 0.0));
+          sim_manager.ApplyPerturbation(true);
+          std::cout << "触发前向干扰力" << std::endl;
+          break;
+
+        case GLFW_KEY_B:  // Shift + B: 后向干扰力
+          sim_manager.SetPerturbationForce(Eigen::Vector3d(-20.0, 0.0, 0.0));
+          sim_manager.ApplyPerturbation(true);
+          std::cout << "触发后向干扰力" << std::endl;
+          break;
+
+        case GLFW_KEY_L:  // Shift + L: 左向干扰力
+          sim_manager.SetPerturbationForce(Eigen::Vector3d(0.0, 20.0, 0.0));
+          sim_manager.ApplyPerturbation(true);
+          std::cout << "触发左向干扰力: 力大小=" << sim_manager.GetPerturbationForceMagnitude() 
+                    << "N, 目标物体=" << sim_manager.GetPerturbationBodyName() << std::endl;
+          break;
+
+        case GLFW_KEY_R:  // Shift + R: 右向干扰力
+          sim_manager.SetPerturbationForce(Eigen::Vector3d(0.0, -20.0, 0.0));
+          sim_manager.ApplyPerturbation(true);
+          std::cout << "触发右向干扰力" << std::endl;
+          break;
+
+        case GLFW_KEY_U:  // Shift + U: 上向干扰力
+          sim_manager.SetPerturbationForce(Eigen::Vector3d(0.0, 0.0, 20.0));
+          sim_manager.ApplyPerturbation(true);
+          std::cout << "触发上向干扰力" << std::endl;
+          break;
+
+        case GLFW_KEY_D:  // Shift + D: 下向干扰力
+          sim_manager.SetPerturbationForce(Eigen::Vector3d(0.0, 0.0, -20.0));
+          sim_manager.ApplyPerturbation(true);
+          std::cout << "触发下向干扰力" << std::endl;
+          break;
+
+        case GLFW_KEY_G:  // Shift + G: X轴正方向干扰力矩
+          sim_manager.SetPerturbationTorque(Eigen::Vector3d(5.0, 0.0, 0.0));
+          sim_manager.ApplyPerturbation(true);
+          std::cout << "触发X轴干扰力矩" << std::endl;
+          break;
+
+        case GLFW_KEY_J:  // Shift + J: X轴负方向干扰力矩
+          sim_manager.SetPerturbationTorque(Eigen::Vector3d(-5.0, 0.0, 0.0));
+          sim_manager.ApplyPerturbation(true);
+          std::cout << "触发X轴干扰力矩" << std::endl;
+          break;
+
+        case GLFW_KEY_Y:  // Shift + Y: Y轴正方向干扰力矩
+          sim_manager.SetPerturbationTorque(Eigen::Vector3d(0.0, 5.0, 0.0));
+          sim_manager.ApplyPerturbation(true);
+          std::cout << "触发Y轴干扰力矩" << std::endl;
+          break;
+
+        case GLFW_KEY_H:  // Shift + H: Y轴负方向干扰力矩
+          sim_manager.SetPerturbationTorque(Eigen::Vector3d(0.0, -5.0, 0.0));
+          sim_manager.ApplyPerturbation(true);
+          std::cout << "触发Y轴干扰力矩" << std::endl;
+          break;
+
+        case GLFW_KEY_LEFT_BRACKET:  // Shift + [: Z轴正方向干扰力矩
+          sim_manager.SetPerturbationTorque(Eigen::Vector3d(0.0, 0.0, 5.0));
+          sim_manager.ApplyPerturbation(true);
+          std::cout << "触发Z轴干扰力矩" << std::endl;
+          break;
+
+        case GLFW_KEY_RIGHT_BRACKET:  // Shift + ]: Z轴负方向干扰力矩
+          sim_manager.SetPerturbationTorque(Eigen::Vector3d(0.0, 0.0, -5.0));
+          sim_manager.ApplyPerturbation(true);
+          std::cout << "触发Z轴干扰力矩" << std::endl;
+          break;
+
+        case GLFW_KEY_0:  // Shift + 0: 立即停止所有干扰力/力矩
+          sim_manager.StopPerturbation();
+          std::cout << "立即停止所有干扰力/力矩" << std::endl;
+          break;
+
+        case GLFW_KEY_EQUAL:  // Shift + +: 增加干扰力/力矩大小
+          sim_manager.SetPerturbationForceMagnitude(sim_manager.GetPerturbationForceMagnitude() + 20.0);
+          sim_manager.SetPerturbationTorqueMagnitude(sim_manager.GetPerturbationTorqueMagnitude() + 5.0);
+          std::cout << "干扰力/力矩大小增加到: " << sim_manager.GetPerturbationForceMagnitude() 
+                    << " N, " << sim_manager.GetPerturbationTorqueMagnitude() << " N.m" << std::endl;
+          break;
+
+        case GLFW_KEY_MINUS:  // Shift + -: 减小干扰力/力矩大小
+          sim_manager.SetPerturbationForceMagnitude(std::max(20.0, sim_manager.GetPerturbationForceMagnitude() - 20.0));
+          sim_manager.SetPerturbationTorqueMagnitude(std::max(5.0, sim_manager.GetPerturbationTorqueMagnitude() - 5.0));
+          std::cout << "干扰力/力矩大小减小到: " << sim_manager.GetPerturbationForceMagnitude() 
+                    << " N, " << sim_manager.GetPerturbationTorqueMagnitude() << " N.m" << std::endl;
+          break;
+
+        case GLFW_KEY_PERIOD:  // Shift + .: 增加干扰力持续时间
+          sim_manager.SetPerturbationDuration(sim_manager.GetPerturbationDuration() + 0.1);
+          std::cout << "干扰力/力矩持续时间增加到: " << sim_manager.GetPerturbationDuration() << "秒" << std::endl;
+          break;
+
+        case GLFW_KEY_COMMA:  // Shift + ,: 减小干扰力持续时间
+          sim_manager.SetPerturbationDuration(std::max(0.1, sim_manager.GetPerturbationDuration() - 0.1));
+          std::cout << "干扰力/力矩持续时间减小到: " << sim_manager.GetPerturbationDuration() << "秒" << std::endl;
+          break;
+      }
+    }
+  }
+};
 
 /**
  * @brief 获取SimManager单例实例
@@ -97,43 +253,99 @@ SimManager::~SimManager() {
  * @brief 关节力矩控制器
  * @param m MuJoCo模型指针
  * @param d MuJoCo数据指针
- * @details 实现PD控制器，根据关节命令计算控制力矩
+ * @details 实现PD控制器和推倒采样的干扰力系统
  */
 void SimManager::TorqueController(const mjModel* m, mjData* d) {
-  if (!ros_interface_) {
-    return;
+  // ==================== PD控制器部分 ====================
+  if (ros_interface_) {
+    // 获取线程安全的命令值副本
+    auto cmd = ros_interface_->GetCommandedSafe();
+
+    // 检查是否为浮动基座机器人
+    bool is_floating_base = (m->nv != m->nu);
+
+    // 应用命令控制
+    for (int i = 0; i < m->nu; ++i) {
+      if (i >= cmd.position.size() || i >= cmd.velocity.size() || i >= cmd.torque.size() ||
+          i >= cmd.feed_forward_torque.size() || i >= cmd.stiffness.size() || i >= cmd.damping.size()) {
+        continue;
+      }
+
+      // 获取位置和速度，考虑浮动基座
+      double position;
+      double velocity;
+
+      if (is_floating_base) {
+        position = d->qpos[i + kNumFloatingBaseJoints];
+        velocity = d->qvel[i + kDofFloatingBase];
+      } else {
+        position = d->qpos[i];
+        velocity = d->qvel[i];
+      }
+
+      // PD控制加前馈力矩
+      double position_error = cmd.position[i] - position;
+      double velocity_error = cmd.velocity[i] - velocity;
+
+      d->ctrl[i] = cmd.feed_forward_torque[i] + cmd.stiffness[i] * position_error + cmd.damping[i] * velocity_error;
+    }
+  } else {
+    // 如果没有ROS接口，使用零力矩控制（机器人自由运动）
+    for (int i = 0; i < m->nu; ++i) {
+      d->ctrl[i] = 0.0;
+    }
   }
 
-  // 获取线程安全的命令值副本
-  auto cmd = ros_interface_->GetCommandedSafe();
+  // ==================== 推倒采样干扰力系统 ====================
+  // 检查干扰力是否应该自动停止（基于持续时间）
+  if (apply_perturb_ && perturb_start_time_ > 0) {
+    if (d->time - perturb_start_time_ > perturb_duration_) {
+      apply_perturb_ = false;
+      perturb_start_time_ = -1.0;
+      std::cout << "干扰力自动停止" << std::endl;
 
-  // 检查是否为浮动基座机器人
-  bool is_floating_base = (m->nv != m->nu);
+      // 清除所有外力
+      mju_zero(d->xfrc_applied, 6 * m->nbody);
+    }
+  }
 
-  // 应用命令控制
-  for (int i = 0; i < m->nu; ++i) {
-    if (i >= cmd.position.size() || i >= cmd.velocity.size() || i >= cmd.torque.size() ||
-        i >= cmd.feed_forward_torque.size() || i >= cmd.stiffness.size() || i >= cmd.damping.size()) {
-      continue;
+  // 施加干扰力和力矩（仅当apply_perturb_为true时）
+  if (apply_perturb_) {
+    // 如果是新的干扰力，记录开始时间
+    if (perturb_start_time_ < 0) {
+      perturb_start_time_ = d->time;
+      std::cout << "开始施加干扰力，持续时间: " << perturb_duration_ << "秒" << std::endl;
     }
 
-    // 获取位置和速度，考虑浮动基座
-    double position;
-    double velocity;
+    // 获取目标物体的ID
+    int body_id = mj_name2id(m, mjOBJ_BODY, perturb_body_name_.c_str());
+    if (body_id >= 0) {
+      // 将干扰力从物体坐标系转换到世界坐标系
+      mjtNum* body_quat = d->xquat + 4 * body_id;  // 获取物体四元数
+      mjtNum perturb_force_local[3] = {perturb_force_.x(), perturb_force_.y(), perturb_force_.z()};
+      mjtNum perturb_force_world[3];
+      mju_rotVecQuat(perturb_force_world, perturb_force_local, body_quat);
 
-    if (is_floating_base) {
-      position = d->qpos[i + kNumFloatingBaseJoints];
-      velocity = d->qvel[i + kDofFloatingBase];
+      // 施加干扰力到物体
+      d->xfrc_applied[6 * body_id + 0] += perturb_force_world[0];
+      d->xfrc_applied[6 * body_id + 1] += perturb_force_world[1];
+      d->xfrc_applied[6 * body_id + 2] += perturb_force_world[2];
+
+      // 施加干扰力矩到物体
+      d->xfrc_applied[6 * body_id + 3] += perturb_torque_.x();
+      d->xfrc_applied[6 * body_id + 4] += perturb_torque_.y();
+      d->xfrc_applied[6 * body_id + 5] += perturb_torque_.z();
+      
+      // 调试信息：每100步打印一次
+      static int debug_counter = 0;
+      if (++debug_counter % 100 == 0) {
+        std::cout << "施加干扰力: body_id=" << body_id << ", 世界力=[" 
+                  << perturb_force_world[0] << ", " << perturb_force_world[1] << ", " << perturb_force_world[2] 
+                  << "], 世界力矩=[" << perturb_torque_.x() << ", " << perturb_torque_.y() << ", " << perturb_torque_.z() << "]" << std::endl;
+      }
     } else {
-      position = d->qpos[i];
-      velocity = d->qvel[i];
+      std::cout << "警告: 找不到目标物体 '" << perturb_body_name_ << "'" << std::endl;
     }
-
-    // PD控制加前馈力矩
-    double position_error = cmd.position[i] - position;
-    double velocity_error = cmd.velocity[i] - velocity;
-
-    d->ctrl[i] = cmd.feed_forward_torque[i] + cmd.stiffness[i] * position_error + cmd.damping[i] * velocity_error;
   }
 }
 
@@ -215,10 +427,58 @@ bool SimManager::Initialize() {
   mjvPerturb pert;
   mjv_defaultPerturb(&pert);
 
-  // 创建仿真对象
-  sim_ = std::make_unique<mj::Simulate>(std::make_unique<mj::GlfwAdapter>(), &cam, &opt, &pert, false);
+  // 创建仿真对象，使用自定义的GLFW适配器以支持推倒采样的键盘交互
+  sim_ = std::make_unique<mj::Simulate>(std::make_unique<CustomGlfwAdapter>(), &cam, &opt, &pert, false);
 
   return true;
+}
+
+// ==================== 推外力控制函数实现 ====================
+
+/**
+ * @brief 设置干扰力向量
+ * @param force 干扰力向量（物体坐标系）
+ */
+void SimManager::SetPerturbationForce(const Eigen::Vector3d& force) {
+  perturb_force_ = force;
+}
+
+/**
+ * @brief 设置干扰力矩向量
+ * @param torque 干扰力矩向量（世界坐标系）
+ */
+void SimManager::SetPerturbationTorque(const Eigen::Vector3d& torque) {
+  perturb_torque_ = torque;
+}
+
+/**
+ * @brief 设置施加干扰力的物体名称
+ * @param body_name 物体名称
+ */
+void SimManager::SetPerturbationBody(const std::string& body_name) {
+  perturb_body_name_ = body_name;
+}
+
+
+/**
+ * @brief 应用或停止干扰力
+ * @param apply 是否应用干扰力
+ */
+void SimManager::ApplyPerturbation(bool apply) {
+  apply_perturb_ = apply;
+  if (apply) {
+    perturb_start_time_ = -1.0;  // 重置开始时间
+  }
+}
+
+/**
+ * @brief 立即停止所有干扰力
+ */
+void SimManager::StopPerturbation() {
+  apply_perturb_ = false;
+  perturb_start_time_ = -1.0;
+  perturb_force_ = Eigen::Vector3d::Zero();
+  perturb_torque_ = Eigen::Vector3d::Zero();
 }
 
 /**

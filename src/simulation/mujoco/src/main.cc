@@ -27,6 +27,20 @@ int main(int argc, char** argv) {
   signal(SIGINT, signal_handler);
   signal(SIGTERM, signal_handler);
   
+  // 打印推外力控制说明
+  std::cout << "=== MuJoCo 仿真器启动 ===" << std::endl;
+  std::cout << "推外力控制快捷键：" << std::endl;
+  std::cout << "  Shift + F/B: 前后向干扰力" << std::endl;
+  std::cout << "  Shift + L/R: 左右向干扰力" << std::endl;
+  std::cout << "  Shift + U/D: 上下向干扰力" << std::endl;
+  std::cout << "  Shift + G/J: X轴干扰力矩" << std::endl;
+  std::cout << "  Shift + Y/H: Y轴干扰力矩" << std::endl;
+  std::cout << "  Shift + [/]: Z轴干扰力矩" << std::endl;
+  std::cout << "  Shift + 0: 立即停止干扰力" << std::endl;
+  std::cout << "  Shift + +/-: 调整干扰力大小" << std::endl;
+  std::cout << "  Shift + ,/.: 调整干扰力持续时间" << std::endl;
+  std::cout << "=========================" << std::endl;
+  
   // 解析命令行参数
   bool export_contact = false;
   std::string contact_topic = "/mujoco/contact_forces";

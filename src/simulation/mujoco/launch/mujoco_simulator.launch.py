@@ -51,6 +51,31 @@ def generate_launch_description():
         description='URDF文件路径'
     )
 
+    # 推倒采样相关参数
+    declare_perturb_force_arg = DeclareLaunchArgument(
+        'perturb_force_magnitude',
+        default_value='20.0',
+        description='推倒采样干扰力大小 (N)'
+    )
+
+    declare_perturb_torque_arg = DeclareLaunchArgument(
+        'perturb_torque_magnitude',
+        default_value='5.0',
+        description='推倒采样干扰力矩大小 (N.m)'
+    )
+
+    declare_perturb_duration_arg = DeclareLaunchArgument(
+        'perturb_duration',
+        default_value='0.2',
+        description='推倒采样干扰力持续时间（秒）'
+    )
+
+    declare_perturb_body_arg = DeclareLaunchArgument(
+        'perturb_body_name',
+        default_value='LINK_TORSO_YAW',
+        description='施加干扰力的物体名称'
+    )
+
     # 创建环境变量列表，供仿真器使用
     env_vars = [
         # 设置产品型号为pm_v2
@@ -72,6 +97,10 @@ def generate_launch_description():
         save_csv_str = LaunchConfiguration('save_contact_csv').perform(context)
         csv_file_path = LaunchConfiguration('csv_file_path').perform(context)
         urdf_file = LaunchConfiguration('urdf_file').perform(context)
+        perturb_force = LaunchConfiguration('perturb_force_magnitude').perform(context)
+        perturb_torque = LaunchConfiguration('perturb_torque_magnitude').perform(context)
+        perturb_duration = LaunchConfiguration('perturb_duration').perform(context)
+        perturb_body = LaunchConfiguration('perturb_body_name').perform(context)
         
         # 将字符串转换为布尔值
         export_contact = export_contact_str.lower() == 'true'
@@ -117,6 +146,10 @@ def generate_launch_description():
                 {'contact_topic': contact_topic},    # 接触力话题名称
                 {'save_contact_csv': save_csv},      # 是否保存CSV
                 {'csv_file_path': csv_file_path},    # CSV文件路径
+                {'perturb_force_magnitude': float(perturb_force)},      # 干扰力大小
+                {'perturb_torque_magnitude': float(perturb_torque)},    # 干扰力矩大小
+                {'perturb_duration': float(perturb_duration)},          # 干扰力持续时间
+                {'perturb_body_name': perturb_body},                    # 干扰力目标物体
             ]
         )
 
@@ -163,6 +196,10 @@ def generate_launch_description():
         declare_save_csv_arg,
         declare_csv_path_arg,
         declare_urdf_file_arg,
+        declare_perturb_force_arg,
+        declare_perturb_torque_arg,
+        declare_perturb_duration_arg,
+        declare_perturb_body_arg,
         *env_vars,
         mujoco_launch
     ])

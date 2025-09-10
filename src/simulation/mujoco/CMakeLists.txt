@@ -63,7 +63,7 @@ link_directories(${ENGINEAI_ROBOTICS_THIRD_PARTY}/lib)
 
 
 
-# ROS2 executable - 标准仿真器
+# ROS2 executable - 集成推外力功能的仿真器
 add_executable(mujoco_simulator
   src/main.cc
   src/ros_interface.cc
@@ -71,13 +71,13 @@ add_executable(mujoco_simulator
   src/sim_manager.cc
 )
 
-# 推倒采样仿真器 - 支持交互式干扰力控制
-add_executable(perturbation_simulator
-  src/perturbation_simulator.cc
-  src/ros_interface.cc
-  src/config_loader.cc
-  src/sim_manager.cc
-)
+# # 推倒采样仿真器 - 支持交互式干扰力控制
+# add_executable(perturbation_simulator
+#   src/perturbation_simulator.cc
+#   src/ros_interface.cc
+#   src/config_loader.cc
+#   src/sim_manager.cc
+# )
 
 # 设置运行时搜索路径，避免conda环境与系统库冲突
 set_target_properties(mujoco_simulator PROPERTIES
@@ -86,11 +86,11 @@ set_target_properties(mujoco_simulator PROPERTIES
   INSTALL_RPATH "${ENGINEAI_ROBOTICS_THIRD_PARTY}/lib"
 )
 
-set_target_properties(perturbation_simulator PROPERTIES
-  BUILD_WITH_INSTALL_RPATH TRUE
-  INSTALL_RPATH_USE_LINK_PATH TRUE
-  INSTALL_RPATH "${ENGINEAI_ROBOTICS_THIRD_PARTY}/lib"
-)
+# set_target_properties(perturbation_simulator PROPERTIES
+#   BUILD_WITH_INSTALL_RPATH TRUE
+#   INSTALL_RPATH_USE_LINK_PATH TRUE
+#   INSTALL_RPATH "${ENGINEAI_ROBOTICS_THIRD_PARTY}/lib"
+# )
 
 target_include_directories(mujoco_simulator PUBLIC
   ${CMAKE_CURRENT_SOURCE_DIR}/include
@@ -100,14 +100,14 @@ target_include_directories(mujoco_simulator PUBLIC
   ${EIGEN3_INCLUDE_DIRS}
 )
 
-target_include_directories(perturbation_simulator PUBLIC
-  ${CMAKE_CURRENT_SOURCE_DIR}/include
-  ${CMAKE_CURRENT_SOURCE_DIR}  # Add parent directory to correctly resolve simulate/array_safety.h
-  ${SIMULATE_DIR}
-  ${ENGINEAI_ROBOTICS_THIRD_PARTY}/include
-  ${EIGEN3_INCLUDE_DIRS}
-  ${LCM_INCLUDE_DIRS}
-)
+# target_include_directories(perturbation_simulator PUBLIC
+#   ${CMAKE_CURRENT_SOURCE_DIR}/include
+#   ${CMAKE_CURRENT_SOURCE_DIR}  # Add parent directory to correctly resolve simulate/array_safety.h
+#   ${SIMULATE_DIR}
+#   ${ENGINEAI_ROBOTICS_THIRD_PARTY}/include
+#   ${EIGEN3_INCLUDE_DIRS}
+#   ${LCM_INCLUDE_DIRS}
+# )
 
 target_link_libraries(mujoco_simulator
   ${MUJOCO_LIB}
@@ -122,19 +122,19 @@ target_link_libraries(mujoco_simulator
   ${rcutils_LIBRARIES}
 )
 
-target_link_libraries(perturbation_simulator
-  ${MUJOCO_LIB}
-  libsimulate
-  yaml-cpp::yaml-cpp
-  ${EIGEN3_LIBRARIES}
-  glfw
-  pthread
-  ${CMAKE_DL_LIBS}
-  ${LCM_LIBRARIES}
-  ${rclcpp_LIBRARIES}
-  ${rcl_LIBRARIES}
-  ${rcutils_LIBRARIES}
-)
+# target_link_libraries(perturbation_simulator
+#   ${MUJOCO_LIB}
+#   libsimulate
+#   yaml-cpp::yaml-cpp
+#   ${EIGEN3_LIBRARIES}
+#   glfw
+#   pthread
+#   ${CMAKE_DL_LIBS}
+#   ${LCM_LIBRARIES}
+#   ${rclcpp_LIBRARIES}
+#   ${rcl_LIBRARIES}
+#   ${rcutils_LIBRARIES}
+# )
 
 ament_target_dependencies(mujoco_simulator
   rclcpp
@@ -144,17 +144,17 @@ ament_target_dependencies(mujoco_simulator
   visualization_msgs
 )
 
-ament_target_dependencies(perturbation_simulator
-  rclcpp
-  interface_protocol
-  std_msgs
-  geometry_msgs
-  visualization_msgs
-)
+# ament_target_dependencies(perturbation_simulator
+#   rclcpp
+#   interface_protocol
+#   std_msgs
+#   geometry_msgs
+#   visualization_msgs
+# )
 
 install(TARGETS
   mujoco_simulator
-  perturbation_simulator
+  # perturbation_simulator
   DESTINATION lib/${PROJECT_NAME}
 )
 

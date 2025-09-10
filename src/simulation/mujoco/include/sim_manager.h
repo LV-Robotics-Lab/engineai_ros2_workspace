@@ -6,9 +6,14 @@
 #include <rclcpp/rclcpp.hpp>
 #include <string_view>
 #include <thread>
+#include <Eigen/Dense>
 #include "config_loader.h"
 #include "ros_interface.h"
 #include "simulate/simulate.h"
+#include "simulate/glfw_adapter.h"
+
+// Forward declaration
+class CustomGlfwAdapter;
 
 class SimManager {
  public:
@@ -27,6 +32,22 @@ class SimManager {
 
   // Controller callback used by MuJoCo
   void TorqueController(const mjModel* m, mjData* d);
+
+  // Perturbation control functions
+  void SetPerturbationForce(const Eigen::Vector3d& force);
+  void SetPerturbationTorque(const Eigen::Vector3d& torque);
+  void SetPerturbationBody(const std::string& body_name);
+  void ApplyPerturbation(bool apply);
+  void StopPerturbation();
+  
+  // Perturbation parameter getters and setters
+  double GetPerturbationForceMagnitude() const { return perturb_force_magnitude_; }
+  void SetPerturbationForceMagnitude(double magnitude) { perturb_force_magnitude_ = magnitude; }
+  double GetPerturbationTorqueMagnitude() const { return perturb_torque_magnitude_; }
+  void SetPerturbationTorqueMagnitude(double magnitude) { perturb_torque_magnitude_ = magnitude; }
+  double GetPerturbationDuration() const { return perturb_duration_; }
+  void SetPerturbationDuration(double duration) { perturb_duration_ = duration; }
+  const std::string& GetPerturbationBodyName() const { return perturb_body_name_; }
 
  private:
   // Private constructor for singleton
@@ -53,5 +74,15 @@ class SimManager {
   mjData* d_ = nullptr;
 
   std::array<char, 1024> mj_load_error_;
+
+  // Perturbation control variables
+  bool apply_perturb_ = false;
+  double perturb_force_magnitude_ = 20.0;
+  double perturb_torque_magnitude_ = 5.0;
+  Eigen::Vector3d perturb_force_ = Eigen::Vector3d::Zero();
+  Eigen::Vector3d perturb_torque_ = Eigen::Vector3d::Zero();
+  std::string perturb_body_name_ = "LINK_TORSO_YAW";
+  double perturb_duration_ = 0.2;
+  double perturb_start_time_ = -1.0;
 
 };

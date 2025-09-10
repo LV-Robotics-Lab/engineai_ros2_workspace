@@ -109,18 +109,19 @@ cd /home/wang22/engineai/engineai_ros2_workspace && conda activate engineai_ros2
 source install/setup.bash
 # ros2 launch mujoco_simulator mujoco_simulator.launch.py
 ros2 launch mujoco_simulator mujoco_simulator.launch.py save_contact_csv:=true csv_save_frequency:=1
+ros2 launch mujoco_simulator mujoco_simulator.launch.py export_contact:=true save_contact_csv:=true
 
-# 推倒采样仿真器 - 支持交互式干扰力控制
-# 基本启动
-ros2 launch mujoco_simulator perturbation_simulator.launch.py save_contact_csv:=true
+# # 推倒采样仿真器 - 支持交互式干扰力控制
+# # 基本启动
+# ros2 launch mujoco_simulator perturbation_simulator.launch.py save_contact_csv:=true
 
-# 自定义推倒采样参数
-ros2 launch mujoco_simulator perturbation_simulator.launch.py \
-    save_contact_csv:=true \
-    perturb_force_magnitude:=30.0 \
-    perturb_torque_magnitude:=8.0 \
-    perturb_duration:=0.3 \
-    perturb_body_name:=LINK_TORSO_YAW
+# # 自定义推倒采样参数
+# ros2 launch mujoco_simulator perturbation_simulator.launch.py \
+#     save_contact_csv:=true \
+#     perturb_force_magnitude:=30.0 \
+#     perturb_torque_magnitude:=8.0 \
+#     perturb_duration:=0.3 \
+#     perturb_body_name:=LINK_TORSO_YAW
 
 # 推倒采样键盘控制说明：
 # Shift + F/B: 前后向干扰力
