@@ -254,6 +254,7 @@ By default, a simple policy is loaded from the directory of ```src/interface_exa
    ```bash
    # in host
    ros2 launch interface_example rl_basic_example.launch.py
+   ros2 launch interface_example rl_basic_runner.launch.py
    ```
 
 > **NOTE**: If the robot falls during simulation, you may need to reset the simulator by pressing the reset button.

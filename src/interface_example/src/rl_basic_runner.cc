@@ -4,6 +4,7 @@
 #include <iostream>
 
 #include "math/rotation_matrix.h"
+#include "math/mnn_model.h"
 #include "tool/concatenate_vector.h"
 
 namespace runner {
@@ -17,7 +18,7 @@ RlBasicRunner::RlBasicRunner(std::string_view name, const std::shared_ptr<data::
   }
 
   // Creates mlp net model
-  mlp_net_ = std::make_unique<math::MNNModel>(
+  mlp_net_ = std::make_unique<math::MnnModel>(
       common::PathJoin(common::GlobalPathManager::GetInstance().GetConfigPath(), param_->policy_file));
   mlp_net_observation_.setZero(param_->num_observations, param_->num_include_obs_steps);
   mlp_net_action_.setZero(param_->num_actions);

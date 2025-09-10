@@ -37,7 +37,7 @@ class RlBasicRunner : public BasicRunner {
   float time_ = 0.0;
   bool is_first_time_ = true;
 
-  std::unique_ptr<math::MNNModel> mlp_net_;
+  std::unique_ptr<math::MnnModel> mlp_net_;
   Eigen::MatrixXd mlp_net_observation_;
   Eigen::VectorXd mlp_net_action_;
 

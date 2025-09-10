@@ -14,6 +14,7 @@ __pycache__/
 
 # 忽略CSV数据文件
 logs/contact_data_*.csv
+logs/perturbation_data_*.csv
 logs/*.png
 logs/*.jpg
 logs/*.jpeg

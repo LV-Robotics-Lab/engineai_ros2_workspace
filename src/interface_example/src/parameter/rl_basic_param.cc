@@ -28,13 +28,19 @@ RlBasicParam::RlBasicParam(const std::string& config_file) {
 void RlBasicParam::LoadFromYaml(const std::string& config_file) {
   try {
     YAML::Node config = YAML::LoadFile(config_file);
+    std::cout << "Loading MLP net parameters..." << std::endl;
     // mix = config["mix"].as<bool>();
     // Load MLP net parameters
     policy_file = config["policy_file"].as<std::string>();
+    std::cout << "policy_file: " << policy_file << std::endl;
     num_observations = config["num_observations"].as<int>();
+    std::cout << "num_observations: " << num_observations << std::endl;
     active_joint_names = config["active_joint_names"].as<std::vector<std::string>>();
+    std::cout << "active_joint_names loaded, size: " << active_joint_names.size() << std::endl;
     active_joint_idx = LoadIntVectorFromYaml(config["active_joint_idx"]);
+    std::cout << "active_joint_idx loaded, size: " << active_joint_idx.size() << std::endl;
     num_include_obs_steps = config["num_include_obs_steps"].as<int>();
+    std::cout << "num_include_obs_steps: " << num_include_obs_steps << std::endl;
 
     // Load observation parameters
     observation_scale_linear_vel = config["observation_scale_linear_vel"].as<double>();

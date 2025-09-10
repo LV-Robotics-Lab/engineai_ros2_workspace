@@ -16,8 +16,9 @@ namespace example {
 
 class RlBasicRunner : public rclcpp::Node {
  public:
-  explicit RlBasicRunner(const std::string& config_file_dir) : Node("rl_basic_runner") {
-    std::string config_file = config_file_dir + "/rl_basic_param.yaml";
+  explicit RlBasicRunner(const std::string& config_file_dir, const std::string& config_file_name = "rl_basic_param.yaml") : Node("rl_basic_runner") {
+    std::string config_file = config_file_dir + "/" + config_file_name;
+    RCLCPP_INFO(get_logger(), "Loading config file: %s", config_file.c_str());
     param_ = std::make_shared<RlBasicParam>(config_file);
     config_file_dir_ = config_file_dir;
     joint_command_ = std::make_shared<interface_protocol::msg::JointCommand>();
@@ -283,11 +284,16 @@ int main(int argc, char** argv) {
   rclcpp::init(argc, argv);
 
   if (argc < 2) {
-    RCLCPP_ERROR(rclcpp::get_logger("rl_basic_example"), "Usage: rl_basic_example <config_file_dir>");
+    RCLCPP_ERROR(rclcpp::get_logger("rl_basic_example"), "Usage: rl_basic_example <config_file_dir> [config_file_name]");
     return 1;
   }
 
-  auto node = std::make_shared<example::RlBasicRunner>(argv[1]);
+  std::string config_file_name = "rl_basic_param.yaml";
+  if (argc >= 3) {
+    config_file_name = argv[2];
+  }
+
+  auto node = std::make_shared<example::RlBasicRunner>(argv[1], config_file_name);
   if (!node->Initialize()) {
     rclcpp::shutdown();
     return 1;
