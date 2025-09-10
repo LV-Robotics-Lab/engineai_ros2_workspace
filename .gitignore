@@ -8,6 +8,8 @@
 /rosbag2_*/
 __pycache__/
 *.pyc
+*.mnn
+*.pt
 
 
 # 忽略CSV数据文件
