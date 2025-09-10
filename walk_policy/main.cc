@@ -13,8 +13,8 @@
 // limitations under the License.
 
 /**
- * @file main.cc
- * @brief MuJoCo仿真器主程序 - 用于机器人推倒采样和步态策略测试
+ * @file perturbation_simulator.cc
+ * @brief MuJoCo推倒采样仿真器主程序 - 用于机器人推倒采样和步态策略测试
  * 
  * 这个程序实现了一个完整的MuJoCo物理仿真环境，主要用于：
  * 1. 机器人步态策略的测试和验证

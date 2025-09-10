@@ -55,6 +55,27 @@ sudo apt install rsync sshpass openssh-client libglfw3-dev libxinerama-dev libxc
 sudo apt install ros-dev-tools ros-humble-rmw-cyclonedds-cpp ros-humble-ros-base
 ```
 
+<!-- #### LCM (Lightweight Communications and Marshalling) Installation
+For the perturbation sampling simulator (推倒采样仿真器), you need to install LCM:
+```bash
+# Install LCM dependencies
+sudo apt --fix-broken install
+sudo apt install build-essential libglib2.0-dev cmake
+sudo apt install openssl libssl-dev -y
+sudo apt update && sudo apt install -y libpcre3-dev libglib2.0-dev pkg-config
+
+# Or install from source for latest version
+git clone https://github.com/lcm-proj/lcm.git
+cd lcm
+mkdir build && cd build
+cmake ..
+make -j$(nproc)
+sudo make install
+sudo ldconfig
+```
+
+> **Note**: LCM is required for the perturbation sampling simulator that provides interactive disturbance force control for robot balance testing. -->
+
 #### Environment Variables
 Add these environment variables to your ~/.bashrc :
 ```bash
@@ -88,6 +109,29 @@ cd /home/wang22/engineai/engineai_ros2_workspace && conda activate engineai_ros2
 source install/setup.bash
 # ros2 launch mujoco_simulator mujoco_simulator.launch.py
 ros2 launch mujoco_simulator mujoco_simulator.launch.py save_contact_csv:=true csv_save_frequency:=1
+
+# 推倒采样仿真器 - 支持交互式干扰力控制
+# 基本启动
+ros2 launch mujoco_simulator perturbation_simulator.launch.py save_contact_csv:=true
+
+# 自定义推倒采样参数
+ros2 launch mujoco_simulator perturbation_simulator.launch.py \
+    save_contact_csv:=true \
+    perturb_force_magnitude:=30.0 \
+    perturb_torque_magnitude:=8.0 \
+    perturb_duration:=0.3 \
+    perturb_body_name:=LINK_TORSO_YAW
+
+# 推倒采样键盘控制说明：
+# Shift + F/B: 前后向干扰力
+# Shift + L/R: 左右向干扰力  
+# Shift + U/D: 上下向干扰力
+# Shift + G/J: X轴干扰力矩
+# Shift + Y/H: Y轴干扰力矩
+# Shift + [/]: Z轴干扰力矩
+# Shift + 0: 立即停止干扰力
+# Shift + +/-: 调整干扰力大小
+# Shift + ,/.: 调整干扰力持续时间
 
 # terminal 2
 # choose mesh or geometry: in src/simulation/mujoco/assets/config/pm_v2.yaml
@@ -127,6 +171,39 @@ git push origin bench
 # terminal 2
 # ros2 launch interface_example contact_viz.launch.py
 ```
+
+#### Perturbation Sampling Simulator (推倒采样仿真器)
+For interactive robot balance testing with disturbance forces:
+
+**Quick Start (推荐):**
+```bash
+cd /home/wang22/engineai/engineai_ros2_workspace
+./scripts/run_perturbation_simulator.sh
+```
+
+**Manual Build and Run:**
+```bash
+# Build the perturbation simulator
+cd /home/wang22/engineai/engineai_ros2_workspace
+./scripts/build_nodes.sh sim
+source install/setup.bash
+
+# Run the perturbation simulator
+ros2 run mujoco_simulator perturbation_simulator
+```
+
+**Keyboard Controls for Disturbance Forces:**
+- Shift + F/B: Forward/Backward force
+- Shift + L/R: Left/Right force  
+- Shift + U/D: Up/Down force
+- Shift + G/J: X-axis torque
+- Shift + Y/H: Y-axis torque
+- Shift + [/]: Z-axis torque
+- Shift + 0: Stop all forces immediately
+- Shift + +/-: Increase/Decrease force magnitude
+- Shift + ,/.: Increase/Decrease force duration
+
+> **Note**: The perturbation simulator provides interactive disturbance force control for testing robot balance and recovery capabilities. It uses LCM communication instead of ROS2.
 > **IMPORTANT**: When running simulation, either do not connect to the physical robot or set `ROS_LOCALHOST_ONLY=1` in your environment to prevent accidental connections.
 
 #### Real robot
