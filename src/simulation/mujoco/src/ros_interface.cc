@@ -853,6 +853,304 @@ void RosInterface::PublishContactForces(const mjModel* m, mjData* d) {
     contact_marker_pub_->publish(arr);
   }
 
+  // ==================== 推力可视化功能 ====================
+  if (contact_marker_pub_) {
+    // 获取活跃的干扰力数据
+    auto& sim_manager = SimManager::GetInstance();
+    auto active_perturbations = sim_manager.GetActivePerturbations();
+    
+    if (!active_perturbations.empty()) {
+      visualization_msgs::msg::MarkerArray perturbation_arr;
+      
+      // 推力可视化参数
+      const double base_diameter = 0.05;   // 5 cm 基础直径
+      const double max_diameter  = 0.15;   // 15 cm 最大直径
+      const double scale_gain    = 1.0/100.0; // 100N对应1倍尺寸缩放
+      
+      // 遍历所有活跃的干扰力
+      for (size_t i = 0; i < active_perturbations.size(); ++i) {
+        const auto& pert = active_perturbations[i];
+        
+        // 计算推力大小
+        double force_magnitude = pert.force.norm();
+        if (force_magnitude < 0.1) continue; // 忽略太小的力
+        
+        // 获取推力作用的目标body ID
+        int perturbation_body_id = mj_name2id(m, mjOBJ_BODY, pert.body_name.c_str());
+        if (perturbation_body_id < 0) continue;
+        
+        // 计算推力在世界坐标系下的位置（body的当前位置）
+        mjtNum world_pos[3] = {0, 0, 0};
+        if (perturbation_body_id < m->nbody) {
+          world_pos[0] = d->xpos[3 * perturbation_body_id];
+          world_pos[1] = d->xpos[3 * perturbation_body_id + 1];
+          world_pos[2] = d->xpos[3 * perturbation_body_id + 2];
+        }
+        
+        // 计算推力在标准姿态下的位置
+        mjtNum std_pose_pos[3] = {0, 0, 0};
+        if (perturbation_body_id < m->nbody && !std_xpos_cache.empty()) {
+          std_pose_pos[0] = std_xpos_cache[3 * perturbation_body_id];
+          std_pose_pos[1] = std_xpos_cache[3 * perturbation_body_id + 1];
+          std_pose_pos[2] = std_xpos_cache[3 * perturbation_body_id + 2];
+        }
+        
+        // 直接使用MuJoCo已经计算好的世界坐标系推力方向
+        // 这个方向已经在SimManager::TorqueController中计算过了
+        mjtNum* body_quat = d->xquat + 4 * perturbation_body_id;
+        mjtNum perturb_force_local[3] = {pert.force.x(), pert.force.y(), pert.force.z()};
+        mjtNum perturb_force_world[3];
+        mju_rotVecQuat(perturb_force_world, perturb_force_local, body_quat);
+        
+        // 调试打印：显示RViz中使用的推力值
+        static int debug_counter = 0;
+        if (++debug_counter % 100 == 0) {
+          std::cout << "RViz推力调试 - ID " << pert.id << ": 局部力=[" 
+                    << perturb_force_local[0] << ", " << perturb_force_local[1] << ", " << perturb_force_local[2] 
+                    << "], 世界力=[" 
+                    << perturb_force_world[0] << ", " << perturb_force_world[1] << ", " << perturb_force_world[2] 
+                    << "], 大小=" << sqrt(perturb_force_world[0]*perturb_force_world[0] + 
+                                         perturb_force_world[1]*perturb_force_world[1] + 
+                                         perturb_force_world[2]*perturb_force_world[2]) << "N" << std::endl;
+        }
+        
+        // -------------------
+        // 蓝球：世界坐标系下的推力位置
+        // -------------------
+        visualization_msgs::msg::Marker mkr_blue;
+        mkr_blue.header.frame_id = "world";
+        mkr_blue.header.stamp = node_->now();
+        mkr_blue.ns = "perturbation_world";
+        mkr_blue.id = 20000 + i;  // 避免和其他标记冲突
+        mkr_blue.type = visualization_msgs::msg::Marker::SPHERE;
+        mkr_blue.action = visualization_msgs::msg::Marker::ADD;
+        
+        mkr_blue.pose.position.x = world_pos[0];
+        mkr_blue.pose.position.y = world_pos[1];
+        mkr_blue.pose.position.z = world_pos[2];
+        mkr_blue.pose.orientation.w = 1.0;
+        
+        // 根据推力大小动态计算球体直径
+        double dia = base_diameter * (1.0 + std::clamp(force_magnitude * scale_gain, 0.0, 3.0));
+        dia = std::min(dia, max_diameter);
+        mkr_blue.scale.x = mkr_blue.scale.y = mkr_blue.scale.z = dia;
+        
+        // 颜色：蓝色
+        mkr_blue.color.r = 0.0; mkr_blue.color.g = 0.0; mkr_blue.color.b = 1.0; mkr_blue.color.a = 0.9;
+        mkr_blue.lifetime = rclcpp::Duration::from_seconds(0.1);
+        
+        perturbation_arr.markers.push_back(mkr_blue);
+        
+        // -------------------
+        // 黄球：标准姿态坐标系下的推力位置
+        // -------------------
+        visualization_msgs::msg::Marker mkr_yellow;
+        mkr_yellow.header.frame_id = "world";
+        mkr_yellow.header.stamp = node_->now();
+        mkr_yellow.ns = "perturbation_stdpose";
+        mkr_yellow.id = 30000 + i;  // 避免和其他标记冲突
+        mkr_yellow.type = visualization_msgs::msg::Marker::SPHERE;
+        mkr_yellow.action = visualization_msgs::msg::Marker::ADD;
+        
+        mkr_yellow.pose.position.x = std_pose_pos[0];
+        mkr_yellow.pose.position.y = std_pose_pos[1];
+        mkr_yellow.pose.position.z = std_pose_pos[2];
+        mkr_yellow.pose.orientation.w = 1.0;
+        
+        // 使用相同的尺寸
+        mkr_yellow.scale.x = mkr_yellow.scale.y = mkr_yellow.scale.z = dia;
+        
+        // 颜色：黄色
+        mkr_yellow.color.r = 1.0; mkr_yellow.color.g = 1.0; mkr_yellow.color.b = 0.0; mkr_yellow.color.a = 0.9;
+        mkr_yellow.lifetime = rclcpp::Duration::from_seconds(0.1);
+        
+        perturbation_arr.markers.push_back(mkr_yellow);
+        
+        // -------------------
+        // 推力箭头：显示推力方向和大小（世界坐标系）
+        // -------------------
+        visualization_msgs::msg::Marker mkr_arrow;
+        mkr_arrow.header.frame_id = "world";
+        mkr_arrow.header.stamp = node_->now();
+        mkr_arrow.ns = "perturbation_force";
+        mkr_arrow.id = 40000 + i;  // 避免和其他标记冲突
+        mkr_arrow.type = visualization_msgs::msg::Marker::ARROW;
+        mkr_arrow.action = visualization_msgs::msg::Marker::ADD;
+        
+        // 箭头起点：推力作用位置
+        mkr_arrow.pose.position.x = world_pos[0];
+        mkr_arrow.pose.position.y = world_pos[1];
+        mkr_arrow.pose.position.z = world_pos[2];
+        
+        // 箭头方向：推力方向
+        double arrow_length = std::min(force_magnitude * 0.01, 0.5); // 缩放箭头长度
+        mkr_arrow.scale.x = arrow_length;  // 箭头长度
+        mkr_arrow.scale.y = 0.02;          // 箭头宽度
+        mkr_arrow.scale.z = 0.02;          // 箭头高度
+        
+        // 使用更简单的方法：直接设置箭头的起点和终点
+        // 起点：推力作用位置
+        // 终点：起点 + 推力方向 * 箭头长度
+        double norm = sqrt(perturb_force_world[0]*perturb_force_world[0] + 
+                          perturb_force_world[1]*perturb_force_world[1] + 
+                          perturb_force_world[2]*perturb_force_world[2]);
+        if (norm > 0.001) {
+          // 归一化推力向量
+          double fx = perturb_force_world[0] / norm;
+          double fy = perturb_force_world[1] / norm;
+          double fz = perturb_force_world[2] / norm;
+          
+          // 计算箭头终点
+          double end_x = world_pos[0] + fx * arrow_length;
+          double end_y = world_pos[1] + fy * arrow_length;
+          double end_z = world_pos[2] + fz * arrow_length;
+          
+          // 使用RViz的ARROW标记，设置起点和终点
+          // 注意：RViz的ARROW标记的scale.x是长度，但我们需要通过pose来设置方向
+          mkr_arrow.scale.x = arrow_length;
+          mkr_arrow.scale.y = 0.02;
+          mkr_arrow.scale.z = 0.02;
+          
+          // 设置箭头位置为起点
+          mkr_arrow.pose.position.x = world_pos[0];
+          mkr_arrow.pose.position.y = world_pos[1];
+          mkr_arrow.pose.position.z = world_pos[2];
+          
+          // 计算从X轴(1,0,0)到推力方向的旋转（RViz ARROW默认指向X轴正方向）
+          double axis_x = 0.0;  // 叉积 X × force
+          double axis_y = -fz;  // 0*fz - 1*fy = -fz
+          double axis_z = fy;   // 1*fx - 0*fz = fy
+          
+          double cos_angle = fx;  // 点积 X · force
+          double angle = acos(std::clamp(cos_angle, -1.0, 1.0));
+          
+          if (angle > 0.001) {
+            double axis_norm = sqrt(axis_x*axis_x + axis_y*axis_y + axis_z*axis_z);
+            if (axis_norm > 0.001) {
+              axis_x /= axis_norm;
+              axis_y /= axis_norm;
+              axis_z /= axis_norm;
+            }
+          } else {
+            axis_x = 0; axis_y = 0; axis_z = 1;
+          }
+          
+          // 转换为四元数
+          double s = sin(angle / 2.0);
+          mkr_arrow.pose.orientation.w = cos(angle / 2.0);
+          mkr_arrow.pose.orientation.x = axis_x * s;
+          mkr_arrow.pose.orientation.y = axis_y * s;
+          mkr_arrow.pose.orientation.z = axis_z * s;
+        } else {
+          mkr_arrow.pose.orientation.w = 1.0;
+          mkr_arrow.pose.orientation.x = 0.0;
+          mkr_arrow.pose.orientation.y = 0.0;
+          mkr_arrow.pose.orientation.z = 0.0;
+        }
+        
+        // 颜色：红色（表示推力）
+        mkr_arrow.color.r = 1.0; mkr_arrow.color.g = 0.0; mkr_arrow.color.b = 0.0; mkr_arrow.color.a = 0.8;
+        mkr_arrow.lifetime = rclcpp::Duration::from_seconds(0.1);
+        
+        perturbation_arr.markers.push_back(mkr_arrow);
+        
+        // -------------------
+        // 黄色箭头：显示推力在标准姿态坐标系下的方向
+        // -------------------
+        visualization_msgs::msg::Marker mkr_yellow_arrow;
+        mkr_yellow_arrow.header.frame_id = "world";
+        mkr_yellow_arrow.header.stamp = node_->now();
+        mkr_yellow_arrow.ns = "perturbation_stdpose_force";
+        mkr_yellow_arrow.id = 50000 + i;  // 避免和其他标记冲突
+        mkr_yellow_arrow.type = visualization_msgs::msg::Marker::ARROW;
+        mkr_yellow_arrow.action = visualization_msgs::msg::Marker::ADD;
+        
+        // 箭头起点：标准姿态坐标系下的推力位置
+        mkr_yellow_arrow.pose.position.x = std_pose_pos[0];
+        mkr_yellow_arrow.pose.position.y = std_pose_pos[1];
+        mkr_yellow_arrow.pose.position.z = std_pose_pos[2];
+        
+        // 箭头方向：推力在标准姿态坐标系下的方向
+        // 需要将推力从局部坐标系转换到标准姿态坐标系
+        mkr_yellow_arrow.scale.x = arrow_length;  // 箭头长度
+        mkr_yellow_arrow.scale.y = 0.02;          // 箭头宽度
+        mkr_yellow_arrow.scale.z = 0.02;          // 箭头高度
+        
+        // 计算推力在标准姿态坐标系下的方向
+        // 首先获取标准姿态下的body旋转矩阵
+        mjtNum* std_rotmat = nullptr;
+        if (perturbation_body_id < m->nbody && !std_xmat_cache.empty()) {
+          std_rotmat = &std_xmat_cache[9 * perturbation_body_id];
+        }
+        
+        // 将推力从局部坐标系转换到标准姿态坐标系
+        mjtNum perturb_force_stdpose[3];
+        if (std_rotmat) {
+          mjtNum perturb_force_local[3] = {pert.force.x(), pert.force.y(), pert.force.z()};
+          mju_rotVecMat(perturb_force_stdpose, perturb_force_local, std_rotmat);
+        } else {
+          // 如果没有标准姿态数据，使用原始局部方向
+          perturb_force_stdpose[0] = pert.force.x();
+          perturb_force_stdpose[1] = pert.force.y();
+          perturb_force_stdpose[2] = pert.force.z();
+        }
+        
+        // 使用与红色箭头相同的方向计算方法
+        double stdpose_norm = sqrt(perturb_force_stdpose[0]*perturb_force_stdpose[0] + 
+                                  perturb_force_stdpose[1]*perturb_force_stdpose[1] + 
+                                  perturb_force_stdpose[2]*perturb_force_stdpose[2]);
+        if (stdpose_norm > 0.001) {
+          // 归一化标准姿态推力向量
+          double fx = perturb_force_stdpose[0] / stdpose_norm;
+          double fy = perturb_force_stdpose[1] / stdpose_norm;
+          double fz = perturb_force_stdpose[2] / stdpose_norm;
+          
+          // 计算从X轴(1,0,0)到推力方向的旋转（RViz ARROW默认指向X轴正方向）
+          double axis_x = 0.0;  // 叉积 X × force
+          double axis_y = -fz;  // 0*fz - 1*fy = -fz
+          double axis_z = fy;   // 1*fx - 0*fz = fy
+          
+          double cos_angle = fx;  // 点积 X · force
+          double angle = acos(std::clamp(cos_angle, -1.0, 1.0));
+          
+          if (angle > 0.001) {
+            double axis_norm = sqrt(axis_x*axis_x + axis_y*axis_y + axis_z*axis_z);
+            if (axis_norm > 0.001) {
+              axis_x /= axis_norm;
+              axis_y /= axis_norm;
+              axis_z /= axis_norm;
+            }
+          } else {
+            axis_x = 0; axis_y = 0; axis_z = 1;
+          }
+          
+          // 转换为四元数
+          double s = sin(angle / 2.0);
+          mkr_yellow_arrow.pose.orientation.w = cos(angle / 2.0);
+          mkr_yellow_arrow.pose.orientation.x = axis_x * s;
+          mkr_yellow_arrow.pose.orientation.y = axis_y * s;
+          mkr_yellow_arrow.pose.orientation.z = axis_z * s;
+        } else {
+          mkr_yellow_arrow.pose.orientation.w = 1.0;
+          mkr_yellow_arrow.pose.orientation.x = 0.0;
+          mkr_yellow_arrow.pose.orientation.y = 0.0;
+          mkr_yellow_arrow.pose.orientation.z = 0.0;
+        }
+        
+        // 颜色：黄色（表示标准姿态坐标系下的推力）
+        mkr_yellow_arrow.color.r = 1.0; mkr_yellow_arrow.color.g = 1.0; mkr_yellow_arrow.color.b = 0.0; mkr_yellow_arrow.color.a = 0.8;
+        mkr_yellow_arrow.lifetime = rclcpp::Duration::from_seconds(0.1);
+        
+        perturbation_arr.markers.push_back(mkr_yellow_arrow);
+      }
+      
+      // 发布推力可视化标记
+      if (!perturbation_arr.markers.empty()) {
+        contact_marker_pub_->publish(perturbation_arr);
+      }
+    }
+  }
+
   // ==================== 第五部分：保存到CSV文件 ====================
   if (save_contact_csv_ && csv_file_.is_open()) {
     // 使用帧计数器控制保存频率
