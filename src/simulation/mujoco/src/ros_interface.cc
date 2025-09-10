@@ -1210,8 +1210,7 @@ void RosInterface::PublishContactForces(const mjModel* m, mjData* d) {
                   << csv_collision_link_quat_w[i] << ","   // 碰撞link的世界坐标姿态四元数
                   << csv_collision_link_quat_x[i] << ","
                   << csv_collision_link_quat_y[i] << ","
-                  << csv_collision_link_quat_z[i] << ","
-                  << num_perturbations;                    // num_perturbations
+                  << csv_collision_link_quat_z[i];
 
         // 添加关节角度参数
         for (int j = 0; j < num_total_joints_; j++) {
