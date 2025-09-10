@@ -105,7 +105,7 @@ Joystick Control is the simplest mode with which the user can enjoy the default 
 # terminal 1
 cd /home/wang22/engineai/engineai_ros2_workspace && conda activate engineai_ros2
 ./src/third_party/install.sh
-./scripts/build_nodes.sh sim    # or colcon build --packages-select mujoco_simulator
+./scripts/build_nodes.sh sim    # or colcon build --packages-select mujoco_simulator , or colcon build
 source install/setup.bash
 # ros2 launch mujoco_simulator mujoco_simulator.launch.py
 ros2 launch mujoco_simulator mujoco_simulator.launch.py save_contact_csv:=true csv_save_frequency:=1
@@ -169,11 +169,9 @@ python ./scripts/MeshCombine/urdf_mesh_combiner.py
 
 git push origin bench
 
-# terminal 2
-# ros2 launch interface_example contact_viz.launch.py
 ```
 
-#### Perturbation Sampling Simulator (推倒采样仿真器)
+<!-- #### Perturbation Sampling Simulator (推倒采样仿真器)
 For interactive robot balance testing with disturbance forces:
 
 **Quick Start (推荐):**
@@ -191,7 +189,7 @@ source install/setup.bash
 
 # Run the perturbation simulator
 ros2 run mujoco_simulator perturbation_simulator
-```
+``` -->
 
 **Keyboard Controls for Disturbance Forces:**
 - Shift + F/B: Forward/Backward force
@@ -204,7 +202,7 @@ ros2 run mujoco_simulator perturbation_simulator
 - Shift + +/-: Increase/Decrease force magnitude
 - Shift + ,/.: Increase/Decrease force duration
 
-> **Note**: The perturbation simulator provides interactive disturbance force control for testing robot balance and recovery capabilities. It uses LCM communication instead of ROS2.
+> **Note**: The perturbation simulator provides interactive disturbance force control for testing robot balance and recovery capabilities. It uses keyboard in ROS2.
 > **IMPORTANT**: When running simulation, either do not connect to the physical robot or set `ROS_LOCALHOST_ONLY=1` in your environment to prevent accidental connections.
 
 #### Real robot

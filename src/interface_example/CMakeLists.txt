@@ -96,7 +96,6 @@ install(DIRECTORY config/
 
 # 安装 Python 脚本
 install(PROGRAMS
-  scripts/contact_viz_and_log.py
   scripts/body_velocity_control_example.py
   src/joint_state_converter.py
   DESTINATION lib/${PROJECT_NAME}

@@ -67,9 +67,12 @@ class RlBasicRunner : public rclcpp::Node {
       is_first_time_ = true;
 
       RCLCPP_INFO(get_logger(), "Starting control loop");
+      
       // Create control timer
+      RCLCPP_INFO(get_logger(), "Creating control timer with dt: %f", param_->control_dt);
       control_timer_ = create_wall_timer(std::chrono::duration<double>(param_->control_dt),
                                          std::bind(&RlBasicRunner::ControlCallback, this));
+      RCLCPP_INFO(get_logger(), "Control timer created successfully");
 
       return true;
     } catch (const std::exception& e) {
@@ -80,17 +83,30 @@ class RlBasicRunner : public rclcpp::Node {
 
  private:
   void ControlCallback() {
+    RCLCPP_DEBUG(get_logger(), "ControlCallback called");
+    
     if (message_handler_->GetLatestMotionState()->current_motion_task != "joint_bridge") {
       time_ = 0.0;
       is_first_time_ = true;
       return;
     }
+    
     auto joint_state = message_handler_->GetLatestJointState();
-    if (!joint_state) return;  // Skip if no joint state received yet
+    if (!joint_state) {
+      RCLCPP_DEBUG(get_logger(), "No joint state received yet, skipping");
+      return;  // Skip if no joint state received yet
+    }
 
+    RCLCPP_DEBUG(get_logger(), "Updating state");
     UpdateState(joint_state);
+    
+    RCLCPP_DEBUG(get_logger(), "Calculating observation");
     CalculateObservation();
+    
+    RCLCPP_DEBUG(get_logger(), "Calculating motor command");
     CalculateMotorCommand();
+    
+    RCLCPP_DEBUG(get_logger(), "Sending motor command");
     SendMotorCommand();
 
     time_ += param_->control_dt;
@@ -175,21 +191,35 @@ class RlBasicRunner : public rclcpp::Node {
   }
 
   void CalculateMotorCommand() {
+    RCLCPP_DEBUG(get_logger(), "CalculateMotorCommand: Starting");
+    
     Eigen::Vector2d clock_signal(std::sin(2 * M_PI * global_phase_), std::cos(2 * M_PI * global_phase_));
+    RCLCPP_DEBUG(get_logger(), "CalculateMotorCommand: Clock signal calculated");
+    
     Eigen::VectorXd obs = Eigen::VectorXd::Zero(
       param_->num_observations * param_->num_include_obs_steps + 
       param_->num_clock_signal + 
       param_->num_commands
     );
     obs = Eigen::VectorXd::Zero(param_->num_observations * param_->num_include_obs_steps + param_->num_clock_signal + param_->num_commands);
+    RCLCPP_DEBUG(get_logger(), "CalculateMotorCommand: Observation vector created, size: %ld", obs.size());
+    
     obs.head(param_->num_observations * param_->num_include_obs_steps) =
         Eigen::Map<Eigen::VectorXd>(mlp_net_observation_.transpose().data(), mlp_net_observation_.size());
+    RCLCPP_DEBUG(get_logger(), "CalculateMotorCommand: Observation data filled");
+    
     command_.array() *= param_->obs_commands_scale.array();
     obs.tail(param_->num_clock_signal + param_->num_commands) << clock_signal, command_;
-
+    RCLCPP_DEBUG(get_logger(), "CalculateMotorCommand: Command data filled");
 
     // Get MNN output
-    mlp_net_action_ = mlp_net_->Inference(obs.cast<float>()).cast<double>();
+    RCLCPP_DEBUG(get_logger(), "CalculateMotorCommand: Preparing MNN inference");
+    Eigen::MatrixXf obs_matrix = obs.cast<float>().transpose();
+    RCLCPP_DEBUG(get_logger(), "CalculateMotorCommand: Observation matrix created, size: %ld x %ld", obs_matrix.rows(), obs_matrix.cols());
+    
+    RCLCPP_DEBUG(get_logger(), "CalculateMotorCommand: Calling MNN inference");
+    mlp_net_action_ = mlp_net_->Inference(obs_matrix).cast<double>();
+    RCLCPP_DEBUG(get_logger(), "CalculateMotorCommand: MNN inference completed");
     mlp_net_action_ = mlp_net_action_.cwiseMax(-param_->action_clip).cwiseMin(param_->action_clip);
 
     // Calculate desired joint positions
