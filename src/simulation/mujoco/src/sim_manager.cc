@@ -80,18 +80,16 @@ class CustomGlfwAdapter : public mj::GlfwAdapter {
       return;
     }
 
-    // 只处理按下事件
-    if (act != GLFW_PRESS) return;
-
-    // 只有在Shift键按下时才处理推倒采样控制
-    if (shift_pressed_) {
-      SimManager& sim_manager = SimManager::GetInstance();
-      
+    // 处理按下和释放事件
+    SimManager& sim_manager = SimManager::GetInstance();
+    
+    if (act == GLFW_PRESS && shift_pressed_) {
+      // 处理按键按下事件（启动干扰力）
       switch (key) {
         case GLFW_KEY_F:  // Shift + F: 前向干扰力
           sim_manager.SetPerturbationForce(Eigen::Vector3d(20.0, 0.0, 0.0));
           sim_manager.ApplyPerturbation(true);
-          std::cout << "触发前向干扰力" << std::endl;
+          std::cout << "触发前向干扰力 (推力可视化已启用)" << std::endl;
           break;
 
         case GLFW_KEY_B:  // Shift + B: 后向干扰力
@@ -104,7 +102,7 @@ class CustomGlfwAdapter : public mj::GlfwAdapter {
           sim_manager.SetPerturbationForce(Eigen::Vector3d(0.0, 20.0, 0.0));
           sim_manager.ApplyPerturbation(true);
           std::cout << "触发左向干扰力: 力大小=" << sim_manager.GetPerturbationForceMagnitude() 
-                    << "N, 目标物体=" << sim_manager.GetPerturbationBodyName() << std::endl;
+                    << "N, 目标物体=" << sim_manager.GetPerturbationBodyName() << " (推力可视化已启用)" << std::endl;
           break;
 
         case GLFW_KEY_R:  // Shift + R: 右向干扰力
@@ -188,6 +186,29 @@ class CustomGlfwAdapter : public mj::GlfwAdapter {
         case GLFW_KEY_COMMA:  // Shift + ,: 减小干扰力持续时间
           sim_manager.SetPerturbationDuration(std::max(0.1, sim_manager.GetPerturbationDuration() - 0.1));
           std::cout << "干扰力/力矩持续时间减小到: " << sim_manager.GetPerturbationDuration() << "秒" << std::endl;
+          break;
+      }
+    } else if (act == GLFW_RELEASE) {
+      // 处理按键释放事件（停止干扰力）
+      switch (key) {
+        case GLFW_KEY_F:  // 释放F键：停止前向干扰力
+        case GLFW_KEY_B:  // 释放B键：停止后向干扰力
+        case GLFW_KEY_L:  // 释放L键：停止左向干扰力
+        case GLFW_KEY_R:  // 释放R键：停止右向干扰力
+        case GLFW_KEY_U:  // 释放U键：停止上向干扰力
+        case GLFW_KEY_D:  // 释放D键：停止下向干扰力
+          sim_manager.ApplyPerturbation(false);
+          std::cout << "停止推力干扰力" << std::endl;
+          break;
+          
+        case GLFW_KEY_G:  // 释放G键：停止X轴干扰力矩
+        case GLFW_KEY_J:  // 释放J键：停止X轴干扰力矩
+        case GLFW_KEY_Y:  // 释放Y键：停止Y轴干扰力矩
+        case GLFW_KEY_H:  // 释放H键：停止Y轴干扰力矩
+        case GLFW_KEY_LEFT_BRACKET:   // 释放[键：停止Z轴干扰力矩
+        case GLFW_KEY_RIGHT_BRACKET:  // 释放]键：停止Z轴干扰力矩
+          sim_manager.ApplyPerturbation(false);
+          std::cout << "停止力矩干扰力" << std::endl;
           break;
       }
     }
@@ -296,55 +317,93 @@ void SimManager::TorqueController(const mjModel* m, mjData* d) {
     }
   }
 
-  // ==================== 推倒采样干扰力系统 ====================
-  // 检查干扰力是否应该自动停止（基于持续时间）
-  if (apply_perturb_ && perturb_start_time_ > 0) {
-    if (d->time - perturb_start_time_ > perturb_duration_) {
-      apply_perturb_ = false;
-      perturb_start_time_ = -1.0;
-      std::cout << "干扰力自动停止" << std::endl;
-
-      // 清除所有外力
-      mju_zero(d->xfrc_applied, 6 * m->nbody);
+  // ==================== 多干扰力系统 ====================
+  {
+    std::lock_guard<std::mutex> lock(perturbation_mutex_);
+    
+    // 检查并清理过期的干扰力
+    auto it = active_perturbations_.begin();
+    while (it != active_perturbations_.end()) {
+      if (d->time - it->start_time > it->duration) {
+        std::cout << "干扰力ID " << it->id << " 自动停止" << std::endl;
+        it = active_perturbations_.erase(it);
+      } else {
+        ++it;
+      }
     }
-  }
-
-  // 施加干扰力和力矩（仅当apply_perturb_为true时）
-  if (apply_perturb_) {
-    // 如果是新的干扰力，记录开始时间
-    if (perturb_start_time_ < 0) {
-      perturb_start_time_ = d->time;
-      std::cout << "开始施加干扰力，持续时间: " << perturb_duration_ << "秒" << std::endl;
-    }
-
-    // 获取目标物体的ID
-    int body_id = mj_name2id(m, mjOBJ_BODY, perturb_body_name_.c_str());
-    if (body_id >= 0) {
-      // 将干扰力从物体坐标系转换到世界坐标系
-      mjtNum* body_quat = d->xquat + 4 * body_id;  // 获取物体四元数
-      mjtNum perturb_force_local[3] = {perturb_force_.x(), perturb_force_.y(), perturb_force_.z()};
-      mjtNum perturb_force_world[3];
-      mju_rotVecQuat(perturb_force_world, perturb_force_local, body_quat);
-
-      // 施加干扰力到物体
-      d->xfrc_applied[6 * body_id + 0] += perturb_force_world[0];
-      d->xfrc_applied[6 * body_id + 1] += perturb_force_world[1];
-      d->xfrc_applied[6 * body_id + 2] += perturb_force_world[2];
-
-      // 施加干扰力矩到物体
-      d->xfrc_applied[6 * body_id + 3] += perturb_torque_.x();
-      d->xfrc_applied[6 * body_id + 4] += perturb_torque_.y();
-      d->xfrc_applied[6 * body_id + 5] += perturb_torque_.z();
+    
+    // 处理当前激活的干扰力（向后兼容）
+    if (apply_perturb_) {
+      // 检查是否已经存在相同的干扰力
+      bool found_existing = false;
+      for (auto& pert : active_perturbations_) {
+        if (pert.body_name == perturb_body_name_ && 
+            pert.force.isApprox(perturb_force_) && 
+            pert.torque.isApprox(perturb_torque_)) {
+          found_existing = true;
+          break;
+        }
+      }
       
-      // 调试信息：每100步打印一次
-      static int debug_counter = 0;
-      if (++debug_counter % 100 == 0) {
-        std::cout << "施加干扰力: body_id=" << body_id << ", 世界力=[" 
-                  << perturb_force_world[0] << ", " << perturb_force_world[1] << ", " << perturb_force_world[2] 
-                  << "], 世界力矩=[" << perturb_torque_.x() << ", " << perturb_torque_.y() << ", " << perturb_torque_.z() << "]" << std::endl;
+      // 如果没有找到相同的干扰力，添加新的
+      if (!found_existing) {
+        PerturbationData new_pert;
+        new_pert.id = GetNextPerturbationId();
+        new_pert.body_name = perturb_body_name_;
+        new_pert.force = perturb_force_;
+        new_pert.torque = perturb_torque_;
+        new_pert.start_time = d->time;
+        new_pert.duration = perturb_duration_;
+        new_pert.is_active = true;
+        active_perturbations_.push_back(new_pert);
+        std::cout << "添加新干扰力ID " << new_pert.id << ", 持续时间: " << perturb_duration_ << "秒" << std::endl;
       }
     } else {
-      std::cout << "警告: 找不到目标物体 '" << perturb_body_name_ << "'" << std::endl;
+      // 如果apply_perturb_为false，清除所有干扰力（向后兼容）
+      if (!active_perturbations_.empty()) {
+        std::cout << "停止所有干扰力（apply_perturb_=false）" << std::endl;
+        active_perturbations_.clear();
+      }
+    }
+    
+    // 施加所有活跃的干扰力
+    for (const auto& pert : active_perturbations_) {
+      int body_id = mj_name2id(m, mjOBJ_BODY, pert.body_name.c_str());
+      if (body_id >= 0) {
+        // 将干扰力从物体坐标系转换到世界坐标系
+        mjtNum* body_quat = d->xquat + 4 * body_id;
+        mjtNum perturb_force_local[3] = {pert.force.x(), pert.force.y(), pert.force.z()};
+        mjtNum perturb_force_world[3];
+        mju_rotVecQuat(perturb_force_world, perturb_force_local, body_quat);
+
+        // 施加干扰力到物体
+        d->xfrc_applied[6 * body_id + 0] += perturb_force_world[0];
+        d->xfrc_applied[6 * body_id + 1] += perturb_force_world[1];
+        d->xfrc_applied[6 * body_id + 2] += perturb_force_world[2];
+
+        // 施加干扰力矩到物体
+        d->xfrc_applied[6 * body_id + 3] += pert.torque.x();
+        d->xfrc_applied[6 * body_id + 4] += pert.torque.y();
+        d->xfrc_applied[6 * body_id + 5] += pert.torque.z();
+        
+        // 调试信息：每100步打印一次
+        static int debug_counter = 0;
+        if (++debug_counter % 100 == 0) {
+          double force_magnitude = sqrt(perturb_force_world[0]*perturb_force_world[0] + 
+                                       perturb_force_world[1]*perturb_force_world[1] + 
+                                       perturb_force_world[2]*perturb_force_world[2]);
+          double torque_magnitude = sqrt(pert.torque.x()*pert.torque.x() + 
+                                        pert.torque.y()*pert.torque.y() + 
+                                        pert.torque.z()*pert.torque.z());
+          std::cout << "施加干扰力ID " << pert.id << ": body_id=" << body_id << ", 世界力=[" 
+                    << perturb_force_world[0] << ", " << perturb_force_world[1] << ", " << perturb_force_world[2] 
+                    << "] (大小: " << force_magnitude << "N), 世界力矩=[" 
+                    << pert.torque.x() << ", " << pert.torque.y() << ", " << pert.torque.z() 
+                    << "] (大小: " << torque_magnitude << "N.m)" << std::endl;
+        }
+      } else {
+        std::cout << "警告: 找不到目标物体 '" << pert.body_name << "'" << std::endl;
+      }
     }
   }
 }
@@ -420,9 +479,13 @@ bool SimManager::Initialize() {
   opt.flags[mjVIS_CONTACTFORCE] = 1;  // 显示接触力
   opt.flags[mjVIS_CONTACTSPLIT] = 1;  // 显示接触分离
   
+  // 启用外力可视化 - 显示TorqueController施加的推力
+  opt.flags[mjVIS_PERTFORCE] = 1;  // 显示施加的外力
+  
   // 添加调试信息
-  RCLCPP_INFO(logger, "Contact visualization enabled: CONTACTPOINT=%d, CONTACTFORCE=%d, CONTACTSPLIT=%d", 
-              opt.flags[mjVIS_CONTACTPOINT], opt.flags[mjVIS_CONTACTFORCE], opt.flags[mjVIS_CONTACTSPLIT]);
+  RCLCPP_INFO(logger, "Visualization enabled: CONTACTPOINT=%d, CONTACTFORCE=%d, CONTACTSPLIT=%d, PERTFORCE=%d", 
+              opt.flags[mjVIS_CONTACTPOINT], opt.flags[mjVIS_CONTACTFORCE], opt.flags[mjVIS_CONTACTSPLIT], opt.flags[mjVIS_PERTFORCE]);
+  RCLCPP_INFO(logger, "推力可视化已启用 - TorqueController施加的推力将在MuJoCo界面中显示为箭头");
 
   mjvPerturb pert;
   mjv_defaultPerturb(&pert);
@@ -475,10 +538,22 @@ void SimManager::ApplyPerturbation(bool apply) {
  * @brief 立即停止所有干扰力
  */
 void SimManager::StopPerturbation() {
+  std::lock_guard<std::mutex> lock(perturbation_mutex_);
   apply_perturb_ = false;
   perturb_start_time_ = -1.0;
   perturb_force_ = Eigen::Vector3d::Zero();
   perturb_torque_ = Eigen::Vector3d::Zero();
+  active_perturbations_.clear();
+  std::cout << "停止所有干扰力" << std::endl;
+}
+
+/**
+ * @brief 获取所有活跃的干扰力数据
+ * @return 活跃干扰力数据向量
+ */
+std::vector<SimManager::PerturbationData> SimManager::GetActivePerturbations() const {
+  std::lock_guard<std::mutex> lock(perturbation_mutex_);
+  return active_perturbations_;
 }
 
 /**
@@ -841,7 +916,10 @@ void SimManager::PhysicsThread(std::string_view filename) {
       sim_->opt.flags[mjVIS_CONTACTPOINT] = 1;  // 显示接触点
       sim_->opt.flags[mjVIS_CONTACTFORCE] = 1;  // 显示接触力
       sim_->opt.flags[mjVIS_CONTACTSPLIT] = 1;  // 显示接触分离
-      RCLCPP_INFO(logger, "Contact visualization flags set in sim_->opt");
+      sim_->opt.flags[mjVIS_PERTFORCE] = 1;  // 显示施加的外力
+      RCLCPP_INFO(logger, "Visualization flags set in sim_->opt: CONTACTPOINT=%d, CONTACTFORCE=%d, CONTACTSPLIT=%d, PERTFORCE=%d", 
+                  sim_->opt.flags[mjVIS_CONTACTPOINT], sim_->opt.flags[mjVIS_CONTACTFORCE], 
+                  sim_->opt.flags[mjVIS_CONTACTSPLIT], sim_->opt.flags[mjVIS_PERTFORCE]);
 
       // 应用 keyframe 中的初始位置
       int keyframe_id = mj_name2id(m_, mjOBJ_KEY, "floating_base_homing");

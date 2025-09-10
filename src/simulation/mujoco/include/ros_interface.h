@@ -72,6 +72,9 @@ class RosInterface {
 
   // Number of joints
   int num_total_joints_ = 0;
+  
+  // Maximum number of perturbations
+  int max_perturbations_ = 2;
 
   // Current joint command
   interface_protocol::msg::JointCommand joint_command_;

@@ -100,6 +100,9 @@ bool ConfigLoader::LoadConfig() {
       if (model_param["num_total_joints"]) {
         num_total_joints_ = model_param["num_total_joints"].as<int>();
       }
+      if (model_param["max_perturbations"]) {
+        max_perturbations_ = model_param["max_perturbations"].as<int>();
+      }
     }
 
     // 加载传感器配置

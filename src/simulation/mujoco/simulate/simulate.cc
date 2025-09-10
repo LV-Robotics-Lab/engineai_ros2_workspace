@@ -2357,6 +2357,7 @@ void Simulate::Render() {
   this->opt.flags[mjVIS_CONTACTPOINT] = 1;  // 显示接触点
   this->opt.flags[mjVIS_CONTACTFORCE] = 1;  // 显示接触力
   this->opt.flags[mjVIS_CONTACTSPLIT] = 1;  // 显示接触分离
+  this->opt.flags[mjVIS_PERTFORCE] = 1;  // 显示施加的外力
 
   // render scene
   mjr_render(rect, &this->scn, &this->platform_ui->mjr_context());

@@ -764,6 +764,7 @@ int main(int argc, char** argv) {
   opt.flags[mjVIS_CONTACTPOINT] = 1;  // 显示接触点
   opt.flags[mjVIS_CONTACTFORCE] = 1;  // 显示接触力
   opt.flags[mjVIS_CONTACTSPLIT] = 1;  // 显示接触分离
+  opt.flags[mjVIS_PERTFORCE] = 1;  // 显示施加的外力
 
   mjvPerturb pert;
   mjv_defaultPerturb(&pert);

@@ -19,6 +19,7 @@ class ConfigLoader {
   int GetNumTotalJoints() const { return num_total_joints_; }
   int GetNumContacts() const { return num_contacts_; }
   int GetNumSingleContactDimensions() const { return num_single_contact_dimensions_; }
+  int GetMaxPerturbations() const { return max_perturbations_; }
 
   // Topic names
   std::string GetImuTopic() const { return imu_topic_; }
@@ -51,6 +52,7 @@ class ConfigLoader {
   int num_total_joints_ = 0;
   int num_contacts_ = 0;
   int num_single_contact_dimensions_ = 0;
+  int max_perturbations_ = 2;  // 默认最大干扰力数量为2
 
   // Topic names
   std::string imu_topic_;

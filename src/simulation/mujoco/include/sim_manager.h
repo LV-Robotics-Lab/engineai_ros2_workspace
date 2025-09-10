@@ -3,9 +3,11 @@
 #include <mujoco/mujoco.h>
 #include <array>
 #include <memory>
+#include <mutex>
 #include <rclcpp/rclcpp.hpp>
 #include <string_view>
 #include <thread>
+#include <vector>
 #include <Eigen/Dense>
 #include "config_loader.h"
 #include "ros_interface.h"
@@ -48,6 +50,26 @@ class SimManager {
   double GetPerturbationDuration() const { return perturb_duration_; }
   void SetPerturbationDuration(double duration) { perturb_duration_ = duration; }
   const std::string& GetPerturbationBodyName() const { return perturb_body_name_; }
+  
+  // Get current perturbation status for visualization
+  bool IsPerturbationActive() const { return apply_perturb_; }
+  const Eigen::Vector3d& GetCurrentPerturbationForce() const { return perturb_force_; }
+  const Eigen::Vector3d& GetCurrentPerturbationTorque() const { return perturb_torque_; }
+  
+  // Multi-perturbation support
+  struct PerturbationData {
+    int id;
+    std::string body_name;
+    Eigen::Vector3d force;
+    Eigen::Vector3d torque;
+    double start_time;
+    double duration;
+    bool is_active;
+  };
+  
+  // Get all active perturbations for CSV recording
+  std::vector<PerturbationData> GetActivePerturbations() const;
+  int GetNextPerturbationId() { return next_perturbation_id_++; }
 
  private:
   // Private constructor for singleton
@@ -84,5 +106,10 @@ class SimManager {
   std::string perturb_body_name_ = "LINK_TORSO_YAW";
   double perturb_duration_ = 0.2;
   double perturb_start_time_ = -1.0;
+  
+  // Multi-perturbation support
+  std::vector<PerturbationData> active_perturbations_;
+  int next_perturbation_id_ = 1;
+  mutable std::mutex perturbation_mutex_;
 
 };
