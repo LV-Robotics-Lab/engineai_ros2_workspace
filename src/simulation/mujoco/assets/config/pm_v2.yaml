@@ -29,7 +29,7 @@ model_param:
   num_contacts: 4                    # 机器人接触点的数量（通常是脚部的4个接触点）
   num_single_contact_dimensions: 2   # 单个接触点的维度数（2表示2D平面接触，如脚底与地面）
   num_total_joints: 24              # 机器人总关节数量（包括所有可控制的关节）
-  max_perturbations: 2              # 最大同时干扰力数量（当前键盘控制支持1个力+1个扭矩=2个）
+  max_perturbations: 1              # 最大同时干扰力数量（当前键盘控制支持1个力&扭矩）
 
 # 传感器配置 - 定义传感器数据的话题
 sensor:

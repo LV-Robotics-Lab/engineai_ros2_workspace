@@ -76,11 +76,18 @@ RosInterface::RosInterface(const std::shared_ptr<rclcpp::Node>& node, std::share
  * @details 关闭CSV文件并输出保存路径信息
  */
 RosInterface::~RosInterface() {
-  // 关闭CSV文件
+  // 关闭接触力CSV文件
   if (csv_file_.is_open()) {
     std::lock_guard<std::mutex> lock(csv_mutex_);
     csv_file_.close();
     RCLCPP_INFO(node_->get_logger(), "Contact data saved to: %s", csv_file_path_.c_str());
+  }
+  
+  // 关闭推力CSV文件
+  if (perturbation_csv_file_.is_open()) {
+    std::lock_guard<std::mutex> lock(perturbation_csv_mutex_);
+    perturbation_csv_file_.close();
+    RCLCPP_INFO(node_->get_logger(), "Perturbation data saved to: %s", perturbation_csv_file_path_.c_str());
   }
 }
 
@@ -122,50 +129,49 @@ bool RosInterface::Initialize() {
     std::stringstream ss;
     ss << "logs/contact_data_" << std::put_time(std::localtime(&time_t), "%Y%m%d_%H%M%S") << ".csv";
     csv_file_path_ = ss.str();
+    
+    // 生成推力数据CSV文件名
+    std::stringstream ss_pert;
+    ss_pert << "logs/perturbation_data_" << std::put_time(std::localtime(&time_t), "%Y%m%d_%H%M%S") << ".csv";
+    perturbation_csv_file_path_ = ss_pert.str();
   }
 
-  // 初始化CSV文件
+  // 初始化接触力CSV文件
   if (save_contact_csv_) {
     std::lock_guard<std::mutex> lock(csv_mutex_);
     csv_file_.open(csv_file_path_, std::ios::out);
     if (csv_file_.is_open()) {
-      // 获取关节数量和最大干扰力数量
+      // 获取关节数量
       num_total_joints_ = config_loader_->GetNumTotalJoints();
-      max_perturbations_ = config_loader_->GetMaxPerturbations();
       
-      // 写入CSV头部
-      csv_file_ << "timestamp,contact_id,body1_name,body2_name,pos_x,pos_y,pos_z,robot_frame_x,robot_frame_y,robot_frame_z,force_x,force_y,force_z,force_magnitude,force_normal,torque_x,torque_y,torque_z,base_link_x,base_link_y,base_link_z,base_link_qw,base_link_qx,base_link_qy,base_link_qz,collision_link_x,collision_link_y,collision_link_z,collision_link_qw,collision_link_qx,collision_link_qy,collision_link_qz,num_perturbations";
-      
-      // 添加最大干扰力数量的列（从配置文件读取）
-      for (int i = 0; i < max_perturbations_; i++) {
-        csv_file_ << ",p_force_" << i << "_id"
-                  << ",p_force_" << i << "_body_name"
-                  << ",p_force_" << i << "_start_time"
-                  << ",p_force_" << i << "_duration"
-                  << ",p_force_" << i << "_elapsed_time"
-                  << ",p_force_" << i << "_force_x"
-                  << ",p_force_" << i << "_force_y"
-                  << ",p_force_" << i << "_force_z"
-                  << ",p_force_" << i << "_force_magnitude"
-                  << ",p_force_" << i << "_torque_x"
-                  << ",p_force_" << i << "_torque_y"
-                  << ",p_force_" << i << "_torque_z"
-                  << ",p_force_" << i << "_torque_magnitude"
-                  << ",p_force_" << i << "_std_pose_x"
-                  << ",p_force_" << i << "_std_pose_y"
-                  << ",p_force_" << i << "_std_pose_z";
-      }
+      // 写入接触力CSV头部（移除推力相关列）
+      csv_file_ << "timestamp,contact_id,body1_name,body2_name,pos_x,pos_y,pos_z,robot_frame_x,robot_frame_y,robot_frame_z,force_x,force_y,force_z,force_magnitude,force_normal,torque_x,torque_y,torque_z,base_link_x,base_link_y,base_link_z,base_link_qw,base_link_qx,base_link_qy,base_link_qz,collision_link_x,collision_link_y,collision_link_z,collision_link_qw,collision_link_qx,collision_link_qy,collision_link_qz";
       
       // 添加关节角度列名
       for (int i = 0; i < num_total_joints_; i++) {
         csv_file_ << ",joint_" << i << "_angle";
       }
+      
       csv_file_ << "\n";
       csv_file_.flush();
       RCLCPP_INFO(node_->get_logger(), "Contact data will be saved to: %s", csv_file_path_.c_str());
     } else {
-      RCLCPP_ERROR(node_->get_logger(), "Failed to open CSV file: %s", csv_file_path_.c_str());
+      RCLCPP_ERROR(node_->get_logger(), "Failed to open contact CSV file: %s", csv_file_path_.c_str());
       save_contact_csv_ = false;
+    }
+  }
+
+  // 初始化推力CSV文件
+  if (save_contact_csv_) {
+    std::lock_guard<std::mutex> lock(perturbation_csv_mutex_);
+    perturbation_csv_file_.open(perturbation_csv_file_path_, std::ios::out);
+    if (perturbation_csv_file_.is_open()) {
+      // 写入推力CSV头部
+      perturbation_csv_file_ << "timestamp,perturbation_id,body_name,start_time,duration,elapsed_time,force_x,force_y,force_z,force_magnitude,torque_x,torque_y,torque_z,torque_magnitude,std_pose_x,std_pose_y,std_pose_z,world_force_x,world_force_y,world_force_z,world_force_magnitude\n";
+      perturbation_csv_file_.flush();
+      RCLCPP_INFO(node_->get_logger(), "Perturbation data will be saved to: %s", perturbation_csv_file_path_.c_str());
+    } else {
+      RCLCPP_ERROR(node_->get_logger(), "Failed to open perturbation CSV file: %s", perturbation_csv_file_path_.c_str());
     }
   }
 
@@ -1212,55 +1218,86 @@ void RosInterface::PublishContactForces(const mjModel* m, mjData* d) {
           csv_file_ << "," << d->qpos[j];
         }
         
-        // 添加干扰力数据 - 固定列数（从配置文件读取）
-        for (int i = 0; i < max_perturbations_; i++) {
-          if (i < active_perturbations.size()) {
-            const auto& pert = active_perturbations[i];
-            
-            // 计算推力在标准姿态下的位置
-            mjtNum perturbation_std_pose[3] = {0, 0, 0};
-            int perturbation_body_id = mj_name2id(m, mjOBJ_BODY, pert.body_name.c_str());
-            if (perturbation_body_id >= 0) {
-              // 复用contact force计算中的标准姿态缓存
-              if (perturbation_body_id < m->nbody && !std_xpos_cache.empty()) {
-                perturbation_std_pose[0] = std_xpos_cache[3 * perturbation_body_id];
-                perturbation_std_pose[1] = std_xpos_cache[3 * perturbation_body_id + 1];
-                perturbation_std_pose[2] = std_xpos_cache[3 * perturbation_body_id + 2];
-              }
-            }
-            
-            // 计算推力大小
-            double force_magnitude = pert.force.norm();
-            double torque_magnitude = pert.torque.norm();
-            
-            // 写入干扰力数据
-            csv_file_ << "," << pert.id                    // perturbation_id
-                      << "," << "\"" << pert.body_name << "\""  // perturbation_body_name
-                      << "," << pert.start_time            // perturbation_start_time
-                      << "," << pert.duration              // perturbation_duration
-                      << "," << (d->time - pert.start_time) // perturbation_elapsed_time
-                      << "," << pert.force.x()             // perturbation_force_x
-                      << "," << pert.force.y()             // perturbation_force_y
-                      << "," << pert.force.z()             // perturbation_force_z
-                      << "," << force_magnitude            // perturbation_force_magnitude
-                      << "," << pert.torque.x()            // perturbation_torque_x
-                      << "," << pert.torque.y()            // perturbation_torque_y
-                      << "," << pert.torque.z()            // perturbation_torque_z
-                      << "," << torque_magnitude           // perturbation_torque_magnitude
-                      << "," << perturbation_std_pose[0]   // perturbation_std_pose_x
-                      << "," << perturbation_std_pose[1]   // perturbation_std_pose_y
-                      << "," << perturbation_std_pose[2];  // perturbation_std_pose_z
-          } else {
-            // 写入空数据（用0填充）
-            csv_file_ << ",0,,,,,,,,,,,,,,";  // 16个空列
-          }
-        }
         
         csv_file_ << "\n";
       }
       
       // 每帧都刷新文件缓冲区（10kHz频率）
       csv_file_.flush();
+    }
+  }
+
+  // ==================== 推力数据单独保存 ====================
+  if (save_contact_csv_ && perturbation_csv_file_.is_open()) {
+    // 使用帧计数器控制保存频率
+    static int perturbation_frame_counter = 0;
+    perturbation_frame_counter++;
+    
+    // 根据配置的频率决定是否保存
+    if (perturbation_frame_counter % csv_save_frequency_ == 0) {
+      std::lock_guard<std::mutex> lock(perturbation_csv_mutex_);
+      
+      // 使用MuJoCo仿真时间
+      double sim_time = d->time;
+      
+      // 获取活跃的干扰力数据
+      auto& sim_manager = SimManager::GetInstance();
+      auto active_perturbations = sim_manager.GetActivePerturbations();
+      
+      // 为每个活跃的推力写入一行数据
+      for (const auto& pert : active_perturbations) {
+        // 计算推力在标准姿态下的位置
+        mjtNum perturbation_std_pose[3] = {0, 0, 0};
+        int perturbation_body_id = mj_name2id(m, mjOBJ_BODY, pert.body_name.c_str());
+        if (perturbation_body_id >= 0) {
+          // 复用contact force计算中的标准姿态缓存
+          if (perturbation_body_id < m->nbody && !std_xpos_cache.empty()) {
+            perturbation_std_pose[0] = std_xpos_cache[3 * perturbation_body_id];
+            perturbation_std_pose[1] = std_xpos_cache[3 * perturbation_body_id + 1];
+            perturbation_std_pose[2] = std_xpos_cache[3 * perturbation_body_id + 2];
+          }
+        }
+        
+        // 计算推力在世界坐标系下的方向
+        mjtNum* body_quat = d->xquat + 4 * perturbation_body_id;
+        mjtNum perturb_force_local[3] = {pert.force.x(), pert.force.y(), pert.force.z()};
+        mjtNum perturb_force_world[3];
+        mju_rotVecQuat(perturb_force_world, perturb_force_local, body_quat);
+        
+        // 计算推力大小
+        double force_magnitude = pert.force.norm();
+        double torque_magnitude = pert.torque.norm();
+        double world_force_magnitude = sqrt(perturb_force_world[0]*perturb_force_world[0] + 
+                                           perturb_force_world[1]*perturb_force_world[1] + 
+                                           perturb_force_world[2]*perturb_force_world[2]);
+        
+        // 写入推力数据
+        perturbation_csv_file_ << std::fixed << std::setprecision(6)
+                              << sim_time << ","
+                              << pert.id << ","
+                              << "\"" << pert.body_name << "\","
+                              << pert.start_time << ","
+                              << pert.duration << ","
+                              << (d->time - pert.start_time) << ","
+                              << pert.force.x() << ","
+                              << pert.force.y() << ","
+                              << pert.force.z() << ","
+                              << force_magnitude << ","
+                              << pert.torque.x() << ","
+                              << pert.torque.y() << ","
+                              << pert.torque.z() << ","
+                              << torque_magnitude << ","
+                              << perturbation_std_pose[0] << ","
+                              << perturbation_std_pose[1] << ","
+                              << perturbation_std_pose[2] << ","
+                              << perturb_force_world[0] << ","
+                              << perturb_force_world[1] << ","
+                              << perturb_force_world[2] << ","
+                              << world_force_magnitude << "\n";
+      }
+      
+      // 刷新推力CSV文件缓冲区
+      perturbation_csv_file_.flush();
     }
   }
 }

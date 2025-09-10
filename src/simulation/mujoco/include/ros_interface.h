@@ -100,6 +100,11 @@ class RosInterface {
   std::mutex csv_mutex_;
   int csv_save_frequency_ = 1;  // 保存频率，1表示每帧都保存
 
+  // Perturbation CSV logging parameters
+  std::string perturbation_csv_file_path_;
+  std::ofstream perturbation_csv_file_;
+  std::mutex perturbation_csv_mutex_;
+
   // Mutex for thread safety
   mutable std::mutex mtx_;
 
