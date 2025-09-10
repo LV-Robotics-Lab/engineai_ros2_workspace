@@ -216,6 +216,11 @@ const double simRefreshFraction = 0.7;  // fraction of refresh available for sim
 mjModel* m = nullptr;
 mjData* d = nullptr;
 
+// 仿真速度监控变量
+std::chrono::time_point<std::chrono::steady_clock> last_speed_report;
+int step_count = 0;
+double last_sim_time = 0.0;
+
 // 完整的物理循环函数
 void PhysicsLoop(mujoco::Simulate& sim) {
   // cpu-sim syncronization point
@@ -315,6 +320,21 @@ void PhysicsLoop(mujoco::Simulate& sim) {
             // run single step, let next iteration deal with timing
             mj_step(m, d);
             stepped = true;
+            
+            // 监控仿真速度
+            step_count++;
+            if (step_count % 1000 == 0) {  // 每1000步报告一次
+              auto now = std::chrono::steady_clock::now();
+              auto elapsed = std::chrono::duration<double>(now - last_speed_report).count();
+              if (elapsed >= 1.0) {  // 每秒报告一次
+                double sim_elapsed = d->time - last_sim_time;
+                double real_time_factor = sim_elapsed / elapsed;
+                std::cout << "Simulation Speed: " << real_time_factor << "x real-time" 
+                         << " (Sim: " << sim_elapsed << "s, Real: " << elapsed << "s)" << std::endl;
+                last_speed_report = now;
+                last_sim_time = d->time;
+              }
+            }
           }
 
           // in-sync: step until ahead of cpu
@@ -330,6 +350,21 @@ void PhysicsLoop(mujoco::Simulate& sim) {
               // call mj_step
               mj_step(m, d);
               stepped = true;
+              
+              // 监控仿真速度
+              step_count++;
+              if (step_count % 1000 == 0) {  // 每1000步报告一次
+                auto now = std::chrono::steady_clock::now();
+                auto elapsed = std::chrono::duration<double>(now - last_speed_report).count();
+                if (elapsed >= 1.0) {  // 每秒报告一次
+                  double sim_elapsed = d->time - last_sim_time;
+                  double real_time_factor = sim_elapsed / elapsed;
+                  std::cout << "Simulation Speed: " << real_time_factor << "x real-time" 
+                           << " (Sim: " << sim_elapsed << "s, Real: " << elapsed << "s)" << std::endl;
+                  last_speed_report = now;
+                  last_sim_time = d->time;
+                }
+              }
 
               // break if reset
               if (d->time < prevSim) {
@@ -386,6 +421,20 @@ void PhysicsThread(mujoco::Simulate* sim, const char* filename, std::shared_ptr<
       std::cout << "Performing initial mj_forward calculation..." << std::endl;
       mj_forward(m, d);
       std::cout << "mj_forward calculation completed" << std::endl;
+      
+      // 显示仿真参数
+      std::cout << "Simulation parameters:" << std::endl;
+      std::cout << "  Timestep: " << m->opt.timestep << " seconds" << std::endl;
+      std::cout << "  Tolerance: " << m->opt.tolerance << std::endl;
+      std::cout << "  Number of bodies: " << m->nbody << std::endl;
+      std::cout << "  Number of joints: " << m->njnt << std::endl;
+      std::cout << "  Number of actuators: " << m->nu << std::endl;
+      
+      // 初始化速度监控
+      last_speed_report = std::chrono::steady_clock::now();
+      step_count = 0;
+      last_sim_time = d->time;
+      std::cout << "Speed monitoring initialized" << std::endl;
 
     } else {
       sim->LoadMessageClear();
@@ -674,6 +723,19 @@ int main(int argc, char** argv) {
   }
   if (node->has_parameter("csv_file_path")) {
     csv_file_path = node->get_parameter("csv_file_path").as_string();
+  }
+  
+  // 也检查命令行参数
+  for (int i = 1; i < argc; i++) {
+    if (std::string(argv[i]) == "--export_contact") {
+      export_contact = true;
+    } else if (std::string(argv[i]) == "--save_contact_csv") {
+      save_contact_csv = true;
+    } else if (std::string(argv[i]) == "--contact_topic" && i + 1 < argc) {
+      contact_topic = argv[++i];
+    } else if (std::string(argv[i]) == "--csv_file_path" && i + 1 < argc) {
+      csv_file_path = argv[++i];
+    }
   }
   
   std::cout << "ROS2 Parameters:" << std::endl;
