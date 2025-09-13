@@ -254,7 +254,7 @@ By default, a simple policy is loaded from the directory of ```src/interface_exa
    ```bash
    # in host
    ros2 launch interface_example rl_basic_example.launch.py
-   ros2 launch interface_example rl_basic_runner.launch.py
+   ros2 launch interface_example rl_basic_example_XZL.launch.py
    ```
 
 > **NOTE**: If the robot falls during simulation, you may need to reset the simulator by pressing the reset button.
@@ -309,4 +309,13 @@ git merge community
 # 推送到您的远程仓库
 git push origin community
 git push origin bench
+```
+
+
+## webm 转 mp4
+```bash
+sudo apt update
+sudo apt install ffmpeg -y
+
+ffmpeg -i input.webm output.mp4
 ```

@@ -76,11 +76,35 @@ ament_target_dependencies(rl_basic_example
   interface_protocol
 )
 
+# Add rl_basic_example_XZL executable
+add_executable(rl_basic_example_XZL
+  src/rl_basic_example_XZL.cc
+  ${rl_basic_example_src_files}
+)
+
+target_include_directories(rl_basic_example_XZL
+  PUBLIC 
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src>
+    ${ENGINEAI_ROBOTICS_THIRD_PARTY}/include
+)
+
+target_link_libraries(rl_basic_example_XZL
+  yaml-cpp::yaml-cpp
+  Eigen3::Eigen
+  ${ENGINEAI_ROBOTICS_THIRD_PARTY}/lib/libMNN.so
+)
+
+ament_target_dependencies(rl_basic_example_XZL
+  rclcpp
+  interface_protocol
+)
+
 
 install(TARGETS
   hold_joint_status
   joint_test_example
   rl_basic_example
+  rl_basic_example_XZL
   RUNTIME DESTINATION lib/${PROJECT_NAME}
 )
 

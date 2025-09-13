@@ -64,11 +64,27 @@ def main():
     script_dir = os.path.dirname(os.path.abspath(__file__))
     model_path = os.path.join(script_dir, "policy.pt")
     print(f"model_path: {model_path}")
-    walk_policy = NaturalWalkPolicy(model_path, device="cuda:0")
+    
+    # 检查CUDA是否可用且兼容
+    if torch.cuda.is_available():
+        try:
+            # 尝试创建一个小的tensor来测试CUDA兼容性
+            test_tensor = torch.randn(1, device="cuda:0")
+            device = "cuda:0"
+            print("使用CUDA设备")
+        except RuntimeError as e:
+            print(f"CUDA不可用，错误: {e}")
+            print("切换到CPU模式")
+            device = "cpu"
+    else:
+        print("CUDA不可用，使用CPU模式")
+        device = "cpu"
+    
+    walk_policy = NaturalWalkPolicy(model_path, device=device)
 
     # create test input data
     num_envs = 16
-    observation = torch.randn(num_envs, 1083, device="cuda:0")
+    observation = torch.randn(num_envs, 1083, device=device)
     print(f"observation shape: {observation.shape}")
 
     # inference

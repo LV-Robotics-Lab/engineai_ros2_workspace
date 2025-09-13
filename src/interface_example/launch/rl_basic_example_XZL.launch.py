@@ -33,8 +33,8 @@ def generate_launch_description():
     # Create node - using rl_basic_example but with runner logic
     hardware_node = Node(
         package='interface_example',
-        executable='rl_basic_example',
-        name='rl_basic_runner',
+        executable='rl_basic_example_XZL',
+        name='rl_basic_example_XZL',
         arguments=[config_dir, 'rl_basic_param_XZL.yaml'],
         output='screen',
         emulate_tty=True,
