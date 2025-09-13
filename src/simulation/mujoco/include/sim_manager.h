@@ -70,6 +70,16 @@ class SimManager {
   // Get all active perturbations for CSV recording
   std::vector<PerturbationData> GetActivePerturbations() const;
   int GetNextPerturbationId() { return next_perturbation_id_++; }
+  
+  // Configuration access methods
+  double GetDefaultForceMagnitude() const;
+  double GetDefaultTorqueMagnitude() const;
+  double GetForceStep() const;
+  double GetTorqueStep() const;
+  const std::vector<double>& GetPerturbationForce(const std::string& direction) const;
+  const std::vector<double>& GetPerturbationForce(const std::string& direction, double magnitude) const;
+  const std::vector<double>& GetPerturbationTorque(const std::string& direction) const;
+  const std::vector<double>& GetPerturbationTorque(const std::string& direction, double magnitude) const;
 
  private:
   // Private constructor for singleton

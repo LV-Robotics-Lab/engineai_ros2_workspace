@@ -37,6 +37,16 @@ class ConfigLoader {
   std::string GetCollisionModelCondition() const;
   std::string GetXmlFilenameByCollisionType() const;  // 根据碰撞类型获取对应的XML文件名
 
+  // 干扰力配置
+  double GetDefaultForceMagnitude() const { return default_force_magnitude_; }
+  double GetDefaultTorqueMagnitude() const { return default_torque_magnitude_; }
+  double GetForceStep() const { return force_step_; }
+  double GetTorqueStep() const { return torque_step_; }
+  const std::vector<double>& GetPerturbationForce(const std::string& direction) const;
+  const std::vector<double>& GetPerturbationForce(const std::string& direction, double magnitude) const;
+  const std::vector<double>& GetPerturbationTorque(const std::string& direction) const;
+  const std::vector<double>& GetPerturbationTorque(const std::string& direction, double magnitude) const;
+
   // Asset path related methods
   std::string GetModelFilePath() const;
   std::string GetResourceDir() const;
@@ -69,6 +79,12 @@ class ConfigLoader {
   bool use_simplified_geometry_ = false;
   std::string simplified_xml_filename_;  // 简化几何体XML文件名
   std::string mesh_xml_filename_;        // 真实mesh XML文件名
+
+  // 干扰力配置
+  double default_force_magnitude_ = 20.0;    // 默认推力大小
+  double default_torque_magnitude_ = 5.0;    // 默认扭矩大小
+  double force_step_ = 20.0;                 // 推力调整步长
+  double torque_step_ = 5.0;                 // 扭矩调整步长
 };
 
 #endif  // CONFIG_LOADER_H_

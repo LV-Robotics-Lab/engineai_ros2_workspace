@@ -113,6 +113,23 @@ bool ConfigLoader::LoadConfig() {
       }
     }
 
+    // 加载干扰力配置
+    if (config["perturbation"]) {
+      YAML::Node perturbation = config["perturbation"];
+      if (perturbation["default_force_magnitude"]) {
+        default_force_magnitude_ = perturbation["default_force_magnitude"].as<double>();
+      }
+      if (perturbation["default_torque_magnitude"]) {
+        default_torque_magnitude_ = perturbation["default_torque_magnitude"].as<double>();
+      }
+      if (perturbation["force_step"]) {
+        force_step_ = perturbation["force_step"].as<double>();
+      }
+      if (perturbation["torque_step"]) {
+        torque_step_ = perturbation["torque_step"].as<double>();
+      }
+    }
+
     // 加载模型文件配置
     if (config["urdf"]) {
       urdf_filename_ = config["urdf"].as<std::string>();
@@ -170,5 +187,161 @@ std::string ConfigLoader::GetXmlFilenameByCollisionType() const {
   } else {
     return "pm_v2_mesh.xml";        // Mesh版本的主配置文件
   }
+}
+
+/**
+ * @brief 获取指定方向的推力配置
+ * @param direction 推力方向（forward, backward, left, right, up, down）
+ * @return 推力向量（3D向量）
+ * @details 根据方向自动分配推力，使用默认推力大小
+ */
+const std::vector<double>& ConfigLoader::GetPerturbationForce(const std::string& direction) const {
+  // 使用静态变量缓存各方向的推力向量
+  static std::map<std::string, std::vector<double>> cached_forces;
+  
+  // 如果缓存中没有该方向，则创建
+  if (cached_forces.find(direction) == cached_forces.end()) {
+    std::vector<double> force(3, 0.0);
+    
+    if (direction == "forward") {
+      force[0] = default_force_magnitude_;   // X轴正方向
+    } else if (direction == "backward") {
+      force[0] = -default_force_magnitude_;  // X轴负方向
+    } else if (direction == "left") {
+      force[1] = default_force_magnitude_;   // Y轴正方向
+    } else if (direction == "right") {
+      force[1] = -default_force_magnitude_;  // Y轴负方向
+    } else if (direction == "up") {
+      force[2] = default_force_magnitude_;   // Z轴正方向
+    } else if (direction == "down") {
+      force[2] = -default_force_magnitude_;  // Z轴负方向
+    } else {
+      // 未知方向，返回前向推力
+      force[0] = default_force_magnitude_;
+    }
+    
+    cached_forces[direction] = force;
+  }
+  
+  return cached_forces[direction];
+}
+
+/**
+ * @brief 获取指定方向的推力配置（使用指定大小）
+ * @param direction 推力方向（forward, backward, left, right, up, down）
+ * @param magnitude 推力大小
+ * @return 推力向量（3D向量）
+ * @details 根据方向自动分配推力，使用指定的推力大小
+ */
+const std::vector<double>& ConfigLoader::GetPerturbationForce(const std::string& direction, double magnitude) const {
+  // 使用静态变量缓存各方向的推力向量（带大小参数）
+  static std::map<std::string, std::vector<double>> cached_forces_with_magnitude;
+  
+  // 创建带大小信息的键
+  std::string key = direction + "_" + std::to_string(magnitude);
+  
+  // 如果缓存中没有该键，则创建
+  if (cached_forces_with_magnitude.find(key) == cached_forces_with_magnitude.end()) {
+    std::vector<double> force(3, 0.0);
+    
+    if (direction == "forward") {
+      force[0] = magnitude;   // X轴正方向
+    } else if (direction == "backward") {
+      force[0] = -magnitude;  // X轴负方向
+    } else if (direction == "left") {
+      force[1] = magnitude;   // Y轴正方向
+    } else if (direction == "right") {
+      force[1] = -magnitude;  // Y轴负方向
+    } else if (direction == "up") {
+      force[2] = magnitude;   // Z轴正方向
+    } else if (direction == "down") {
+      force[2] = -magnitude;  // Z轴负方向
+    } else {
+      // 未知方向，返回前向推力
+      force[0] = magnitude;
+    }
+    
+    cached_forces_with_magnitude[key] = force;
+  }
+  
+  return cached_forces_with_magnitude[key];
+}
+
+/**
+ * @brief 获取指定方向的扭矩配置
+ * @param direction 扭矩方向（x_positive, x_negative, y_positive, y_negative, z_positive, z_negative）
+ * @return 扭矩向量（3D向量）
+ * @details 根据方向自动分配扭矩，使用默认扭矩大小
+ */
+const std::vector<double>& ConfigLoader::GetPerturbationTorque(const std::string& direction) const {
+  // 使用静态变量缓存各方向的扭矩向量
+  static std::map<std::string, std::vector<double>> cached_torques;
+  
+  // 如果缓存中没有该方向，则创建
+  if (cached_torques.find(direction) == cached_torques.end()) {
+    std::vector<double> torque(3, 0.0);
+    
+    if (direction == "x_positive") {
+      torque[0] = default_torque_magnitude_;   // X轴正方向
+    } else if (direction == "x_negative") {
+      torque[0] = -default_torque_magnitude_;  // X轴负方向
+    } else if (direction == "y_positive") {
+      torque[1] = default_torque_magnitude_;   // Y轴正方向
+    } else if (direction == "y_negative") {
+      torque[1] = -default_torque_magnitude_;  // Y轴负方向
+    } else if (direction == "z_positive") {
+      torque[2] = default_torque_magnitude_;   // Z轴正方向
+    } else if (direction == "z_negative") {
+      torque[2] = -default_torque_magnitude_;  // Z轴负方向
+    } else {
+      // 未知方向，返回X轴正方向扭矩
+      torque[0] = default_torque_magnitude_;
+    }
+    
+    cached_torques[direction] = torque;
+  }
+  
+  return cached_torques[direction];
+}
+
+/**
+ * @brief 获取指定方向的扭矩配置（使用指定大小）
+ * @param direction 扭矩方向（x_positive, x_negative, y_positive, y_negative, z_positive, z_negative）
+ * @param magnitude 扭矩大小
+ * @return 扭矩向量（3D向量）
+ * @details 根据方向自动分配扭矩，使用指定的扭矩大小
+ */
+const std::vector<double>& ConfigLoader::GetPerturbationTorque(const std::string& direction, double magnitude) const {
+  // 使用静态变量缓存各方向的扭矩向量（带大小参数）
+  static std::map<std::string, std::vector<double>> cached_torques_with_magnitude;
+  
+  // 创建带大小信息的键
+  std::string key = direction + "_" + std::to_string(magnitude);
+  
+  // 如果缓存中没有该键，则创建
+  if (cached_torques_with_magnitude.find(key) == cached_torques_with_magnitude.end()) {
+    std::vector<double> torque(3, 0.0);
+    
+    if (direction == "x_positive") {
+      torque[0] = magnitude;   // X轴正方向
+    } else if (direction == "x_negative") {
+      torque[0] = -magnitude;  // X轴负方向
+    } else if (direction == "y_positive") {
+      torque[1] = magnitude;   // Y轴正方向
+    } else if (direction == "y_negative") {
+      torque[1] = -magnitude;  // Y轴负方向
+    } else if (direction == "z_positive") {
+      torque[2] = magnitude;   // Z轴正方向
+    } else if (direction == "z_negative") {
+      torque[2] = -magnitude;  // Z轴负方向
+    } else {
+      // 未知方向，返回X轴正方向扭矩
+      torque[0] = magnitude;
+    }
+    
+    cached_torques_with_magnitude[key] = torque;
+  }
+  
+  return cached_torques_with_magnitude[key];
 }
 

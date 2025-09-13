@@ -31,6 +31,13 @@ model_param:
   num_total_joints: 24              # 机器人总关节数量（包括所有可控制的关节）
   max_perturbations: 1              # 最大同时干扰力数量（当前键盘控制支持1个力&扭矩）
 
+# 干扰力配置 - 定义默认的推力大小
+perturbation:
+  default_force_magnitude: 20.0     # 默认推力大小（牛顿），系统会自动按前后左右方向分配
+  default_torque_magnitude: 5.0     # 默认扭矩大小（牛·米）
+  force_step: 20.0                  # 推力调整步长（牛顿），用于+/-键调整推力大小
+  torque_step: 5.0                  # 扭矩调整步长（牛·米），用于+/-键调整扭矩大小
+
 # 传感器配置 - 定义传感器数据的话题
 sensor:
   imu_topic: /hardware/imu_info  # IMU传感器数据的话题名称（用于获取姿态、角速度、加速度等信息）

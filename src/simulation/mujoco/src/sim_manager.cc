@@ -87,76 +87,136 @@ class CustomGlfwAdapter : public mj::GlfwAdapter {
       // 处理按键按下事件（启动干扰力）
       switch (key) {
         case GLFW_KEY_F:  // Shift + F: 前向干扰力
-          sim_manager.SetPerturbationForce(Eigen::Vector3d(20.0, 0.0, 0.0));
-          sim_manager.ApplyPerturbation(true);
-          std::cout << "触发前向干扰力 (推力可视化已启用)" << std::endl;
+          {
+            double current_force = sim_manager.GetPerturbationForceMagnitude();
+            const auto& force_vec = sim_manager.GetPerturbationForce("forward", current_force);
+            sim_manager.SetPerturbationForce(Eigen::Vector3d(force_vec[0], force_vec[1], force_vec[2]));
+            sim_manager.SetPerturbationTorque(Eigen::Vector3d::Zero());  // 清除力矩
+            sim_manager.ApplyPerturbation(true);
+            std::cout << "触发前向干扰力 (推力可视化已启用)" << std::endl;
+          }
           break;
 
         case GLFW_KEY_B:  // Shift + B: 后向干扰力
-          sim_manager.SetPerturbationForce(Eigen::Vector3d(-20.0, 0.0, 0.0));
-          sim_manager.ApplyPerturbation(true);
-          std::cout << "触发后向干扰力" << std::endl;
+          {
+            double current_force = sim_manager.GetPerturbationForceMagnitude();
+            const auto& force_vec = sim_manager.GetPerturbationForce("backward", current_force);
+            sim_manager.SetPerturbationForce(Eigen::Vector3d(force_vec[0], force_vec[1], force_vec[2]));
+            sim_manager.SetPerturbationTorque(Eigen::Vector3d::Zero());  // 清除力矩
+            sim_manager.ApplyPerturbation(true);
+            std::cout << "触发后向干扰力" << std::endl;
+          }
           break;
 
         case GLFW_KEY_L:  // Shift + L: 左向干扰力
-          sim_manager.SetPerturbationForce(Eigen::Vector3d(0.0, 20.0, 0.0));
-          sim_manager.ApplyPerturbation(true);
-          std::cout << "触发左向干扰力: 力大小=" << sim_manager.GetPerturbationForceMagnitude() 
-                    << "N, 目标物体=" << sim_manager.GetPerturbationBodyName() << " (推力可视化已启用)" << std::endl;
+          {
+            double current_force = sim_manager.GetPerturbationForceMagnitude();
+            const auto& force_vec = sim_manager.GetPerturbationForce("left", current_force);
+            sim_manager.SetPerturbationForce(Eigen::Vector3d(force_vec[0], force_vec[1], force_vec[2]));
+            sim_manager.SetPerturbationTorque(Eigen::Vector3d::Zero());  // 清除力矩
+            sim_manager.ApplyPerturbation(true);
+            std::cout << "触发左向干扰力: 力大小=" << sim_manager.GetPerturbationForceMagnitude() 
+                      << "N, 目标物体=" << sim_manager.GetPerturbationBodyName() << " (推力可视化已启用)" << std::endl;
+          }
           break;
 
         case GLFW_KEY_R:  // Shift + R: 右向干扰力
-          sim_manager.SetPerturbationForce(Eigen::Vector3d(0.0, -20.0, 0.0));
-          sim_manager.ApplyPerturbation(true);
-          std::cout << "触发右向干扰力" << std::endl;
+          {
+            double current_force = sim_manager.GetPerturbationForceMagnitude();
+            const auto& force_vec = sim_manager.GetPerturbationForce("right", current_force);
+            sim_manager.SetPerturbationForce(Eigen::Vector3d(force_vec[0], force_vec[1], force_vec[2]));
+            sim_manager.SetPerturbationTorque(Eigen::Vector3d::Zero());  // 清除力矩
+            sim_manager.ApplyPerturbation(true);
+            std::cout << "触发右向干扰力" << std::endl;
+          }
           break;
 
         case GLFW_KEY_U:  // Shift + U: 上向干扰力
-          sim_manager.SetPerturbationForce(Eigen::Vector3d(0.0, 0.0, 20.0));
-          sim_manager.ApplyPerturbation(true);
-          std::cout << "触发上向干扰力" << std::endl;
+          {
+            double current_force = sim_manager.GetPerturbationForceMagnitude();
+            const auto& force_vec = sim_manager.GetPerturbationForce("up", current_force);
+            sim_manager.SetPerturbationForce(Eigen::Vector3d(force_vec[0], force_vec[1], force_vec[2]));
+            sim_manager.SetPerturbationTorque(Eigen::Vector3d::Zero());  // 清除力矩
+            sim_manager.ApplyPerturbation(true);
+            std::cout << "触发上向干扰力" << std::endl;
+          }
           break;
 
         case GLFW_KEY_D:  // Shift + D: 下向干扰力
-          sim_manager.SetPerturbationForce(Eigen::Vector3d(0.0, 0.0, -20.0));
-          sim_manager.ApplyPerturbation(true);
-          std::cout << "触发下向干扰力" << std::endl;
+          {
+            double current_force = sim_manager.GetPerturbationForceMagnitude();
+            const auto& force_vec = sim_manager.GetPerturbationForce("down", current_force);
+            sim_manager.SetPerturbationForce(Eigen::Vector3d(force_vec[0], force_vec[1], force_vec[2]));
+            sim_manager.SetPerturbationTorque(Eigen::Vector3d::Zero());  // 清除力矩
+            sim_manager.ApplyPerturbation(true);
+            std::cout << "触发下向干扰力" << std::endl;
+          }
           break;
 
         case GLFW_KEY_G:  // Shift + G: X轴正方向干扰力矩
-          sim_manager.SetPerturbationTorque(Eigen::Vector3d(5.0, 0.0, 0.0));
-          sim_manager.ApplyPerturbation(true);
-          std::cout << "触发X轴干扰力矩" << std::endl;
+          {
+            double current_torque = sim_manager.GetPerturbationTorqueMagnitude();
+            const auto& torque_vec = sim_manager.GetPerturbationTorque("x_positive", current_torque);
+            sim_manager.SetPerturbationTorque(Eigen::Vector3d(torque_vec[0], torque_vec[1], torque_vec[2]));
+            sim_manager.SetPerturbationForce(Eigen::Vector3d::Zero());  // 清除推力
+            sim_manager.ApplyPerturbation(true);
+            std::cout << "触发X轴干扰力矩" << std::endl;
+          }
           break;
 
         case GLFW_KEY_J:  // Shift + J: X轴负方向干扰力矩
-          sim_manager.SetPerturbationTorque(Eigen::Vector3d(-5.0, 0.0, 0.0));
-          sim_manager.ApplyPerturbation(true);
-          std::cout << "触发X轴干扰力矩" << std::endl;
+          {
+            double current_torque = sim_manager.GetPerturbationTorqueMagnitude();
+            const auto& torque_vec = sim_manager.GetPerturbationTorque("x_negative", current_torque);
+            sim_manager.SetPerturbationTorque(Eigen::Vector3d(torque_vec[0], torque_vec[1], torque_vec[2]));
+            sim_manager.SetPerturbationForce(Eigen::Vector3d::Zero());  // 清除推力
+            sim_manager.ApplyPerturbation(true);
+            std::cout << "触发X轴干扰力矩" << std::endl;
+          }
           break;
 
         case GLFW_KEY_Y:  // Shift + Y: Y轴正方向干扰力矩
-          sim_manager.SetPerturbationTorque(Eigen::Vector3d(0.0, 5.0, 0.0));
-          sim_manager.ApplyPerturbation(true);
-          std::cout << "触发Y轴干扰力矩" << std::endl;
+          {
+            double current_torque = sim_manager.GetPerturbationTorqueMagnitude();
+            const auto& torque_vec = sim_manager.GetPerturbationTorque("y_positive", current_torque);
+            sim_manager.SetPerturbationTorque(Eigen::Vector3d(torque_vec[0], torque_vec[1], torque_vec[2]));
+            sim_manager.SetPerturbationForce(Eigen::Vector3d::Zero());  // 清除推力
+            sim_manager.ApplyPerturbation(true);
+            std::cout << "触发Y轴干扰力矩" << std::endl;
+          }
           break;
 
         case GLFW_KEY_H:  // Shift + H: Y轴负方向干扰力矩
-          sim_manager.SetPerturbationTorque(Eigen::Vector3d(0.0, -5.0, 0.0));
-          sim_manager.ApplyPerturbation(true);
-          std::cout << "触发Y轴干扰力矩" << std::endl;
+          {
+            double current_torque = sim_manager.GetPerturbationTorqueMagnitude();
+            const auto& torque_vec = sim_manager.GetPerturbationTorque("y_negative", current_torque);
+            sim_manager.SetPerturbationTorque(Eigen::Vector3d(torque_vec[0], torque_vec[1], torque_vec[2]));
+            sim_manager.SetPerturbationForce(Eigen::Vector3d::Zero());  // 清除推力
+            sim_manager.ApplyPerturbation(true);
+            std::cout << "触发Y轴干扰力矩" << std::endl;
+          }
           break;
 
         case GLFW_KEY_LEFT_BRACKET:  // Shift + [: Z轴正方向干扰力矩
-          sim_manager.SetPerturbationTorque(Eigen::Vector3d(0.0, 0.0, 5.0));
-          sim_manager.ApplyPerturbation(true);
-          std::cout << "触发Z轴干扰力矩" << std::endl;
+          {
+            double current_torque = sim_manager.GetPerturbationTorqueMagnitude();
+            const auto& torque_vec = sim_manager.GetPerturbationTorque("z_positive", current_torque);
+            sim_manager.SetPerturbationTorque(Eigen::Vector3d(torque_vec[0], torque_vec[1], torque_vec[2]));
+            sim_manager.SetPerturbationForce(Eigen::Vector3d::Zero());  // 清除推力
+            sim_manager.ApplyPerturbation(true);
+            std::cout << "触发Z轴干扰力矩" << std::endl;
+          }
           break;
 
         case GLFW_KEY_RIGHT_BRACKET:  // Shift + ]: Z轴负方向干扰力矩
-          sim_manager.SetPerturbationTorque(Eigen::Vector3d(0.0, 0.0, -5.0));
-          sim_manager.ApplyPerturbation(true);
-          std::cout << "触发Z轴干扰力矩" << std::endl;
+          {
+            double current_torque = sim_manager.GetPerturbationTorqueMagnitude();
+            const auto& torque_vec = sim_manager.GetPerturbationTorque("z_negative", current_torque);
+            sim_manager.SetPerturbationTorque(Eigen::Vector3d(torque_vec[0], torque_vec[1], torque_vec[2]));
+            sim_manager.SetPerturbationForce(Eigen::Vector3d::Zero());  // 清除推力
+            sim_manager.ApplyPerturbation(true);
+            std::cout << "触发Z轴干扰力矩" << std::endl;
+          }
           break;
 
         case GLFW_KEY_0:  // Shift + 0: 立即停止所有干扰力/力矩
@@ -165,17 +225,25 @@ class CustomGlfwAdapter : public mj::GlfwAdapter {
           break;
 
         case GLFW_KEY_EQUAL:  // Shift + +: 增加干扰力/力矩大小
-          sim_manager.SetPerturbationForceMagnitude(sim_manager.GetPerturbationForceMagnitude() + 20.0);
-          sim_manager.SetPerturbationTorqueMagnitude(sim_manager.GetPerturbationTorqueMagnitude() + 5.0);
-          std::cout << "干扰力/力矩大小增加到: " << sim_manager.GetPerturbationForceMagnitude() 
-                    << " N, " << sim_manager.GetPerturbationTorqueMagnitude() << " N.m" << std::endl;
+          {
+            double force_step = sim_manager.GetForceStep();
+            double torque_step = sim_manager.GetTorqueStep();
+            sim_manager.SetPerturbationForceMagnitude(sim_manager.GetPerturbationForceMagnitude() + force_step);
+            sim_manager.SetPerturbationTorqueMagnitude(sim_manager.GetPerturbationTorqueMagnitude() + torque_step);
+            std::cout << "干扰力/力矩大小增加到: " << sim_manager.GetPerturbationForceMagnitude() 
+                      << " N, " << sim_manager.GetPerturbationTorqueMagnitude() << " N.m" << std::endl;
+          }
           break;
 
         case GLFW_KEY_MINUS:  // Shift + -: 减小干扰力/力矩大小
-          sim_manager.SetPerturbationForceMagnitude(std::max(20.0, sim_manager.GetPerturbationForceMagnitude() - 20.0));
-          sim_manager.SetPerturbationTorqueMagnitude(std::max(5.0, sim_manager.GetPerturbationTorqueMagnitude() - 5.0));
-          std::cout << "干扰力/力矩大小减小到: " << sim_manager.GetPerturbationForceMagnitude() 
-                    << " N, " << sim_manager.GetPerturbationTorqueMagnitude() << " N.m" << std::endl;
+          {
+            double force_step = sim_manager.GetForceStep();
+            double torque_step = sim_manager.GetTorqueStep();
+            sim_manager.SetPerturbationForceMagnitude(std::max(force_step, sim_manager.GetPerturbationForceMagnitude() - force_step));
+            sim_manager.SetPerturbationTorqueMagnitude(std::max(torque_step, sim_manager.GetPerturbationTorqueMagnitude() - torque_step));
+            std::cout << "干扰力/力矩大小减小到: " << sim_manager.GetPerturbationForceMagnitude() 
+                      << " N, " << sim_manager.GetPerturbationTorqueMagnitude() << " N.m" << std::endl;
+          }
           break;
 
         case GLFW_KEY_PERIOD:  // Shift + .: 增加干扰力持续时间
@@ -504,6 +572,112 @@ bool SimManager::Initialize() {
  */
 void SimManager::SetPerturbationForce(const Eigen::Vector3d& force) {
   perturb_force_ = force;
+}
+
+/**
+ * @brief 获取默认推力大小
+ * @return 默认推力大小（牛顿）
+ */
+double SimManager::GetDefaultForceMagnitude() const {
+  if (config_loader_) {
+    return config_loader_->GetDefaultForceMagnitude();
+  }
+  return 20.0;  // 默认值
+}
+
+/**
+ * @brief 获取默认扭矩大小
+ * @return 默认扭矩大小（牛·米）
+ */
+double SimManager::GetDefaultTorqueMagnitude() const {
+  if (config_loader_) {
+    return config_loader_->GetDefaultTorqueMagnitude();
+  }
+  return 5.0;  // 默认值
+}
+
+/**
+ * @brief 获取推力调整步长
+ * @return 推力调整步长（牛顿）
+ */
+double SimManager::GetForceStep() const {
+  if (config_loader_) {
+    return config_loader_->GetForceStep();
+  }
+  return 20.0;  // 默认值
+}
+
+/**
+ * @brief 获取扭矩调整步长
+ * @return 扭矩调整步长（牛·米）
+ */
+double SimManager::GetTorqueStep() const {
+  if (config_loader_) {
+    return config_loader_->GetTorqueStep();
+  }
+  return 5.0;  // 默认值
+}
+
+/**
+ * @brief 获取指定方向的推力配置
+ * @param direction 推力方向（forward, backward, left, right, up, down）
+ * @return 推力向量（3D向量）
+ */
+const std::vector<double>& SimManager::GetPerturbationForce(const std::string& direction) const {
+  if (config_loader_) {
+    return config_loader_->GetPerturbationForce(direction);
+  }
+  
+  // 如果配置加载器不可用，返回默认前向推力
+  static const std::vector<double> default_force = {20.0, 0.0, 0.0};
+  return default_force;
+}
+
+/**
+ * @brief 获取指定方向的推力配置（使用指定大小）
+ * @param direction 推力方向（forward, backward, left, right, up, down）
+ * @param magnitude 推力大小
+ * @return 推力向量（3D向量）
+ */
+const std::vector<double>& SimManager::GetPerturbationForce(const std::string& direction, double magnitude) const {
+  if (config_loader_) {
+    return config_loader_->GetPerturbationForce(direction, magnitude);
+  }
+  
+  // 如果配置加载器不可用，返回指定大小的前向推力
+  static std::vector<double> force = {magnitude, 0.0, 0.0};
+  return force;
+}
+
+/**
+ * @brief 获取指定方向的扭矩配置
+ * @param direction 扭矩方向（x_positive, x_negative, y_positive, y_negative, z_positive, z_negative）
+ * @return 扭矩向量（3D向量）
+ */
+const std::vector<double>& SimManager::GetPerturbationTorque(const std::string& direction) const {
+  if (config_loader_) {
+    return config_loader_->GetPerturbationTorque(direction);
+  }
+  
+  // 如果配置加载器不可用，返回默认X轴正方向扭矩
+  static const std::vector<double> default_torque = {5.0, 0.0, 0.0};
+  return default_torque;
+}
+
+/**
+ * @brief 获取指定方向的扭矩配置（使用指定大小）
+ * @param direction 扭矩方向（x_positive, x_negative, y_positive, y_negative, z_positive, z_negative）
+ * @param magnitude 扭矩大小
+ * @return 扭矩向量（3D向量）
+ */
+const std::vector<double>& SimManager::GetPerturbationTorque(const std::string& direction, double magnitude) const {
+  if (config_loader_) {
+    return config_loader_->GetPerturbationTorque(direction, magnitude);
+  }
+  
+  // 如果配置加载器不可用，返回指定大小的X轴正方向扭矩
+  static std::vector<double> torque = {magnitude, 0.0, 0.0};
+  return torque;
 }
 
 /**
