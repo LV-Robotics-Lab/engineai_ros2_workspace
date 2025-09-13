@@ -252,7 +252,9 @@ By default, a simple policy is loaded from the directory of ```src/interface_exa
    - Launch the example with:
    ```bash
    # in host
+   ## 默认policy
    ros2 launch interface_example rl_basic_example.launch.py
+   ## XZL's policy
    ros2 launch interface_example rl_basic_example_XZL.launch.py
    ```
 
