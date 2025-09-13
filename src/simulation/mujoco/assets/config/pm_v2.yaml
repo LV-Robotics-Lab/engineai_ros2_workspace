@@ -8,7 +8,7 @@ actuator:
 
 # 碰撞模型配置 - 定义碰撞检测的几何体类型
 collision_model:
-  use_simplified_geometry: true  # 碰撞检测几何体类型选择
+  use_simplified_geometry: false  # 碰撞检测几何体类型选择
   # true = 使用简化几何体（如球体、圆柱体、立方体，计算速度快但精度较低）
   # false = 使用真实mesh（高精度网格模型，计算精度高但速度较慢）
   

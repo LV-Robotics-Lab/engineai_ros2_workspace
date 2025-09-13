@@ -108,7 +108,6 @@ cd /home/wang22/engineai/engineai_ros2_workspace && conda activate engineai_ros2
 ./scripts/build_nodes.sh sim    # or colcon build --packages-select mujoco_simulator , or colcon build
 source install/setup.bash
 # ros2 launch mujoco_simulator mujoco_simulator.launch.py
-ros2 launch mujoco_simulator mujoco_simulator.launch.py save_contact_csv:=true csv_save_frequency:=1
 ros2 launch mujoco_simulator mujoco_simulator.launch.py export_contact:=true save_contact_csv:=true
 
 # # 推倒采样仿真器 - 支持交互式干扰力控制
@@ -136,14 +135,14 @@ ros2 launch mujoco_simulator mujoco_simulator.launch.py export_contact:=true sav
 
 # terminal 2
 # choose mesh or geometry: in src/simulation/mujoco/assets/config/pm_v2.yaml
-# change "use_simplified_geometry: true"
+# change "use_simplified_geometry: false"
 cd /home/wang22/engineai/engineai_ros2_workspace
 conda activate engineai_ros2
 # plot contact force max
-python3 scripts/analyze_contact_forces.py /home/wang22/engineai/engineai_ros2_workspace/logs/contact_data_20250902_112231.csv
+python3 scripts/analyze_contact_forces.py logs/contact_data_20250913_181435.csv
 # plot contact point with force
 # 使用机器人坐标系（默认）
-python3 scripts/mujoco_xml_contact_display.py /home/wang22/engineai/engineai_ros2_workspace/logs/contact_data_20250902_112231.csv src/simulation/mujoco/assets/resource/pm_v2_mesh.xml
+python3 scripts/mujoco_xml_contact_display.py logs/contact_data_20250913_181435.csv src/simulation/mujoco/assets/resource/pm_v2_mesh.xml
 
 # 使用世界坐标系
 python3 scripts/mujoco_xml_contact_display.py logs/contact_data_20250831_125541.csv src/simulation/mujoco/assets/resource/pm_v2_mesh.xml world
