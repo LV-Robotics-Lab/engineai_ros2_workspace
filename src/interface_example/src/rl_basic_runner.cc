@@ -4,7 +4,6 @@
 #include <iostream>
 
 #include "math/rotation_matrix.h"
-#include "math/mnn_model.h"
 #include "tool/concatenate_vector.h"
 
 namespace runner {

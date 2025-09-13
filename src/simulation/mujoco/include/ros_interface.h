@@ -107,6 +107,9 @@ class RosInterface {
 
   // Mutex for thread safety
   mutable std::mutex mtx_;
+  
+  // Global mutex for contact force publishing synchronization
+  mutable std::mutex contact_force_mutex_;
 
   // Flag indicating if we have a floating base robot
   bool is_floating_base_;

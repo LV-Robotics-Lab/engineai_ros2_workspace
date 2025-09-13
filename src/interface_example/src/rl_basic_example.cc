@@ -114,6 +114,19 @@ class RlBasicRunner : public rclcpp::Node {
   }
 
   void UpdateState(const interface_protocol::msg::JointState::SharedPtr& joint_state) {
+    // 添加边界检查
+    if (!joint_state || joint_state->position.empty() || joint_state->velocity.empty()) {
+      RCLCPP_WARN(get_logger(), "Invalid joint state received, skipping update");
+      return;
+    }
+    
+    // 检查数据大小是否匹配
+    if (joint_state->position.size() != joint_state->velocity.size()) {
+      RCLCPP_ERROR(get_logger(), "Position and velocity size mismatch: %zu vs %zu", 
+                   joint_state->position.size(), joint_state->velocity.size());
+      return;
+    }
+    
     // Update joint states
     q_real_ = Eigen::Map<const Eigen::VectorXd>(joint_state->position.data(), joint_state->position.size());
     qd_real_ = Eigen::Map<const Eigen::VectorXd>(joint_state->velocity.data(), joint_state->velocity.size());
@@ -215,16 +228,56 @@ class RlBasicRunner : public rclcpp::Node {
 
     // Get MNN output
     RCLCPP_DEBUG(get_logger(), "CalculateMotorCommand: Preparing MNN inference");
+    
+    // 添加安全检查
+    if (!mlp_net_) {
+      RCLCPP_ERROR(get_logger(), "MNN model not initialized");
+      return;
+    }
+    
+    if (obs.size() == 0) {
+      RCLCPP_ERROR(get_logger(), "Empty observation vector");
+      return;
+    }
+    
     Eigen::MatrixXf obs_matrix = obs.cast<float>().transpose();
     RCLCPP_DEBUG(get_logger(), "CalculateMotorCommand: Observation matrix created, size: %ld x %ld", obs_matrix.rows(), obs_matrix.cols());
     
+    // 检查观察矩阵大小
+    if (obs_matrix.rows() == 0 || obs_matrix.cols() == 0) {
+      RCLCPP_ERROR(get_logger(), "Invalid observation matrix size: %ld x %ld", obs_matrix.rows(), obs_matrix.cols());
+      return;
+    }
+    
     RCLCPP_DEBUG(get_logger(), "CalculateMotorCommand: Calling MNN inference");
-    mlp_net_action_ = mlp_net_->Inference(obs_matrix).cast<double>();
-    RCLCPP_DEBUG(get_logger(), "CalculateMotorCommand: MNN inference completed");
+    try {
+      mlp_net_action_ = mlp_net_->Inference(obs_matrix).cast<double>();
+      RCLCPP_DEBUG(get_logger(), "CalculateMotorCommand: MNN inference completed");
+    } catch (const std::exception& e) {
+      RCLCPP_ERROR(get_logger(), "MNN inference failed: %s", e.what());
+      return;
+    }
     mlp_net_action_ = mlp_net_action_.cwiseMax(-param_->action_clip).cwiseMin(param_->action_clip);
 
     // Calculate desired joint positions
     q_des_ = default_joint_q_;                                                 // Use concatenated default_joint_q_
+    
+    // 添加边界检查
+    if (active_joint_idx_.size() != mlp_net_action_.size() || 
+        active_joint_idx_.size() != action_scale_.size()) {
+      RCLCPP_ERROR(get_logger(), "Size mismatch: active_joint_idx=%ld, mlp_net_action=%ld, action_scale=%ld", 
+                   active_joint_idx_.size(), mlp_net_action_.size(), action_scale_.size());
+      return;
+    }
+    
+    // 检查关节索引是否在有效范围内
+    for (int i = 0; i < active_joint_idx_.size(); ++i) {
+      if (active_joint_idx_[i] < 0 || active_joint_idx_[i] >= q_des_.size()) {
+        RCLCPP_ERROR(get_logger(), "Invalid joint index: %d (max: %ld)", active_joint_idx_[i], q_des_.size() - 1);
+        return;
+      }
+    }
+    
     q_des_(active_joint_idx_) += mlp_net_action_.cwiseProduct(action_scale_);  // Use concatenated action_scale_
 
     if (time_ < param_->transition_time) {
