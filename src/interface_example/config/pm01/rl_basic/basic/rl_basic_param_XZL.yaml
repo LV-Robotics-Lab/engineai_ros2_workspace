@@ -1,6 +1,9 @@
 # mlp net parameters
 policy_file: "policies/pm01_v2_XZL_ppo_72obs.mnn"
 num_observations: 72
+num_commands: 3
+num_clock_signal: 2
+
 active_joint_names:
   [
     "J00_HIP_PITCH_L",
@@ -32,8 +35,7 @@ active_joint_idx:
 
 num_include_obs_steps: 15
 vae: True
-num_commands: 3
-num_clock_signal: 2
+mix: False
 # observation parameters
 observation_scale_linear_vel: 2.0
 observation_scale_angular_vel: 1.0

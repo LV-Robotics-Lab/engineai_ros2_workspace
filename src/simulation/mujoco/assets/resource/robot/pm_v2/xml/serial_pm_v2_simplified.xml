@@ -1,6 +1,6 @@
 <mujoco model="engineai_robotics_simplified">
     <compiler angle="radian" discardvisual="false" autolimits="true" eulerseq="zyx"/>
-    <option timestep="0.0001" tolerance="1e-10"/>
+    <option timestep="0.002" tolerance="1e-10"/>
 
     <!-- 添加可视化设置 -->
     <visual>
@@ -31,72 +31,71 @@
                      condim="6": 接触维度，6表示完整的6D接触
                      solimp: 求解器参数，控制接触的软硬程度
                      solref: 求解器参考参数，控制接触的响应特性
-                     rgba: 可视化颜色 (红 绿 蓝 透明度) -->
-                <geom group="3" contype="1" conaffinity="1" friction="0.5 0.005 0.0001" 
-                       condim="6" solimp="0.9 0.95" solref="0.0005 1" 
-                       rgba="0.804 0.361 0.031 0.5"/>
+                    rgba: 可视化颜色 (红 绿 蓝 透明度) -->
+                <geom group="3" contype="1" conaffinity="1" friction="0.8 0.005 0.0001" 
+                      rgba="0.804 0.361 0.031 0.5"/>
                 <!-- 头部碰撞几何体 - 使用球形简化头部形状 -->
                 <default class="collision_head">
-                    <geom type="sphere" size="0.09" pos="0.01 0.0 0.11" condim="6" solimp="0.9 0.95" solref="0.0005 1" rgba="0.804 0.361 0.031 0.5"/>
+                    <geom type="sphere" size="0.09" pos="0.01 0.0 0.11" rgba="0.804 0.361 0.031 0.5"/>
                 </default>
 
                 <!-- 基座上部碰撞几何体 - 使用盒形几何体覆盖基座上部区域 -->
                 <default class="collision_base_upper_box">
-                    <geom type="box" size="0.085 0.096 0.135" pos="-0.008 0.0 0.15" condim="6" solimp="0.9 0.95" solref="0.0005 1" rgba="0.804 0.361 0.031 0.5"/>
+                    <geom type="box" size="0.085 0.096 0.135" pos="-0.008 0.0 0.15" rgba="0.804 0.361 0.031 0.5"/>
                 </default>
 
                 <!-- 基座下部碰撞几何体 - 使用球形几何体简化基座下部 -->
                 <default class="collision_base_lower_box">
-                    <geom type="sphere" size="0.085" pos="0.02 0.0 -0.02" condim="6" solimp="0.9 0.95" solref="0.0005 1" rgba="0.804 0.361 0.031 0.5"/>
+                    <geom type="sphere" size="0.085" pos="0.02 0.0 -0.02" rgba="0.804 0.361 0.031 0.5"/>
                 </default>
 
                 <!-- 左脚碰撞几何体 - 使用薄盒形几何体模拟脚掌 -->
                 <default class="collision_left_foot">
-                    <geom type="box" size="0.102292353 0.053555 0.01" pos="0.0170 0.00166 -0.03631" condim="6" solimp="0.9 0.95" solref="0.0005 1" rgba="0.804 0.361 0.031 0.5"/>
+                    <geom type="box" size="0.102292353 0.053555 0.01" pos="0.0170 0.00166 -0.03631" rgba="0.804 0.361 0.031 0.5"/>
                 </default>
 
                 <!-- 左脚脚趾碰撞几何体 - 使用倾斜的盒形几何体模拟脚趾部分 -->
                 <default class="collision_left_foot_toe">
-                    <geom type="box" size="0.028 0.047805 0.01" quat="0.9741537 0 -0.2258863 0" pos="0.139 0.0 -0.0235" condim="6" solimp="0.9 0.95" solref="0.0005 1" rgba="0.804 0.361 0.031 0.5"/>
+                    <geom type="box" size="0.028 0.047805 0.01" quat="0.9741537 0 -0.2258863 0" pos="0.139 0.0 -0.0235" rgba="0.804 0.361 0.031 0.5"/>
                 </default>
 
                 <!-- 右脚碰撞几何体 - 使用薄盒形几何体模拟脚掌 -->
                 <default class="collision_right_foot">
-                    <geom type="box" size="0.102292353 0.053555 0.01" pos="0.0170 -0.00166 -0.03631" condim="6" solimp="0.9 0.95" solref="0.0005 1" rgba="0.804 0.361 0.031 0.5"/>
+                    <geom type="box" size="0.102292353 0.053555 0.01" pos="0.0170 -0.00166 -0.03631" rgba="0.804 0.361 0.031 0.5"/>
                 </default>
 
                 <!-- 右脚脚趾碰撞几何体 - 使用倾斜的盒形几何体模拟脚趾部分 -->
                 <default class="collision_right_foot_toe">
-                    <geom type="box" size="0.028 0.047805 0.01" quat="0.9741537 0 -0.2258863 0" pos="0.139 0.0 -0.0235" condim="6" solimp="0.9 0.95" solref="0.0005 1" rgba="0.804 0.361 0.031 0.5"/>
+                    <geom type="box" size="0.028 0.047805 0.01" quat="0.9741537 0 -0.2258863 0" pos="0.139 0.0 -0.0235" rgba="0.804 0.361 0.031 0.5"/>
                 </default>
 
                 <!-- 左肘末端碰撞几何体 - 使用球形几何体保护肘部末端 -->
                 <default class="collision_left_elbow_end">
-                    <geom type="sphere" size="0.05" pos="0.03 -0.02 -0.14" condim="6" solimp="0.9 0.95" solref="0.0005 1" rgba="0.804 0.361 0.031 0.5"/>
+                    <geom type="sphere" size="0.05" pos="0.03 -0.02 -0.14" rgba="0.804 0.361 0.031 0.5"/>
                 </default>
                 <!-- 通用肘部碰撞几何体 - 使用球形几何体保护肘关节 -->
                 <default class="collision_elbow">
-                    <geom type="sphere" size="0.045" pos="0.0 0.0 -0.0" condim="6" solimp="0.9 0.95" solref="0.0005 1" rgba="0.804 0.361 0.031 0.5"/>
+                    <geom type="sphere" size="0.045" pos="0.0 0.0 -0.0" rgba="0.804 0.361 0.031 0.5"/>
                 </default>
 
                 <!-- 右肘末端碰撞几何体 - 使用球形几何体保护肘部末端 -->
                 <default class="collision_right_elbow_end">
-                    <geom type="sphere" size="0.05" pos="0.03 0.02 -0.14" condim="6" solimp="0.9 0.95" solref="0.0005 1" rgba="0.804 0.361 0.031 0.5"/>
+                    <geom type="sphere" size="0.05" pos="0.03 0.02 -0.14" rgba="0.804 0.361 0.031 0.5"/>
                 </default>
 
                 <!-- 左髋关节碰撞几何体 - 使用圆柱形几何体保护髋关节 -->
                 <default class="collision_hip_left">
-                    <geom type="cylinder" size="0.046 0.06" pos="0.007 0.05 -0.012" quat="1 0 1 0" condim="6" solimp="0.9 0.95" solref="0.0005 1" rgba="0.804 0.361 0.031 0.5"/>
+                    <geom type="cylinder" size="0.046 0.06" pos="0.007 0.05 -0.012" quat="1 0 1 0" rgba="0.804 0.361 0.031 0.5"/>
                 </default>
 
                 <!-- 右髋关节碰撞几何体 - 使用圆柱形几何体保护髋关节 -->
                 <default class="collision_hip_right">
-                    <geom type="cylinder" size="0.046 0.06" pos="0.007 -0.05 -0.012" quat="1 0 1 0" condim="6" solimp="0.9 0.95" solref="0.0005 1" rgba="0.804 0.361 0.031 0.5"/>
+                    <geom type="cylinder" size="0.046 0.06" pos="0.007 -0.05 -0.012" quat="1 0 1 0" rgba="0.804 0.361 0.031 0.5"/>
                 </default>
 
                 <!-- 膝盖碰撞几何体 - 使用球形几何体保护膝关节 -->
                 <default class="collision_knee">
-                    <geom type="sphere" size="0.062" pos="0.004 0.00 -0.0" condim="6" solimp="0.9 0.95" solref="0.0005 1" rgba="0.804 0.361 0.031 0.5"/>
+                    <geom type="sphere" size="0.062" pos="0.004 0.00 -0.0" rgba="0.804 0.361 0.031 0.5"/>
                 </default>
             </default>
 
