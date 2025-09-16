@@ -257,6 +257,8 @@ By default, a simple policy is loaded from the directory of ```src/interface_exa
    ros2 launch interface_example rl_basic_example.launch.py
    ## XZL policy from engineai, 先开RL控制器，再开mujoco
    ros2 launch interface_example rl_basic_example_XZL.launch.py
+   ## 通过修改 pm_v2.yaml 里 perturbation 组参数来改变推力大小；
+   ## 通过修改 rl_basic_param_XZL.yaml 里 initial_velocity 组参数来改变初始速度
    ```
 
 > **NOTE**: If the robot falls during simulation, you may need to reset the simulator by pressing the reset button.

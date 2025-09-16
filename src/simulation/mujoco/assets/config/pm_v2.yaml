@@ -8,7 +8,7 @@ actuator:
 
 # 碰撞模型配置 - 定义碰撞检测的几何体类型
 collision_model:
-  use_simplified_geometry: false  # 碰撞检测几何体类型选择
+  use_simplified_geometry: true  # 碰撞检测几何体类型选择
   # true = 使用简化几何体（如球体、圆柱体、立方体，计算速度快但精度较低）
   # false = 使用真实mesh（高精度网格模型，计算精度高但速度较慢）
   
@@ -37,6 +37,7 @@ perturbation:
   default_torque_magnitude: 5.0     # 默认扭矩大小（牛·米）
   force_step: 20.0                  # 推力调整步长（牛顿），用于+/-键调整推力大小
   torque_step: 5.0                  # 扭矩调整步长（牛·米），用于+/-键调整扭矩大小
+  force_duration: 1.0               # 推力持续时间（秒），按下键盘后推力持续的时间
 
 # 传感器配置 - 定义传感器数据的话题
 sensor:

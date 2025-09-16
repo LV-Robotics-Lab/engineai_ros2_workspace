@@ -66,6 +66,9 @@ class SimManager {
     double duration;
     bool is_active;
   };
+
+// 全局函数声明
+void ApplyPerturbationForcesFromSimManager();
   
   // Get all active perturbations for CSV recording
   std::vector<PerturbationData> GetActivePerturbations() const;
@@ -80,6 +83,9 @@ class SimManager {
   const std::vector<double>& GetPerturbationForce(const std::string& direction, double magnitude) const;
   const std::vector<double>& GetPerturbationTorque(const std::string& direction) const;
   const std::vector<double>& GetPerturbationTorque(const std::string& direction, double magnitude) const;
+
+  // 推力施加函数 - 在UI系统清空外力后调用
+  void ApplyPerturbationForces();
 
  private:
   // Private constructor for singleton
@@ -109,7 +115,7 @@ class SimManager {
 
   // Perturbation control variables
   bool apply_perturb_ = false;
-  double perturb_force_magnitude_ = 20.0;
+  double perturb_force_magnitude_ = 20.0;  // 将在初始化时从YAML加载
   double perturb_torque_magnitude_ = 5.0;
   Eigen::Vector3d perturb_force_ = Eigen::Vector3d::Zero();
   Eigen::Vector3d perturb_torque_ = Eigen::Vector3d::Zero();

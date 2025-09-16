@@ -206,8 +206,14 @@ class RlBasicRunnerXZL : public rclcpp::Node {
     obs = Eigen::VectorXd::Zero(param_->num_observations * param_->num_include_obs_steps + 3);
     obs.head(param_->num_observations * param_->num_include_obs_steps) =
         Eigen::Map<Eigen::VectorXd>(mlp_net_observation_.transpose().data(), mlp_net_observation_.size());
-    // 测试用，添加速度指令
-    command_ << 1.0,0.0,0.0;
+    // 从YAML配置加载初始速度指令
+    command_ = param_->initial_linear_velocity;
+    static bool debug_printed = false;
+    if (!debug_printed) {
+      RCLCPP_INFO(get_logger(), "Using initial velocity from YAML: [%.3f, %.3f, %.3f]", 
+                  command_[0], command_[1], command_[2]);
+      debug_printed = true;
+    }
     obs.tail(3) = command_.cwiseProduct(command_scale_);
     
     // Get MNN output

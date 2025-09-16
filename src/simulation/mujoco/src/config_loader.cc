@@ -128,6 +128,32 @@ bool ConfigLoader::LoadConfig() {
       if (perturbation["torque_step"]) {
         torque_step_ = perturbation["torque_step"].as<double>();
       }
+      if (perturbation["force_duration"]) {
+        force_duration_ = perturbation["force_duration"].as<double>();
+      }
+    }
+
+    // 解析初始速度配置
+    if (config["initial_velocity"]) {
+      YAML::Node initial_velocity = config["initial_velocity"];
+      if (initial_velocity["linear_x"]) {
+        initial_linear_velocity_x_ = initial_velocity["linear_x"].as<double>();
+      }
+      if (initial_velocity["linear_y"]) {
+        initial_linear_velocity_y_ = initial_velocity["linear_y"].as<double>();
+      }
+      if (initial_velocity["linear_z"]) {
+        initial_linear_velocity_z_ = initial_velocity["linear_z"].as<double>();
+      }
+      if (initial_velocity["angular_x"]) {
+        initial_angular_velocity_x_ = initial_velocity["angular_x"].as<double>();
+      }
+      if (initial_velocity["angular_y"]) {
+        initial_angular_velocity_y_ = initial_velocity["angular_y"].as<double>();
+      }
+      if (initial_velocity["angular_z"]) {
+        initial_angular_velocity_z_ = initial_velocity["angular_z"].as<double>();
+      }
     }
 
     // 加载模型文件配置

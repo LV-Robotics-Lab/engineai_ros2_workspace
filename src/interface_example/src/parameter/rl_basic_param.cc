@@ -72,6 +72,37 @@ void RlBasicParam::LoadFromYaml(const std::string& config_file) {
                                     command_scale_node[2].as<double>());
     num_commands = config["num_commands"].as<int>();
     num_clock_signal = config["num_clock_signal"].as<int>();
+    
+    // Load initial velocity parameters
+    if (config["initial_velocity"]) {
+      std::cout << "Found initial_velocity in YAML config" << std::endl;
+      auto initial_velocity_node = config["initial_velocity"];
+      if (initial_velocity_node["linear"]) {
+        auto linear_node = initial_velocity_node["linear"];
+        initial_linear_velocity = Eigen::Vector3d(linear_node[0].as<double>(), linear_node[1].as<double>(),
+                                                  linear_node[2].as<double>());
+        std::cout << "Loaded initial_linear_velocity from YAML: [" 
+                  << initial_linear_velocity[0] << ", " << initial_linear_velocity[1] << ", " << initial_linear_velocity[2] << "]" << std::endl;
+      } else {
+        initial_linear_velocity = Eigen::Vector3d::Zero();
+        std::cout << "No linear velocity in YAML, using zero" << std::endl;
+      }
+      if (initial_velocity_node["angular"]) {
+        auto angular_node = initial_velocity_node["angular"];
+        initial_angular_velocity = Eigen::Vector3d(angular_node[0].as<double>(), angular_node[1].as<double>(),
+                                                   angular_node[2].as<double>());
+        std::cout << "Loaded initial_angular_velocity from YAML: [" 
+                  << initial_angular_velocity[0] << ", " << initial_angular_velocity[1] << ", " << initial_angular_velocity[2] << "]" << std::endl;
+      } else {
+        initial_angular_velocity = Eigen::Vector3d::Zero();
+        std::cout << "No angular velocity in YAML, using zero" << std::endl;
+      }
+    } else {
+      // Default values
+      initial_linear_velocity = Eigen::Vector3d(1.0, 0.0, 0.0);  // 默认向前1m/s
+      initial_angular_velocity = Eigen::Vector3d::Zero();
+      std::cout << "No initial_velocity in YAML, using default: [1.0, 0.0, 0.0]" << std::endl;
+    }
 
   } catch (const YAML::Exception& e) {
     std::cerr << "Error loading YAML file: " << e.what() << std::endl;

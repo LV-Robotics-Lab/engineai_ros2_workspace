@@ -49,6 +49,9 @@ class RlBasicParam {
   bool mix;
   // Sim to real fine tune parameters
   Eigen::Vector3d command_scale;
+  // Initial velocity parameters
+  Eigen::Vector3d initial_linear_velocity;
+  Eigen::Vector3d initial_angular_velocity;
 
  private:
   void LoadFromYaml(const std::string& config_file);

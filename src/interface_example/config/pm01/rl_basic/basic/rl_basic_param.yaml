@@ -80,6 +80,11 @@ angular_vel_delta_bias: 0.001
 imu_install_delta_bias: 0.001
 imu_install_bias: [0,0.015,0]
 transition_time: 0.5
+
+# 初始速度配置 - 定义机器人的初始运动状态
+initial_velocity:
+  linear: [1.0, 0.0, 0.0]    # 初始线速度 [x, y, z] (m/s)
+  angular: [0.0, 0.0, 0.0]   # 初始角速度 [x, y, z] (rad/s)
 # # Replaces the following limbs with multiple motion planner
 # replaced_limbs:
 #   - waist

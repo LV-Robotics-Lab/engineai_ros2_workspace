@@ -42,10 +42,19 @@ class ConfigLoader {
   double GetDefaultTorqueMagnitude() const { return default_torque_magnitude_; }
   double GetForceStep() const { return force_step_; }
   double GetTorqueStep() const { return torque_step_; }
+  double GetForceDuration() const { return force_duration_; }
   const std::vector<double>& GetPerturbationForce(const std::string& direction) const;
   const std::vector<double>& GetPerturbationForce(const std::string& direction, double magnitude) const;
   const std::vector<double>& GetPerturbationTorque(const std::string& direction) const;
   const std::vector<double>& GetPerturbationTorque(const std::string& direction, double magnitude) const;
+
+  // 初始速度配置
+  double GetInitialLinearVelocityX() const { return initial_linear_velocity_x_; }
+  double GetInitialLinearVelocityY() const { return initial_linear_velocity_y_; }
+  double GetInitialLinearVelocityZ() const { return initial_linear_velocity_z_; }
+  double GetInitialAngularVelocityX() const { return initial_angular_velocity_x_; }
+  double GetInitialAngularVelocityY() const { return initial_angular_velocity_y_; }
+  double GetInitialAngularVelocityZ() const { return initial_angular_velocity_z_; }
 
   // Asset path related methods
   std::string GetModelFilePath() const;
@@ -85,6 +94,15 @@ class ConfigLoader {
   double default_torque_magnitude_ = 5.0;    // 默认扭矩大小
   double force_step_ = 20.0;                 // 推力调整步长
   double torque_step_ = 5.0;                 // 扭矩调整步长
+  double force_duration_ = 0.2;              // 推力持续时间
+
+  // 初始速度配置
+  double initial_linear_velocity_x_ = 0.0;   // 初始线速度X分量
+  double initial_linear_velocity_y_ = 0.0;   // 初始线速度Y分量
+  double initial_linear_velocity_z_ = 0.0;   // 初始线速度Z分量
+  double initial_angular_velocity_x_ = 0.0;  // 初始角速度X分量
+  double initial_angular_velocity_y_ = 0.0;  // 初始角速度Y分量
+  double initial_angular_velocity_z_ = 0.0;  // 初始角速度Z分量
 };
 
 #endif  // CONFIG_LOADER_H_

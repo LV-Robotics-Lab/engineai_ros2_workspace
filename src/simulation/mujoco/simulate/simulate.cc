@@ -14,6 +14,14 @@
 
 #include "simulate.h"
 
+// 前向声明
+namespace mujoco {
+class SimManager;
+}
+
+// 全局函数声明
+void ApplyPerturbationForcesFromSimManager();
+
 #include <algorithm>
 #include <atomic>
 #include <chrono>
@@ -2021,6 +2029,10 @@ void Simulate::Sync() {
     mju_zero(d_->xfrc_applied, 6 * m_->nbody);
     mjv_applyPerturbPose(m_, d_, &this->pert, 0);  // mocap bodies only
     mjv_applyPerturbForce(m_, d_, &this->pert);
+    
+    // 在UI系统清空外力后，重新施加我们的推力
+    // 这样可以确保推力不会被UI系统清空
+    ApplyPerturbationForcesFromSimManager();
   } else {
     mjv_applyPerturbPose(m_, d_, &this->pert, 1);  // mocap and dynamic bodies
   }
