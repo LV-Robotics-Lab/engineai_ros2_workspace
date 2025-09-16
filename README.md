@@ -80,6 +80,7 @@ sudo ldconfig
 Add these environment variables to your ~/.bashrc :
 ```bash
 echo -e '\nexport ROS_DOMAIN_ID=69\nexport ROS_LOCALHOST_ONLY=0\nexport RMW_IMPLEMENTATION=rmw_cyclonedds_cpp' >> ~/.bashrc && source ~/.bashrc
+# 如果只运行mujoco，需要防止局域网其他机器人的干扰，ROS_DOMAIN_ID=77, ROS_LOCALHOST_ONLY=1
 ```
 
 ### Finite State Machine(FSM) for the Development Mode
