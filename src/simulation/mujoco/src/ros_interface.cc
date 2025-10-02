@@ -1373,22 +1373,39 @@ void RosInterface::PublishContactForces(const mjModel* m, mjData* d) {
 
   // ==================== 推力数据单独保存 ====================
   if (save_contact_csv_ && perturbation_csv_file_.is_open()) {
-    // 使用相同的延迟逻辑，确保推力CSV也在重置后开始记录
+    // 使用与contact CSV相同的延迟逻辑，确保推力CSV也在重置后开始记录
     static bool perturbation_csv_recording_started = false;
     static double perturbation_csv_start_time = -1.0;
+    static bool perturbation_mujoco_reset_done = false;
     
     // 如果还没有开始记录，检查是否已经过了3秒
     if (!perturbation_csv_recording_started) {
       if (perturbation_csv_start_time < 0) {
         perturbation_csv_start_time = d->time;  // 记录开始时间
+        RCLCPP_INFO(node_->get_logger(), "推力CSV记录延迟开始，等待3秒后重置MuJoCo...");
       }
       
       // 检查是否已经过了3秒
       if (d->time - perturbation_csv_start_time >= 3.0) {
+        if (!perturbation_mujoco_reset_done) {
+          // 重置auto_sampling状态，让推力重新施加
+          auto& sim_manager = SimManager::GetInstance();
+          sim_manager.ResetAutoSampling();
+          RCLCPP_INFO(node_->get_logger(), "已重置auto_sampling状态，推力将在auto_delay时间后重新施加");
+          perturbation_mujoco_reset_done = true;
+        }
         perturbation_csv_recording_started = true;
+        RCLCPP_INFO(node_->get_logger(), "推力CSV记录开始，时间: %.3f", d->time);
       } else {
-        // 还在延迟期间，不记录推力CSV
-        return;
+        // 在3秒延迟期间，检查是否已经进行了MuJoCo Reset
+        // 如果已经Reset，立即开始记录推力CSV
+        if (perturbation_mujoco_reset_done) {
+          perturbation_csv_recording_started = true;
+          RCLCPP_INFO(node_->get_logger(), "MuJoCo已重置，开始推力CSV记录，时间: %.3f", d->time);
+        } else {
+          // 还没有Reset，不记录推力CSV
+          return;
+        }
       }
     }
     
@@ -1406,6 +1423,18 @@ void RosInterface::PublishContactForces(const mjModel* m, mjData* d) {
       // 获取活跃的干扰力数据
       auto& sim_manager = SimManager::GetInstance();
       auto active_perturbations = sim_manager.GetActivePerturbations();
+      
+      // 调试信息
+      if (active_perturbations.empty()) {
+        // 只在第一次为空时打印，避免刷屏
+        static bool debug_printed = false;
+        if (!debug_printed) {
+          RCLCPP_INFO(node_->get_logger(), "推力CSV记录：active_perturbations为空，推力数量: %zu", active_perturbations.size());
+          debug_printed = true;
+        }
+      } else {
+        RCLCPP_INFO(node_->get_logger(), "推力CSV记录：找到 %zu 个推力", active_perturbations.size());
+      }
       
       // 为每个活跃的推力写入一行数据
       for (const auto& pert : active_perturbations) {

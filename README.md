@@ -152,7 +152,7 @@ conda activate engineai_ros2
 python3 scripts/analyze_contact_forces.py logs/contact_data_20250913_181435.csv
 # plot contact point with force
 # 使用机器人坐标系（默认）
-python3 scripts/mujoco_xml_contact_display.py logs/forward-20.0N-20251002_030843/contact_data_20251002_030959.csv src/simulation/mujoco/assets/resource/pm_v2_mesh.xml
+python3 scripts/mujoco_xml_contact_display.py logs/forward-200.0N-20251002_142946/contact_data_20251002_142950.csv src/simulation/mujoco/assets/resource/pm_v2_mesh.xml
 
 # 使用世界坐标系
 python3 scripts/mujoco_xml_contact_display.py logs/contact_data_20250831_125541.csv src/simulation/mujoco/assets/resource/pm_v2_mesh.xml world

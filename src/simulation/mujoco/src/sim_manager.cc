@@ -434,12 +434,14 @@ void SimManager::ApplyPerturbationForces() {
     }
   }
   
-  // 检查并清理过期的干扰力
+  // 检查并清理过期的干扰力（但在CSV记录期间保留推力数据）
   auto it = active_perturbations_.begin();
   while (it != active_perturbations_.end()) {
     if (d_->time - it->start_time > it->duration) {
       std::cout << "干扰力ID " << it->id << " 自动停止" << std::endl;
-      it = active_perturbations_.erase(it);
+      // 标记为非活跃，但不删除，以便CSV记录
+      it->is_active = false;
+      ++it;
     } else {
       ++it;
     }
@@ -790,7 +792,20 @@ void SimManager::ApplyPerturbation(bool apply) {
                                   perturb_torque_.y()*perturb_torque_.y() + 
                                   perturb_torque_.z()*perturb_torque_.z());
     
+    // 将推力添加到active_perturbations_列表中，用于CSV记录
+    PerturbationData new_perturbation;
+    new_perturbation.id = GetNextPerturbationId();
+    new_perturbation.body_name = perturb_body_name_;
+    new_perturbation.force = perturb_force_;
+    new_perturbation.torque = perturb_torque_;
+    new_perturbation.start_time = d_->time;
+    new_perturbation.duration = perturb_duration_;
+    new_perturbation.is_active = true;
+    
+    active_perturbations_.push_back(new_perturbation);
+    
     std::cout << "=== 开始定时推力 ===" << std::endl;
+    std::cout << "当前active_perturbations_数量: " << active_perturbations_.size() << std::endl;
     std::cout << "时间: " << std::fixed << std::setprecision(3) << d_->time << "s" << std::endl;
     std::cout << "推力大小: " << force_magnitude << "N" << std::endl;
     std::cout << "推力方向: [" << perturb_force_.x() << ", " << perturb_force_.y() << ", " << perturb_force_.z() << "]" << std::endl;
@@ -800,6 +815,7 @@ void SimManager::ApplyPerturbation(bool apply) {
     }
     std::cout << "目标物体: " << perturb_body_name_ << std::endl;
     std::cout << "持续时间: " << perturb_duration_ << "s" << std::endl;
+    std::cout << "推力ID: " << new_perturbation.id << std::endl;
     std::cout << "===================" << std::endl;
   } else {
     // 松开键盘：立即停止推力
@@ -807,6 +823,13 @@ void SimManager::ApplyPerturbation(bool apply) {
       double actual_duration = (perturb_start_time_ > 0) ? (d_->time - perturb_start_time_) : 0.0;
       apply_perturb_ = false;
       perturb_start_time_ = -1.0;  // 重置开始时间
+      
+      // 标记所有活跃的推力为非活跃状态
+      for (auto& pert : active_perturbations_) {
+        if (pert.is_active) {
+          pert.is_active = false;
+        }
+      }
       
       std::cout << "=== 手动停止推力 ===" << std::endl;
       std::cout << "时间: " << std::fixed << std::setprecision(3) << d_->time << "s" << std::endl;
