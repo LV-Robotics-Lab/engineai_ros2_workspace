@@ -401,6 +401,43 @@ void SimManager::ApplyPerturbationForces() {
   
   std::lock_guard<std::mutex> lock(perturbation_mutex_);
   
+  // 自动采样逻辑 - 只触发一次
+  if (config_loader_->GetAutoSampling() && !apply_perturb_) {
+    static bool auto_triggered = false;
+    static double auto_start_time = -1.0;
+    static bool auto_completed = false;  // 新增：标记自动推力是否已完成
+    
+    // 如果已经完成，不再执行
+    if (auto_completed) {
+      return;
+    }
+    
+    if (!auto_triggered) {
+      auto_start_time = d_->time;
+      auto_triggered = true;
+    }
+    
+    // 等待指定时间后自动触发推力
+    if (d_->time - auto_start_time >= config_loader_->GetAutoDelay()) {
+      std::string direction = config_loader_->GetAutoDirection();
+      
+      // 根据方向设置推力
+      if (direction == "forward") {
+        perturb_force_ = Eigen::Vector3d(perturb_force_magnitude_, 0, 0);
+      } else if (direction == "backward") {
+        perturb_force_ = Eigen::Vector3d(-perturb_force_magnitude_, 0, 0);
+      } else if (direction == "left") {
+        perturb_force_ = Eigen::Vector3d(0, perturb_force_magnitude_, 0);
+      } else if (direction == "right") {
+        perturb_force_ = Eigen::Vector3d(0, -perturb_force_magnitude_, 0);
+      }
+      
+      // 应用推力
+      ApplyPerturbation(true);
+      auto_completed = true;  // 标记已完成，不再重复触发
+    }
+  }
+  
   // 检查并清理过期的干扰力
   auto it = active_perturbations_.begin();
   while (it != active_perturbations_.end()) {

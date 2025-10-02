@@ -48,6 +48,11 @@ class ConfigLoader {
   const std::vector<double>& GetPerturbationTorque(const std::string& direction) const;
   const std::vector<double>& GetPerturbationTorque(const std::string& direction, double magnitude) const;
 
+  // 自动采样配置
+  bool GetAutoSampling() const { return auto_sampling_; }
+  const std::string& GetAutoDirection() const { return auto_direction_; }
+  double GetAutoDelay() const { return auto_delay_; }
+
   // 初始速度配置
   double GetInitialLinearVelocityX() const { return initial_linear_velocity_x_; }
   double GetInitialLinearVelocityY() const { return initial_linear_velocity_y_; }
@@ -95,6 +100,11 @@ class ConfigLoader {
   double force_step_ = 20.0;                 // 推力调整步长
   double torque_step_ = 5.0;                 // 扭矩调整步长
   double force_duration_ = 0.2;              // 推力持续时间
+
+  // 自动采样配置
+  bool auto_sampling_ = false;               // 自动采样模式
+  std::string auto_direction_ = "forward";   // 自动采样方向
+  double auto_delay_ = 1.0;                  // 自动采样延迟时间
 
   // 初始速度配置
   double initial_linear_velocity_x_ = 0.0;   // 初始线速度X分量

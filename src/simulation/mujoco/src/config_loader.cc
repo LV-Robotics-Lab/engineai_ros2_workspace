@@ -131,6 +131,16 @@ bool ConfigLoader::LoadConfig() {
       if (perturbation["force_duration"]) {
         force_duration_ = perturbation["force_duration"].as<double>();
       }
+      // 读取自动采样配置
+      if (perturbation["auto_sampling"]) {
+        auto_sampling_ = perturbation["auto_sampling"].as<bool>();
+      }
+      if (perturbation["auto_direction"]) {
+        auto_direction_ = perturbation["auto_direction"].as<std::string>();
+      }
+      if (perturbation["auto_delay"]) {
+        auto_delay_ = perturbation["auto_delay"].as<double>();
+      }
     }
 
     // 解析初始速度配置

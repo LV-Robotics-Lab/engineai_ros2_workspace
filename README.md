@@ -115,6 +115,11 @@ ros2 launch mujoco_simulator mujoco_simulator.launch.py export_contact:=true sav
 # # 基本启动
 # ros2 launch mujoco_simulator perturbation_simulator.launch.py save_contact_csv:=true
 
+## XZL policy from engineai, 先开RL控制器，再开mujoco
+ros2 launch interface_example rl_basic_example_XZL.launch.py
+## 通过修改 pm_v2.yaml 里 perturbation 组参数来改变推力大小；
+## 通过修改 rl_basic_param_XZL.yaml 里 initial_velocity 组参数来改变初始速度
+
 # # 自定义推倒采样参数
 # ros2 launch mujoco_simulator perturbation_simulator.launch.py \
 #     save_contact_csv:=true \
@@ -134,6 +139,10 @@ ros2 launch mujoco_simulator mujoco_simulator.launch.py export_contact:=true sav
 # Shift + +/-: 调整干扰力大小
 # Shift + ,/.: 调整干扰力持续时间
 
+# 自动采集碰撞
+chmod +x /home/wang22/engineai/engineai_ros2_workspace/scripts/automated_collection.sh
+./scripts/automated_collection.sh
+
 # terminal 2
 # choose mesh or geometry: in src/simulation/mujoco/assets/config/pm_v2.yaml
 # change "use_simplified_geometry: false"
@@ -143,7 +152,7 @@ conda activate engineai_ros2
 python3 scripts/analyze_contact_forces.py logs/contact_data_20250913_181435.csv
 # plot contact point with force
 # 使用机器人坐标系（默认）
-python3 scripts/mujoco_xml_contact_display.py logs/contact_data_20250913_181435.csv src/simulation/mujoco/assets/resource/pm_v2_mesh.xml
+python3 scripts/mujoco_xml_contact_display.py logs/forward-20.0N-20251002_030843/contact_data_20251002_030959.csv src/simulation/mujoco/assets/resource/pm_v2_mesh.xml
 
 # 使用世界坐标系
 python3 scripts/mujoco_xml_contact_display.py logs/contact_data_20250831_125541.csv src/simulation/mujoco/assets/resource/pm_v2_mesh.xml world
@@ -253,12 +262,7 @@ By default, a simple policy is loaded from the directory of ```src/interface_exa
    - Launch the example with:
    ```bash
    # in host
-   ## 默认policy
    ros2 launch interface_example rl_basic_example.launch.py
-   ## XZL policy from engineai, 先开RL控制器，再开mujoco
-   ros2 launch interface_example rl_basic_example_XZL.launch.py
-   ## 通过修改 pm_v2.yaml 里 perturbation 组参数来改变推力大小；
-   ## 通过修改 rl_basic_param_XZL.yaml 里 initial_velocity 组参数来改变初始速度
    ```
 
 > **NOTE**: If the robot falls during simulation, you may need to reset the simulator by pressing the reset button.

@@ -1,1 +1,0 @@
-timestamp,perturbation_id,body_name,start_time,duration,elapsed_time,force_x,force_y,force_z,force_magnitude,torque_x,torque_y,torque_z,torque_magnitude,std_pose_x,std_pose_y,std_pose_z,world_force_x,world_force_y,world_force_z,world_force_magnitude

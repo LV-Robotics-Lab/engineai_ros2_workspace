@@ -134,6 +134,21 @@ bool RosInterface::Initialize() {
     std::stringstream ss_pert;
     ss_pert << "logs/perturbation_data_" << std::put_time(std::localtime(&time_t), "%Y%m%d_%H%M%S") << ".csv";
     perturbation_csv_file_path_ = ss_pert.str();
+  } else if (save_contact_csv_ && !csv_file_path_.empty()) {
+    // 如果指定了自定义路径，使用该路径并创建目录
+    std::filesystem::create_directories(csv_file_path_);
+    
+    // 在指定目录下生成带时间戳的文件名
+    auto now = std::chrono::system_clock::now();
+    auto time_t = std::chrono::system_clock::to_time_t(now);
+    std::stringstream ss;
+    ss << csv_file_path_ << "/contact_data_" << std::put_time(std::localtime(&time_t), "%Y%m%d_%H%M%S") << ".csv";
+    csv_file_path_ = ss.str();
+    
+    // 生成推力数据CSV文件名
+    std::stringstream ss_pert;
+    ss_pert << csv_file_path_.substr(0, csv_file_path_.find_last_of("/")) << "/perturbation_data_" << std::put_time(std::localtime(&time_t), "%Y%m%d_%H%M%S") << ".csv";
+    perturbation_csv_file_path_ = ss_pert.str();
   }
 
   // 获取关节数量（无论是否保存CSV都需要这个值）
@@ -1224,6 +1239,56 @@ void RosInterface::PublishContactForces(const mjModel* m, mjData* d) {
 
   // ==================== 第五部分：保存到CSV文件 ====================
   if (save_contact_csv_ && csv_file_.is_open()) {
+    // 延迟3秒后重置并开始记录CSV的逻辑
+    static bool csv_recording_started = false;
+    static double csv_start_time = -1.0;
+    static bool mujoco_reset_done = false;
+    
+    // 如果还没有开始记录，检查是否已经过了3秒
+    if (!csv_recording_started) {
+      if (csv_start_time < 0) {
+        csv_start_time = d->time;  // 记录开始时间
+        RCLCPP_INFO(node_->get_logger(), "CSV记录延迟开始，等待3秒后重置MuJoCo...");
+      }
+      
+      // 检查是否已经过了3秒
+      if (d->time - csv_start_time >= 3.0) {
+        if (!mujoco_reset_done) {
+          // 执行MuJoCo重置
+          RCLCPP_INFO(node_->get_logger(), "3秒延迟结束，开始重置MuJoCo...");
+          
+          // 重置到初始状态
+          if (m) {
+            // 查找并应用keyframe
+            int keyframe_id = mj_name2id(m, mjOBJ_KEY, "floating_base_homing");
+            if (keyframe_id >= 0) {
+              mj_resetDataKeyframe(m, d, keyframe_id);
+              RCLCPP_INFO(node_->get_logger(), "已应用keyframe 'floating_base_homing' 重置机器人到初始状态");
+            } else {
+              // 如果没有keyframe，重置到零位
+              mju_zero(d->qpos, m->nq);
+              if (m->jnt_type[0] == mjJNT_FREE) {
+                // 对于自由关节，设置四元数为单位四元数，位置为原点
+                d->qpos[0] = 1; d->qpos[1] = d->qpos[2] = d->qpos[3] = 0; // quat = [1,0,0,0]
+                d->qpos[4] = d->qpos[5] = d->qpos[6] = 0; // base at origin (0,0,0)
+              }
+              RCLCPP_INFO(node_->get_logger(), "已重置机器人到零位状态");
+            }
+            
+            // 执行前向运动学计算
+            mj_forward(m, d);
+            RCLCPP_INFO(node_->get_logger(), "MuJoCo重置完成，开始记录CSV数据");
+          }
+          
+          mujoco_reset_done = true;
+          csv_recording_started = true;
+        }
+      } else {
+        // 还在延迟期间，不记录CSV
+        return;
+      }
+    }
+    
     // 使用帧计数器控制保存频率
     static int frame_counter = 0;
     frame_counter++;
@@ -1303,6 +1368,25 @@ void RosInterface::PublishContactForces(const mjModel* m, mjData* d) {
 
   // ==================== 推力数据单独保存 ====================
   if (save_contact_csv_ && perturbation_csv_file_.is_open()) {
+    // 使用相同的延迟逻辑，确保推力CSV也在重置后开始记录
+    static bool perturbation_csv_recording_started = false;
+    static double perturbation_csv_start_time = -1.0;
+    
+    // 如果还没有开始记录，检查是否已经过了3秒
+    if (!perturbation_csv_recording_started) {
+      if (perturbation_csv_start_time < 0) {
+        perturbation_csv_start_time = d->time;  // 记录开始时间
+      }
+      
+      // 检查是否已经过了3秒
+      if (d->time - perturbation_csv_start_time >= 3.0) {
+        perturbation_csv_recording_started = true;
+      } else {
+        // 还在延迟期间，不记录推力CSV
+        return;
+      }
+    }
+    
     // 使用帧计数器控制保存频率
     static int perturbation_frame_counter = 0;
     perturbation_frame_counter++;
