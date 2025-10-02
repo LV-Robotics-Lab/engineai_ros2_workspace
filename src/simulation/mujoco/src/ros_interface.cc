@@ -1277,7 +1277,12 @@ void RosInterface::PublishContactForces(const mjModel* m, mjData* d) {
             
             // 执行前向运动学计算
             mj_forward(m, d);
-            RCLCPP_INFO(node_->get_logger(), "MuJoCo重置完成，开始记录CSV数据");
+            RCLCPP_INFO(node_->get_logger(), "MuJoCo重置完成");
+            
+            // 重置auto_sampling状态，让推力重新施加
+            auto& sim_manager = SimManager::GetInstance();
+            sim_manager.ResetAutoSampling();
+            RCLCPP_INFO(node_->get_logger(), "已重置auto_sampling状态，推力将在auto_delay时间后重新施加");
           }
           
           mujoco_reset_done = true;

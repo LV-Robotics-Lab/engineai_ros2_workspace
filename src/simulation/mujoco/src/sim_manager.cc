@@ -403,22 +403,18 @@ void SimManager::ApplyPerturbationForces() {
   
   // 自动采样逻辑 - 只触发一次
   if (config_loader_->GetAutoSampling() && !apply_perturb_) {
-    static bool auto_triggered = false;
-    static double auto_start_time = -1.0;
-    static bool auto_completed = false;  // 新增：标记自动推力是否已完成
-    
     // 如果已经完成，不再执行
-    if (auto_completed) {
+    if (auto_completed_) {
       return;
     }
     
-    if (!auto_triggered) {
-      auto_start_time = d_->time;
-      auto_triggered = true;
+    if (!auto_triggered_) {
+      auto_start_time_ = d_->time;
+      auto_triggered_ = true;
     }
     
     // 等待指定时间后自动触发推力
-    if (d_->time - auto_start_time >= config_loader_->GetAutoDelay()) {
+    if (d_->time - auto_start_time_ >= config_loader_->GetAutoDelay()) {
       std::string direction = config_loader_->GetAutoDirection();
       
       // 根据方向设置推力
@@ -434,7 +430,7 @@ void SimManager::ApplyPerturbationForces() {
       
       // 应用推力
       ApplyPerturbation(true);
-      auto_completed = true;  // 标记已完成，不再重复触发
+      auto_completed_ = true;  // 标记已完成，不再重复触发
     }
   }
   
@@ -522,6 +518,30 @@ void SimManager::ApplyPerturbationForces() {
  */
 void ApplyPerturbationForcesFromSimManager() {
   SimManager::GetInstance().ApplyPerturbationForces();
+}
+
+/**
+ * @brief 重置auto_sampling状态
+ * @details 用于MuJoCo重置后重新触发推力施加
+ */
+void SimManager::ResetAutoSampling() {
+  std::lock_guard<std::mutex> lock(perturbation_mutex_);
+  
+  // 重置auto_sampling状态变量
+  auto_triggered_ = false;
+  auto_start_time_ = -1.0;
+  auto_completed_ = false;
+  
+  // 停止当前的推力
+  apply_perturb_ = false;
+  perturb_start_time_ = -1.0;
+  
+  // 清除所有外力
+  if (m_ && d_) {
+    mju_zero(d_->xfrc_applied, 6 * m_->nbody);
+  }
+  
+  std::cout << "Auto-sampling状态已重置，推力将在auto_delay时间后重新施加" << std::endl;
 }
 
 /**

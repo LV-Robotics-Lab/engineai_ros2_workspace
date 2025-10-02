@@ -86,6 +86,9 @@ void ApplyPerturbationForcesFromSimManager();
 
   // 推力施加函数 - 在UI系统清空外力后调用
   void ApplyPerturbationForces();
+  
+  // 重置auto_sampling状态，用于MuJoCo重置后重新触发推力
+  void ResetAutoSampling();
 
  private:
   // Private constructor for singleton
@@ -127,5 +130,10 @@ void ApplyPerturbationForcesFromSimManager();
   std::vector<PerturbationData> active_perturbations_;
   int next_perturbation_id_ = 1;
   mutable std::mutex perturbation_mutex_;
+  
+  // Auto-sampling state variables
+  bool auto_triggered_ = false;
+  double auto_start_time_ = -1.0;
+  bool auto_completed_ = false;
 
 };
