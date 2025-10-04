@@ -1101,74 +1101,123 @@ void SimManager::PhysicsLoop() {
       if (m_) {
         if (sim_->run) {
           bool stepped = false;
+          
+          // 获取当前CPU时间戳，用于计算实际经过的时间
           const auto startCPU = mj::Simulate::Clock::now();
+          
+          // 计算自上次同步以来CPU实际经过的时间
           const auto elapsedCPU = startCPU - syncCPU;
+          
+          // 计算自上次同步以来仿真时间的变化
           double elapsedSim = d_->time - syncSim;
+          
+          // 计算时间缩放因子：100%实时 = 1.0，50%实时 = 0.5，200%实时 = 2.0
+          // 例如：percentRealTime[real_time_index] = 50 时，slowdown = 100/50 = 2.0
+          // 意味着仿真运行速度是实时的2倍（即仿真时间流逝比实际时间快2倍）
           double slowdown = 100 / sim_->percentRealTime[sim_->real_time_index];
+          
+          // 检查CPU时间和仿真时间是否同步
+          // 如果两者差异超过阈值，则认为时间不同步，需要重新同步
+          // 公式：|(CPU时间 / 缩放因子) - 仿真时间| > 同步容差
           bool misaligned = std::abs((elapsedCPU / slowdown).count() - elapsedSim) > kSyncMisalign;
 
-          // 检查是否需要重新同步
+          // 检查是否需要重新同步时间基准点
+          // 重新同步的条件：
+          // 1. elapsedSim < 0: 仿真时间异常（可能发生了重置）
+          // 2. elapsedCPU.count() < 0: CPU时间异常
+          // 3. syncCPU.time_since_epoch().count() == 0: 首次运行，同步点未初始化
+          // 4. misaligned: CPU时间和仿真时间不同步
+          // 5. sim_->speed_changed: 用户改变了仿真速度设置
           if (elapsedSim < 0 || elapsedCPU.count() < 0 || syncCPU.time_since_epoch().count() == 0 || misaligned ||
               sim_->speed_changed) {
-            syncCPU = startCPU;
-            syncSim = d_->time;
-            sim_->speed_changed = false;
+            // 重新设置同步基准点
+            syncCPU = startCPU;        // 重置CPU时间基准
+            syncSim = d_->time;        // 重置仿真时间基准
+            sim_->speed_changed = false;  // 清除速度变化标志
 
-            // 执行仿真步进
+            // 执行单步仿真：计算动力学并推进时间
             mj_step(m_, d_);
             
             // 在仿真步进后施加推力（确保在UI系统清空外力之后）
+            // 这样可以确保用户施加的外力不会被UI系统覆盖
             ApplyPerturbationForces();
             
+            // 更新ROS接口状态，发送最新的仿真数据
             ros_interface_->UpdateSimState(m_, d_);
+            
+            // 检查仿真是否发散（数值不稳定）
             const char* message = Diverged(m_->opt.disableflags, d_);
             if (message) {
+              // 如果发散，停止仿真并记录错误信息
               sim_->run = 0;
               mju::strcpy_arr(sim_->load_error, message);
             } else {
+              // 仿真正常，标记为已步进
               stepped = true;
             }
           } else {
-            // 执行多个仿真步进以保持实时性
-            bool measured = false;
-            mjtNum prevSim = d_->time;
-            double refreshTime = kSimRefreshFraction / sim_->refresh_rate;
+            // 时间同步正常，执行多步仿真以保持实时性
+            // 当CPU时间领先于仿真时间时，需要执行多个仿真步进来追赶
+            bool measured = false;           // 是否已测量实际运行速度
+            mjtNum prevSim = d_->time;       // 记录当前仿真时间，用于检测时间倒退
+            double refreshTime = kSimRefreshFraction / sim_->refresh_rate;  // 计算刷新时间间隔
 
+            // 多步仿真循环条件：
+            // 1. 仿真时间落后于CPU时间：需要追赶
+            // 2. 单次循环时间不超过刷新间隔：避免阻塞UI
             while ((d_->time - syncSim) * slowdown < (mj::Simulate::Clock::now() - syncCPU).count() &&
                    mj::Simulate::Clock::now() - startCPU < refreshTime * 1s) {
+              
+              // 测量实际运行速度（仅测量一次）
               if (!measured && elapsedSim) {
+                // 计算实际运行速度：CPU时间 / 仿真时间
+                // 这个值用于显示实际性能，帮助用户了解仿真是否按预期速度运行
                 sim_->measured_slowdown = elapsedCPU.count() / elapsedSim;
                 measured = true;
               }
 
+              // 注入噪声（如果启用）：模拟传感器噪声、环境扰动等
               sim_->InjectNoise();
+              
+              // 执行仿真步进
               mj_step(m_, d_);
               
               // 在仿真步进后施加推力（确保在UI系统清空外力之后）
+              // 这样可以确保用户施加的外力不会被UI系统覆盖
               ApplyPerturbationForces();
               
+              // 更新ROS接口状态，发送最新的仿真数据
               ros_interface_->UpdateSimState(m_, d_);
+              
+              // 检查仿真是否发散（数值不稳定）
               const char* message = Diverged(m_->opt.disableflags, d_);
               if (message) {
+                // 如果发散，停止仿真并记录错误信息
                 sim_->run = 0;
                 mju::strcpy_arr(sim_->load_error, message);
               } else {
+                // 仿真正常，标记为已步进
                 stepped = true;
               }
 
+              // 检测时间倒退：如果当前仿真时间小于之前记录的时间
+              // 这通常表示发生了时间重置或异常情况，需要退出循环
               if (d_->time < prevSim) {
                 break;
               }
             }
           }
 
+          // 如果执行了仿真步进，将当前状态添加到历史记录中
+          // 历史记录用于时间回放、状态恢复等功能
           if (stepped) {
             sim_->AddToHistory();
           }
         } else {
-          // 仿真暂停时只进行前向计算
+          // 仿真暂停状态：不推进时间，只更新当前状态的计算
+          // 这确保用户交互（如拖拽、施加外力）和可视化能正常工作
           mj_forward(m_, d_);
-          sim_->speed_changed = true;
+          sim_->speed_changed = true;  // 标记速度已改变，下次运行时需要重新同步
         }
       }
     }
