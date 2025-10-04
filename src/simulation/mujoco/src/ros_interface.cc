@@ -36,6 +36,10 @@ const int kDofFloatingBase = 6;        // 浮动基座的自由度数量
 const int kNumFloatingBaseJoints = 7;  // 浮动基座的关节数量（四元数 + xyz位置）
 const int kDimQuaternion = 4;          // 四元数的维度
 
+// 全局标志位：控制CSV记录时机
+static bool contact_csv_enabled = false;      // 是否启用contact CSV记录
+static bool perturbation_csv_enabled = false;  // 是否启用perturbation CSV记录
+
 // 3D旋转变换函数
 /**
  * @brief 矩阵转置乘以向量：o = R^T * v
@@ -111,10 +115,12 @@ bool RosInterface::Initialize() {
 
   // 读取CSV保存参数
   node_->declare_parameter("save_contact_csv", false);
+  node_->declare_parameter("save_perturbation_csv", false);
   node_->declare_parameter("csv_file_path", "");
   node_->declare_parameter("csv_save_frequency", 1);  // 每帧都保存
   
   save_contact_csv_ = node_->get_parameter("save_contact_csv").as_bool();
+  save_perturbation_csv_ = node_->get_parameter("save_perturbation_csv").as_bool();
   csv_file_path_ = node_->get_parameter("csv_file_path").as_string();
   csv_save_frequency_ = node_->get_parameter("csv_save_frequency").as_int();
 
@@ -161,7 +167,7 @@ bool RosInterface::Initialize() {
     if (csv_file_.is_open()) {
       
       // 写入接触力CSV头部（移除推力相关列）
-      csv_file_ << "timestamp,contact_id,body1_name,body2_name,pos_x,pos_y,pos_z,robot_frame_x,robot_frame_y,robot_frame_z,force_x,force_y,force_z,force_magnitude,force_normal,torque_x,torque_y,torque_z,base_link_x,base_link_y,base_link_z,base_link_qw,base_link_qx,base_link_qy,base_link_qz,collision_link_x,collision_link_y,collision_link_z,collision_link_qw,collision_link_qx,collision_link_qy,collision_link_qz";
+      csv_file_ << "timestamp,contact_id,body1_name,body2_name,pos_x,pos_y,pos_z,robot_frame_x,robot_frame_y,robot_frame_z,force_x,force_y,force_z,force_magnitude,force_normal,torque_x,torque_y,torque_z,base_link_x,base_link_y,base_link_z,base_link_qw,base_link_qx,base_link_qy,base_link_qz,base_link_vel_x,base_link_vel_y,base_link_vel_z,base_link_angvel_x,base_link_angvel_y,base_link_angvel_z,collision_link_x,collision_link_y,collision_link_z,collision_link_qw,collision_link_qx,collision_link_qy,collision_link_qz";
       
       // 添加关节角度列名
       for (int i = 0; i < num_total_joints_; i++) {
@@ -460,6 +466,12 @@ void RosInterface::PublishContactForces(const mjModel* m, mjData* d) {
   std::unique_ptr<std::vector<mjtNum>> csv_base_link_quat_x;
   std::unique_ptr<std::vector<mjtNum>> csv_base_link_quat_y;
   std::unique_ptr<std::vector<mjtNum>> csv_base_link_quat_z;
+  std::unique_ptr<std::vector<mjtNum>> csv_base_link_vel_x;
+  std::unique_ptr<std::vector<mjtNum>> csv_base_link_vel_y;
+  std::unique_ptr<std::vector<mjtNum>> csv_base_link_vel_z;
+  std::unique_ptr<std::vector<mjtNum>> csv_base_link_angvel_x;
+  std::unique_ptr<std::vector<mjtNum>> csv_base_link_angvel_y;
+  std::unique_ptr<std::vector<mjtNum>> csv_base_link_angvel_z;
   std::unique_ptr<std::vector<mjtNum>> csv_robot_frame_pos_x;
   std::unique_ptr<std::vector<mjtNum>> csv_robot_frame_pos_y;
   std::unique_ptr<std::vector<mjtNum>> csv_robot_frame_pos_z;
@@ -496,6 +508,12 @@ void RosInterface::PublishContactForces(const mjModel* m, mjData* d) {
     csv_base_link_quat_x = std::make_unique<std::vector<mjtNum>>(ncon);
     csv_base_link_quat_y = std::make_unique<std::vector<mjtNum>>(ncon);
     csv_base_link_quat_z = std::make_unique<std::vector<mjtNum>>(ncon);
+    csv_base_link_vel_x = std::make_unique<std::vector<mjtNum>>(ncon);
+    csv_base_link_vel_y = std::make_unique<std::vector<mjtNum>>(ncon);
+    csv_base_link_vel_z = std::make_unique<std::vector<mjtNum>>(ncon);
+    csv_base_link_angvel_x = std::make_unique<std::vector<mjtNum>>(ncon);
+    csv_base_link_angvel_y = std::make_unique<std::vector<mjtNum>>(ncon);
+    csv_base_link_angvel_z = std::make_unique<std::vector<mjtNum>>(ncon);
     csv_robot_frame_pos_x = std::make_unique<std::vector<mjtNum>>(ncon);
     csv_robot_frame_pos_y = std::make_unique<std::vector<mjtNum>>(ncon);
     csv_robot_frame_pos_z = std::make_unique<std::vector<mjtNum>>(ncon);
@@ -771,6 +789,8 @@ void RosInterface::PublishContactForces(const mjModel* m, mjData* d) {
     // 获取base_link的pose（机器人基座的世界坐标位置）
     mjtNum base_link_pos[3] = {0, 0, 0};
     mjtNum base_link_quat[4] = {1, 0, 0, 0}; // 默认单位四元数
+    mjtNum base_link_vel[3] = {0, 0, 0};    // 线速度
+    mjtNum base_link_angvel[3] = {0, 0, 0};  // 角速度
     if (base_link_id >= 0) {
       base_link_pos[0] = d->xpos[base_link_id*3];
       base_link_pos[1] = d->xpos[base_link_id*3+1];
@@ -779,11 +799,23 @@ void RosInterface::PublishContactForces(const mjModel* m, mjData* d) {
       base_link_quat[1] = d->xquat[base_link_id*4+1];
       base_link_quat[2] = d->xquat[base_link_id*4+2];
       base_link_quat[3] = d->xquat[base_link_id*4+3];
+      
+      // 获取base_link的速度（线速度和角速度）
+      // 对于浮动基座，速度存储在d->cvel中
+      // cvel格式：[angvel_x, angvel_y, angvel_z, vel_x, vel_y, vel_z]
+      base_link_angvel[0] = d->cvel[base_link_id*6 + 0];  // 角速度x
+      base_link_angvel[1] = d->cvel[base_link_id*6 + 1];  // 角速度y
+      base_link_angvel[2] = d->cvel[base_link_id*6 + 2];  // 角速度z
+      base_link_vel[0] = d->cvel[base_link_id*6 + 3];      // 线速度x
+      base_link_vel[1] = d->cvel[base_link_id*6 + 4];      // 线速度y
+      base_link_vel[2] = d->cvel[base_link_id*6 + 5];     // 线速度z
     }
     
     // 存储base_link信息到CSV变量
     if (save_contact_csv_ && csv_base_link_pos_x && csv_base_link_pos_y && csv_base_link_pos_z &&
-        csv_base_link_quat_w && csv_base_link_quat_x && csv_base_link_quat_y && csv_base_link_quat_z) {
+        csv_base_link_quat_w && csv_base_link_quat_x && csv_base_link_quat_y && csv_base_link_quat_z &&
+        csv_base_link_vel_x && csv_base_link_vel_y && csv_base_link_vel_z &&
+        csv_base_link_angvel_x && csv_base_link_angvel_y && csv_base_link_angvel_z) {
       (*csv_base_link_pos_x)[i] = base_link_pos[0];
       (*csv_base_link_pos_y)[i] = base_link_pos[1];
       (*csv_base_link_pos_z)[i] = base_link_pos[2];
@@ -791,6 +823,12 @@ void RosInterface::PublishContactForces(const mjModel* m, mjData* d) {
       (*csv_base_link_quat_x)[i] = base_link_quat[1];
       (*csv_base_link_quat_y)[i] = base_link_quat[2];
       (*csv_base_link_quat_z)[i] = base_link_quat[3];
+      (*csv_base_link_vel_x)[i] = base_link_vel[0];
+      (*csv_base_link_vel_y)[i] = base_link_vel[1];
+      (*csv_base_link_vel_z)[i] = base_link_vel[2];
+      (*csv_base_link_angvel_x)[i] = base_link_angvel[0];
+      (*csv_base_link_angvel_y)[i] = base_link_angvel[1];
+      (*csv_base_link_angvel_z)[i] = base_link_angvel[2];
     }
 
     // 找到机器人body（非world的几何体）
@@ -1239,13 +1277,12 @@ void RosInterface::PublishContactForces(const mjModel* m, mjData* d) {
 
   // ==================== 第五部分：保存到CSV文件 ====================
   if (save_contact_csv_ && csv_file_.is_open()) {
-    // 延迟3秒后重置并开始记录CSV的逻辑
-    static bool csv_recording_started = false;
+    // 使用全局标志位控制CSV记录
     static double csv_start_time = -1.0;
     static bool mujoco_reset_done = false;
     
     // 如果还没有开始记录，检查是否已经过了3秒
-    if (!csv_recording_started) {
+    if (!contact_csv_enabled) {
       if (csv_start_time < 0) {
         csv_start_time = d->time;  // 记录开始时间
         RCLCPP_INFO(node_->get_logger(), "CSV记录延迟开始，等待3秒后重置MuJoCo...");
@@ -1286,7 +1323,9 @@ void RosInterface::PublishContactForces(const mjModel* m, mjData* d) {
           }
           
           mujoco_reset_done = true;
-          csv_recording_started = true;
+          // 重置后启用CSV记录
+          contact_csv_enabled = true;
+          perturbation_csv_enabled = true;
         }
       } else {
         // 还在延迟期间，不记录CSV
@@ -1298,8 +1337,8 @@ void RosInterface::PublishContactForces(const mjModel* m, mjData* d) {
     static int frame_counter = 0;
     frame_counter++;
     
-    // 根据配置的频率决定是否保存
-    if (frame_counter % csv_save_frequency_ == 0) {
+    // 根据配置的频率决定是否保存，并且检查标志位
+    if (contact_csv_enabled && frame_counter % csv_save_frequency_ == 0) {
       std::lock_guard<std::mutex> lock(csv_mutex_);
       
       // 使用MuJoCo仿真时间而不是ROS时间
@@ -1320,6 +1359,8 @@ void RosInterface::PublishContactForces(const mjModel* m, mjData* d) {
             csv_world_torques_x && csv_world_torques_y && csv_world_torques_z &&
             csv_base_link_pos_x && csv_base_link_pos_y && csv_base_link_pos_z &&
             csv_base_link_quat_w && csv_base_link_quat_x && csv_base_link_quat_y && csv_base_link_quat_z &&
+            csv_base_link_vel_x && csv_base_link_vel_y && csv_base_link_vel_z &&
+            csv_base_link_angvel_x && csv_base_link_angvel_y && csv_base_link_angvel_z &&
             csv_collision_link_pos_x && csv_collision_link_pos_y && csv_collision_link_pos_z &&
             csv_collision_link_quat_w && csv_collision_link_quat_x && csv_collision_link_quat_y && csv_collision_link_quat_z) {
           csv_file_ << std::fixed << std::setprecision(6)
@@ -1348,6 +1389,12 @@ void RosInterface::PublishContactForces(const mjModel* m, mjData* d) {
                     << (*csv_base_link_quat_x)[i] << ","
                     << (*csv_base_link_quat_y)[i] << ","
                     << (*csv_base_link_quat_z)[i] << ","
+                    << (*csv_base_link_vel_x)[i] << ","      // base link线速度x
+                    << (*csv_base_link_vel_y)[i] << ","      // base link线速度y
+                    << (*csv_base_link_vel_z)[i] << ","      // base link线速度z
+                    << (*csv_base_link_angvel_x)[i] << ","   // base link角速度x
+                    << (*csv_base_link_angvel_y)[i] << ","   // base link角速度y
+                    << (*csv_base_link_angvel_z)[i] << ","   // base link角速度z
                     << (*csv_collision_link_pos_x)[i] << ","    // 碰撞link的世界坐标位置
                     << (*csv_collision_link_pos_y)[i] << ","
                     << (*csv_collision_link_pos_z)[i] << ","
@@ -1372,49 +1419,20 @@ void RosInterface::PublishContactForces(const mjModel* m, mjData* d) {
   }
 
   // ==================== 推力数据单独保存 ====================
-  if (save_contact_csv_ && perturbation_csv_file_.is_open()) {
-    // 使用与contact CSV相同的延迟逻辑，确保推力CSV也在重置后开始记录
-    static bool perturbation_csv_recording_started = false;
-    static double perturbation_csv_start_time = -1.0;
-    static bool perturbation_mujoco_reset_done = false;
+  if (save_perturbation_csv_ && perturbation_csv_file_.is_open()) {
+    // 使用全局标志位控制perturbation CSV记录
     
-    // 如果还没有开始记录，检查是否已经过了3秒
-    if (!perturbation_csv_recording_started) {
-      if (perturbation_csv_start_time < 0) {
-        perturbation_csv_start_time = d->time;  // 记录开始时间
-        RCLCPP_INFO(node_->get_logger(), "推力CSV记录延迟开始，等待3秒后重置MuJoCo...");
-      }
-      
-      // 检查是否已经过了3秒
-      if (d->time - perturbation_csv_start_time >= 3.0) {
-        if (!perturbation_mujoco_reset_done) {
-          // 重置auto_sampling状态，让推力重新施加
-          auto& sim_manager = SimManager::GetInstance();
-          sim_manager.ResetAutoSampling();
-          RCLCPP_INFO(node_->get_logger(), "已重置auto_sampling状态，推力将在auto_delay时间后重新施加");
-          perturbation_mujoco_reset_done = true;
-        }
-        perturbation_csv_recording_started = true;
-        RCLCPP_INFO(node_->get_logger(), "推力CSV记录开始，时间: %.3f", d->time);
-      } else {
-        // 在3秒延迟期间，检查是否已经进行了MuJoCo Reset
-        // 如果已经Reset，立即开始记录推力CSV
-        if (perturbation_mujoco_reset_done) {
-          perturbation_csv_recording_started = true;
-          RCLCPP_INFO(node_->get_logger(), "MuJoCo已重置，开始推力CSV记录，时间: %.3f", d->time);
-        } else {
-          // 还没有Reset，不记录推力CSV
-          return;
-        }
-      }
+    // 检查是否启用perturbation CSV记录
+    if (!perturbation_csv_enabled) {
+      return;
     }
     
     // 使用帧计数器控制保存频率
     static int perturbation_frame_counter = 0;
     perturbation_frame_counter++;
     
-    // 根据配置的频率决定是否保存
-    if (perturbation_frame_counter % csv_save_frequency_ == 0) {
+    // 根据配置的频率决定是否保存，并且检查标志位
+    if (perturbation_csv_enabled && perturbation_frame_counter % csv_save_frequency_ == 0) {
       std::lock_guard<std::mutex> lock(perturbation_csv_mutex_);
       
       // 使用MuJoCo仿真时间
@@ -1438,6 +1456,10 @@ void RosInterface::PublishContactForces(const mjModel* m, mjData* d) {
       
       // 为每个活跃的推力写入一行数据
       for (const auto& pert : active_perturbations) {
+        // 只记录真正活跃的推力
+        if (!pert.is_active) {
+          continue;
+        }
         // 计算推力在标准姿态下的位置
         mjtNum perturbation_std_pose[3] = {0, 0, 0};
         int perturbation_body_id = mj_name2id(m, mjOBJ_BODY, pert.body_name.c_str());

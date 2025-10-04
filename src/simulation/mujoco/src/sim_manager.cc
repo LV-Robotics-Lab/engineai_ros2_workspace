@@ -434,14 +434,13 @@ void SimManager::ApplyPerturbationForces() {
     }
   }
   
-  // 检查并清理过期的干扰力（但在CSV记录期间保留推力数据）
+  // 检查并清理过期的干扰力
   auto it = active_perturbations_.begin();
   while (it != active_perturbations_.end()) {
     if (d_->time - it->start_time > it->duration) {
       std::cout << "干扰力ID " << it->id << " 自动停止" << std::endl;
-      // 标记为非活跃，但不删除，以便CSV记录
-      it->is_active = false;
-      ++it;
+      // 从列表中删除过期的推力，避免CSV记录"幽灵"推力
+      it = active_perturbations_.erase(it);
     } else {
       ++it;
     }
@@ -542,6 +541,9 @@ void SimManager::ResetAutoSampling() {
   if (m_ && d_) {
     mju_zero(d_->xfrc_applied, 6 * m_->nbody);
   }
+  
+  // 清除所有推力记录，避免CSV记录"幽灵"推力
+  active_perturbations_.clear();
   
   std::cout << "Auto-sampling状态已重置，推力将在auto_delay时间后重新施加" << std::endl;
 }

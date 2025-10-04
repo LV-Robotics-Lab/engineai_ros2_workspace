@@ -109,7 +109,7 @@ cd /home/wang22/engineai/engineai_ros2_workspace && conda activate engineai_ros2
 ./scripts/build_nodes.sh sim    # or colcon build --packages-select mujoco_simulator , or colcon build
 source install/setup.bash
 # ros2 launch mujoco_simulator mujoco_simulator.launch.py
-ros2 launch mujoco_simulator mujoco_simulator.launch.py export_contact:=true save_contact_csv:=true
+ros2 launch mujoco_simulator mujoco_simulator.launch.py export_contact:=true save_contact_csv:=true save_perturbation_csv:=true 
 
 # # 推倒采样仿真器 - 支持交互式干扰力控制
 # # 基本启动

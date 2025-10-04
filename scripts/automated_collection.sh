@@ -4,7 +4,7 @@
 # 4000次实验，每次启动RL+MuJoCo、自动推力、等10秒、关闭
 
 TOTAL_EXPERIMENTS=4000
-EXPERIMENT_DURATION=10
+EXPERIMENT_DURATION=15
 DIRECTIONS=("forward" "backward" "left" "right")
 
 echo "=========================================="
@@ -92,6 +92,7 @@ for ((i=1; i<=TOTAL_EXPERIMENTS; i++)); do
     ros2 launch mujoco_simulator mujoco_simulator.launch.py \
         export_contact:=true \
         save_contact_csv:=true \
+        save_perturbation_csv:=true \
         csv_file_path:="$EXPERIMENT_FOLDER" &
     MUJOCO_PID=$!
 

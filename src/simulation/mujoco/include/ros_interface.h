@@ -95,6 +95,7 @@ class RosInterface {
 
   // CSV logging parameters
   bool save_contact_csv_ = false;
+  bool save_perturbation_csv_ = false;
   std::string csv_file_path_;
   std::ofstream csv_file_;
   std::mutex csv_mutex_;

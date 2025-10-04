@@ -37,10 +37,10 @@ perturbation:
   default_torque_magnitude: 5.0     # 默认扭矩大小（牛·米）
   force_step: 20.0                  # 推力调整步长（牛顿），用于+/-键调整推力大小
   torque_step: 5.0                  # 扭矩调整步长（牛·米），用于+/-键调整推力大小
-  force_duration: 1.0               # 推力持续时间（秒），按下键盘后推力持续的时间
+  force_duration: 0.5               # 推力持续时间（秒），按下键盘后推力持续的时间
   auto_sampling: true
-  auto_direction: "forward"        # 自动采样时的推力方向（forward/backward/left/right）
-  auto_delay: 1.0                   # 自动采样时等待时间（秒）
+  auto_direction: "forward"         # 施加推力时的推力方向（forward/backward/left/right）
+  auto_delay: 1.0                   # 施加推力等待时间（秒）
 
 # 传感器配置 - 定义传感器数据的话题
 sensor:
