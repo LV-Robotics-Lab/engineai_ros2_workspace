@@ -38,8 +38,8 @@
                 
                 <!-- 头部碰撞几何体 - 使用mesh模型进行精确碰撞检测 -->
                 <default class="collision_head">
-                    <geom type="mesh" mesh="LINK_HEAD_YAW" rgba="0.804 0.361 0.031 0.5"/>
-                    <!-- <geom type="sphere" size="0.09" pos="0.01 0.0 0.11" rgba="0.804 0.361 0.031 0.5"/> -->
+                    <!-- <geom type="mesh" mesh="LINK_HEAD_YAW" rgba="0.804 0.361 0.031 0.5"/> -->
+                    <geom type="sphere" size="0.09" pos="0.01 0.0 0.11" rgba="0.804 0.361 0.031 0.5"/>
                 </default>
 
                 <!-- 基座上部碰撞几何体 - 使用mesh模型进行精确碰撞检测 -->
@@ -54,7 +54,7 @@
 
                 <!-- 左脚碰撞几何体 - 使用mesh模型进行精确碰撞检测 -->
                 <default class="collision_left_foot">
-                    <!-- <geom type="mesh" mesh="LINK_ANKLE_ROLL_L" rgba="0.804 0.361 0.031 0.5"/> -->
+                    <!-- <geom type="mesh" mesh="LINK_ANKLE_ROLL_L_simplified" rgba="0.804 0.361 0.031 0.5"/> -->
                     <geom type="box" size="0.102292353 0.053555 0.01" pos="0.0170 0.00166 -0.03631" rgba="0.804 0.361 0.031 0.5"/>
                 </default>
 
@@ -65,7 +65,7 @@
 
                 <!-- 右脚碰撞几何体 - 使用mesh模型进行精确碰撞检测 -->
                 <default class="collision_right_foot">
-                    <!-- <geom type="mesh" mesh="LINK_ANKLE_ROLL_R" rgba="0.804 0.361 0.031 0.5"/> -->
+                    <!-- <geom type="mesh" mesh="LINK_ANKLE_ROLL_R_simplified" rgba="0.804 0.361 0.031 0.5"/> -->
                     <geom type="box" size="0.102292353 0.053555 0.01" pos="0.0170 -0.00166 -0.03631" rgba="0.804 0.361 0.031 0.5"/>
                 </default>
 
@@ -137,8 +137,8 @@
 
                 <!-- 左踝关节俯仰轴碰撞几何体 - 使用mesh模型进行精确碰撞检测 -->
                 <default class="collision_ankle_pitch_left">
-                    <!-- <geom type="mesh" mesh="LINK_ANKLE_PITCH_L" rgba="0.804 0.361 0.031 0.5"/> -->
-                    <geom type="sphere" size="0.001" pos="0.000 0.00 -0.0" rgba="0.804 0.361 0.031 0.5"/>
+                    <geom type="mesh" mesh="LINK_ANKLE_PITCH_L" rgba="0.804 0.361 0.031 0.5" contype="2"/>
+                    <!-- <geom type="sphere" size="0.001" pos="0.000 0.00 -0.0" rgba="0.804 0.361 0.031 0.5"/> -->
                 </default>
 
                 <!-- 右髋关节横滚轴碰撞几何体 - 使用mesh模型进行精确碰撞检测 -->
@@ -153,8 +153,8 @@
 
                 <!-- 右踝关节俯仰轴碰撞几何体 - 使用mesh模型进行精确碰撞检测 -->
                 <default class="collision_ankle_pitch_right">
-                    <!-- <geom type="mesh" mesh="LINK_ANKLE_PITCH_R" rgba="0.804 0.361 0.031 0.5"/> -->
-                    <geom type="sphere" size="0.001" pos="0.000 0.00 -0.0" rgba="0.804 0.361 0.031 0.5"/>
+                    <geom type="mesh" mesh="LINK_ANKLE_PITCH_R" rgba="0.804 0.361 0.031 0.5" contype="2"/>
+                    <!-- <geom type="sphere" size="0.001" pos="0.000 0.00 -0.0" rgba="0.804 0.361 0.031 0.5"/> -->
                 </default>
 
                 <!-- 躯干偏航轴碰撞几何体 - 使用mesh模型进行精确碰撞检测 -->

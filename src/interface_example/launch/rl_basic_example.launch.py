@@ -14,10 +14,15 @@ def generate_launch_description():
     # Build config file path using os.path.join
     config_dir = os.path.join(package_dir, 'config',
                               product, 'rl_basic', 'basic')
-    print(config_dir)
-    # Ensure config directory exists
+    config_file = os.path.join(config_dir, 'default.yaml')
+    print(f"Config directory: {config_dir}")
+    print(f"Config file: {config_file}")
+    
+    # Ensure config directory and file exist
     if not os.path.exists(config_dir):
         raise FileNotFoundError(f"Config directory not found: {config_dir}")
+    if not os.path.exists(config_file):
+        raise FileNotFoundError(f"Config file not found: {config_file}")
 
     # Append dynamic library path
     ENGINEAI_ROBOTICS_THIRD_PARTY = "/opt/engineai_robotics_third_party"
@@ -29,7 +34,7 @@ def generate_launch_description():
         package='interface_example',
         executable='rl_basic_example',
         name='rl_basic_example',
-        arguments=[config_dir],
+        arguments=[config_file],
         output='screen',
         emulate_tty=True,
     )
