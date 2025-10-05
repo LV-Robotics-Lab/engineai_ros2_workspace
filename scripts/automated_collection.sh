@@ -4,7 +4,7 @@
 # 4000次实验，每次启动RL+MuJoCo、自动推力、等10秒、关闭
 
 TOTAL_EXPERIMENTS=4000
-EXPERIMENT_DURATION=15
+EXPERIMENT_DURATION=20
 DIRECTIONS=("forward" "backward" "left" "right")
 
 echo "=========================================="

@@ -40,7 +40,7 @@ perturbation:
   force_duration: 0.5               # 推力持续时间（秒），按下键盘后推力持续的时间
   auto_sampling: true
   auto_direction: "forward"         # 施加推力时的推力方向（forward/backward/left/right）
-  auto_delay: 1.0                   # 施加推力等待时间（秒）
+  auto_delay: 2.0                   # 施加推力等待时间（秒）
 
 # 传感器配置 - 定义传感器数据的话题
 sensor:

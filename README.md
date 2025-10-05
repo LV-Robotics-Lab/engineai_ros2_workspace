@@ -107,6 +107,7 @@ Joystick Control is the simplest mode with which the user can enjoy the default 
 cd /home/wang22/engineai/engineai_ros2_workspace && conda activate engineai_ros2
 ./src/third_party/install.sh
 ./scripts/build_nodes.sh sim    # or colcon build --packages-select mujoco_simulator , or colcon build
+./scripts/build_nodes_4090.sh sim
 source install/setup.bash
 # ros2 launch mujoco_simulator mujoco_simulator.launch.py
 ros2 launch mujoco_simulator mujoco_simulator.launch.py export_contact:=true save_contact_csv:=true save_perturbation_csv:=true 
