@@ -5,12 +5,14 @@
     <mesh name="LINK_HIP_YAW_L" file="../meshes/LINK_HIP_YAW_L.STL"/>
     <mesh name="LINK_HIP_PITCH_L" file="../meshes/LINK_HIP_PITCH_L.STL"/>
     <mesh name="LINK_KNEE_PITCH_L" file="../meshes/LINK_KNEE_PITCH_L.STL"/>
+    <mesh name="LINK_KNEE_PITCH_L_VISUAL" file="../meshes/LINK_KNEE_PITCH_L_VISUAL.STL"/>
     <mesh name="LINK_ANKLE_PITCH_L" file="../meshes/LINK_ANKLE_PITCH_L.STL"/>
     <mesh name="LINK_ANKLE_ROLL_L" file="../meshes/LINK_ANKLE_ROLL_L_simplified.STL"/>
     <mesh name="LINK_HIP_ROLL_R" file="../meshes/LINK_HIP_ROLL_R.STL"/>
     <mesh name="LINK_HIP_YAW_R" file="../meshes/LINK_HIP_YAW_R.STL"/>
     <mesh name="LINK_HIP_PITCH_R" file="../meshes/LINK_HIP_PITCH_R.STL"/>
     <mesh name="LINK_KNEE_PITCH_R" file="../meshes/LINK_KNEE_PITCH_R.STL"/>
+    <mesh name="LINK_KNEE_PITCH_R_VISUAL" file="../meshes/LINK_KNEE_PITCH_R_VISUAL.STL"/>
     <mesh name="LINK_ANKLE_PITCH_R" file="../meshes/LINK_ANKLE_PITCH_R.STL"/>
     <mesh name="LINK_ANKLE_ROLL_R" file="../meshes/LINK_ANKLE_ROLL_R_simplified.STL"/>
 
