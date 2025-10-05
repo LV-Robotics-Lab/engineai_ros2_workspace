@@ -153,7 +153,8 @@ conda activate engineai_ros2
 python3 scripts/analyze_contact_forces.py logs/contact_data_20250913_181435.csv
 # plot contact point with force
 # 使用机器人坐标系（默认）， 后面的参数 1000 是显示点数量，1、2是 过滤掉足部的点
-python3 scripts/mujoco_xml_contact_display.py logs/forward-200.0N-20251005_162754/contact_data_20251005_162820.csv src/simulation/mujoco/assets/resource/pm_v2_mesh.xml robot_frame 1000 true 1,2
+pip install mujoco==3.3.6
+python3 scripts/mujoco_xml_contact_display.py logs/forward-200.0N-20251005_162754/contact_data_20251005_162820.csv src/simulation/mujoco/assets/resource/pm_v2_mesh.xml robot_frame 1500 true 1,2
 
 # 使用世界坐标系
 python3 scripts/mujoco_xml_contact_display.py logs/contact_data_20250831_125541.csv src/simulation/mujoco/assets/resource/pm_v2_mesh.xml world
