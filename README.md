@@ -103,7 +103,7 @@ Joystick Control is the simplest mode with which the user can enjoy the default 
 #### Simulator
 ```bash
 # in host
-# terminal 1
+# terminal 1 开mujoco
 cd /home/wang22/engineai/engineai_ros2_workspace && conda activate engineai_ros2
 ./src/third_party/install.sh
 ./scripts/build_nodes.sh sim    # or colcon build --packages-select mujoco_simulator , or colcon build
@@ -115,6 +115,7 @@ ros2 launch mujoco_simulator mujoco_simulator.launch.py export_contact:=true sav
 # # 基本启动
 # ros2 launch mujoco_simulator perturbation_simulator.launch.py save_contact_csv:=true
 
+# terminal 2 开RL
 ## XZL policy from engineai, 先开RL控制器，再开mujoco
 ros2 launch interface_example rl_basic_example_XZL.launch.py
 ## 通过修改 pm_v2.yaml 里 perturbation 组参数来改变推力大小；
@@ -139,11 +140,11 @@ ros2 launch interface_example rl_basic_example_XZL.launch.py
 # Shift + +/-: 调整干扰力大小
 # Shift + ,/.: 调整干扰力持续时间
 
-# 自动采集碰撞
+# terminal 1&2 自动采集碰撞
 chmod +x /home/wang22/engineai/engineai_ros2_workspace/scripts/automated_collection.sh
 ./scripts/automated_collection.sh
 
-# terminal 2
+# terminal 3
 # choose mesh or geometry: in src/simulation/mujoco/assets/config/pm_v2.yaml
 # change "use_simplified_geometry: false"
 cd /home/wang22/engineai/engineai_ros2_workspace
@@ -151,8 +152,8 @@ conda activate engineai_ros2
 # plot contact force max
 python3 scripts/analyze_contact_forces.py logs/contact_data_20250913_181435.csv
 # plot contact point with force
-# 使用机器人坐标系（默认）
-python3 scripts/mujoco_xml_contact_display.py logs/forward-200.0N-20251002_142946/contact_data_20251002_142950.csv src/simulation/mujoco/assets/resource/pm_v2_mesh.xml
+# 使用机器人坐标系（默认）， 后面的参数 1000 是显示点数量，1、2是 过滤掉足部的点
+python3 scripts/mujoco_xml_contact_display.py logs/forward-200.0N-20251005_162754/contact_data_20251005_162820.csv src/simulation/mujoco/assets/resource/pm_v2_mesh.xml robot_frame 1000 true 1,2
 
 # 使用世界坐标系
 python3 scripts/mujoco_xml_contact_display.py logs/contact_data_20250831_125541.csv src/simulation/mujoco/assets/resource/pm_v2_mesh.xml world
@@ -163,13 +164,13 @@ python3 scripts/mujoco_xml_contact_display.py logs/contact_data_20250831_125541.
 # 参数3: 可视化类型 (sphere|cylinder) - 可选，默认为cylinder
 # 参数4: 坐标系统 (world|urdf) - 可选，默认为urdf
 
-# terminal 3
+# terminal 4
 # 小球撞地测试
 conda activate engineai_ros2
 python /home/wang22/engineai/engineai_ros2_workspace/scripts/FreeBallTest/iron_ball_drop_bySensor.py
 
 
-# terminal 4
+# terminal 5
 # 根据urdf和xml里的初始位置，把机器人多link的mesh合成一个整体mesh
 # main中，urdf提供机器人link父子关系，xml提供初始位姿，
 chmod +x ./scripts/MeshCombine/install_dependencies.sh

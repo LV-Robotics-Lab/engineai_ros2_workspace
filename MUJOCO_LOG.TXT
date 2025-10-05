@@ -7,3 +7,9 @@ WARNING: Nan, Inf or huge value in QACC at DOF 5. The simulation is unstable. Ti
 Sat Aug 30 11:23:48 2025
 ERROR: mjv_updateCamera: unknown camera type
 
+Sun Oct  5 16:23:18 2025
+WARNING: Insufficient arena memory for the number of constraints generated. Increase arena memory allocation above 15M bytes. Time = 0.0000.
+
+Sun Oct  5 16:56:29 2025
+WARNING: Insufficient arena memory for the number of constraints generated. Increase arena memory allocation above 15M bytes. Time = 0.0000.
+

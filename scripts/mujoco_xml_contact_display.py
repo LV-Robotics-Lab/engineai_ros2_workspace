@@ -9,15 +9,18 @@ import sys
 import time
 import numpy as np
 import pandas as pd
-import mujoco as mj
 import tempfile
 import xml.etree.ElementTree as ET
 import mediapy as media
 from datetime import datetime
 
-# Set MuJoCo memory limits to avoid stack overflow
-os.environ['MUJOCO_GL'] = 'egl'  # Use EGL for better memory management
-os.environ['MUJOCO_STACK_SIZE'] = '8388608'  # 8MB stack size (reduced from default)
+# Set MuJoCo memory limits to avoid stack overflow - MUST be set before importing mujoco
+# os.environ['MUJOCO_GL'] = 'egl'  # Use EGL for better memory management
+os.environ['MUJOCO_STACK_SIZE'] = '1073741824'  # 1GB stack size (increased for large models with many spheres)
+os.environ['MUJOCO_ARENA_SIZE'] = '8589934592'  # 8GB arena size for constraints (doubled for more spheres)
+
+# Import mujoco AFTER setting environment variables
+import mujoco as mj
 
 def analyze_csv_data(df):
     """Analyze CSV data and print statistics"""
@@ -79,7 +82,132 @@ def analyze_csv_data(df):
     
     print("=" * 30)
 
-def create_contact_force_visualization(df, x_col, y_col, z_col, max_spheres_override=None):
+def show_available_joints(df):
+    """Show available joint/body names in the data"""
+    print("\n=== Available Joint/Body Names ===")
+    
+    # Get unique body names
+    body1_names = df['body1_name'].unique() if 'body1_name' in df.columns else []
+    body2_names = df['body2_name'].unique() if 'body2_name' in df.columns else []
+    all_bodies = sorted(set(list(body1_names) + list(body2_names)))
+    
+    print(f"Found {len(all_bodies)} unique body/joint names:")
+    for i, body_name in enumerate(all_bodies, 1):
+        print(f"  {i:2d}. {body_name}")
+    
+    return all_bodies
+
+def parse_joint_filter(joint_filter_str, available_bodies):
+    """Parse joint filter string from command line"""
+    if not joint_filter_str:
+        return None
+    
+    try:
+        if joint_filter_str.lower() == 'all':
+            return available_bodies
+        
+        if joint_filter_str.lower() == 'none':
+            return []
+        
+        # Parse user input
+        selected_indices = []
+        for part in joint_filter_str.split(','):
+            part = part.strip()
+            if '-' in part:
+                # Handle ranges like "1-5"
+                start, end = map(int, part.split('-'))
+                selected_indices.extend(range(start, end + 1))
+            else:
+                selected_indices.append(int(part))
+        
+        # Convert indices to body names
+        selected_bodies = []
+        for idx in selected_indices:
+            if 1 <= idx <= len(available_bodies):
+                selected_bodies.append(available_bodies[idx - 1])
+            else:
+                print(f"Warning: Index {idx} is out of range (1-{len(available_bodies)})")
+        
+        if selected_bodies:
+            print(f"Command line filter: Selected {len(selected_bodies)} joints to exclude:")
+            for body in selected_bodies:
+                print(f"  - {body}")
+            return selected_bodies
+        else:
+            print("No valid joints selected from command line filter.")
+            return None
+            
+    except ValueError:
+        print("Error: Invalid joint filter format. Use numbers separated by commas, or 'all'/'none'")
+        return None
+
+def get_user_joint_selection(available_bodies, joint_filter_str=None):
+    """Get user selection for which joints to filter out"""
+    # If joint filter is provided via command line, use it
+    if joint_filter_str:
+        parsed_filter = parse_joint_filter(joint_filter_str, available_bodies)
+        if parsed_filter is not None:
+            return parsed_filter
+        # If parsing failed, fall back to interactive mode
+        print("Falling back to interactive mode...")
+    
+    print("\n=== Joint Filter Selection ===")
+    print("You can choose to filter out specific joints/bodies from the visualization.")
+    print("Enter the numbers of joints you want to EXCLUDE (separated by commas), or press Enter to skip:")
+    print("Example: 1,3,5,7 (to exclude joints 1, 3, 5, and 7)")
+    print("Example: 1-5 (to exclude joints 1 through 5)")
+    print("Example: all (to exclude all joints)")
+    print("Example: none (to include all joints)")
+    print("Press Enter to use default foot filtering only")
+    
+    while True:
+        try:
+            user_input = input("Your selection: ").strip()
+            
+            if not user_input:
+                # Default: only filter foot contacts
+                return ['LINK_ANKLE_ROLL_L', 'LINK_ANKLE_ROLL_R', 'LINK_ANKLE_PITCH_L', 'LINK_ANKLE_PITCH_R', 'LINK_FOOT_L', 'LINK_FOOT_R']
+            
+            if user_input.lower() == 'all':
+                return available_bodies
+            
+            if user_input.lower() == 'none':
+                return []
+            
+            # Parse user input
+            selected_indices = []
+            for part in user_input.split(','):
+                part = part.strip()
+                if '-' in part:
+                    # Handle ranges like "1-5"
+                    start, end = map(int, part.split('-'))
+                    selected_indices.extend(range(start, end + 1))
+                else:
+                    selected_indices.append(int(part))
+            
+            # Convert indices to body names
+            selected_bodies = []
+            for idx in selected_indices:
+                if 1 <= idx <= len(available_bodies):
+                    selected_bodies.append(available_bodies[idx - 1])
+                else:
+                    print(f"Warning: Index {idx} is out of range (1-{len(available_bodies)})")
+            
+            if selected_bodies:
+                print(f"Selected {len(selected_bodies)} joints to exclude:")
+                for body in selected_bodies:
+                    print(f"  - {body}")
+                return selected_bodies
+            else:
+                print("No valid joints selected. Please try again.")
+                
+        except ValueError:
+            print("Invalid input. Please enter numbers separated by commas, or 'all'/'none'")
+        except KeyboardInterrupt:
+            print("\nOperation cancelled.")
+            return ['LINK_ANKLE_ROLL_L', 'LINK_ANKLE_ROLL_R', 'LINK_ANKLE_PITCH_L', 'LINK_ANKLE_PITCH_R', 'LINK_FOOT_L', 'LINK_FOOT_R']
+
+def create_contact_force_visualization(df, x_col, y_col, z_col, max_spheres_override=None, filter_foot_contacts=True, custom_filter_bodies=None):
     """Create contact force visualization data with sphere sizes based on force magnitude"""
     print("Processing contact force data for sphere visualization...")
     
@@ -93,6 +221,39 @@ def create_contact_force_visualization(df, x_col, y_col, z_col, max_spheres_over
     
     df_valid = df[valid_mask].copy()
     print(f"Found {len(df_valid)} valid contact points")
+    
+    # Filter out contacts based on user selection
+    if custom_filter_bodies is not None:
+        # Use custom filter bodies
+        filter_bodies = custom_filter_bodies
+        filter_name = "custom joints"
+    elif filter_foot_contacts:
+        # Use default foot filter
+        filter_bodies = [
+            'LINK_ANKLE_ROLL_L', 'LINK_ANKLE_ROLL_R',
+            'LINK_ANKLE_PITCH_L', 'LINK_ANKLE_PITCH_R',
+            'LINK_FOOT_L', 'LINK_FOOT_R'
+        ]
+        filter_name = "foot contacts"
+    else:
+        filter_bodies = []
+        filter_name = "no filtering"
+    
+    if filter_bodies:
+        before_filter = len(df_valid)
+        contact_mask = (
+            df_valid['body1_name'].isin(filter_bodies) | 
+            df_valid['body2_name'].isin(filter_bodies)
+        )
+        df_valid = df_valid[~contact_mask]
+        after_filter = len(df_valid)
+        
+        print(f"Filtered out {before_filter - after_filter} {filter_name}")
+        print(f"Remaining contact points: {after_filter}")
+        
+        if after_filter == 0:
+            print(f"Warning: All contacts were {filter_name} and have been filtered out")
+            return []
     
     # Group by position to aggregate forces at the same location
     position_groups = {}
@@ -145,14 +306,17 @@ def create_contact_force_visualization(df, x_col, y_col, z_col, max_spheres_over
             contact_forces = contact_forces[:max_spheres]
     else:
         # Smart limit based on data size - balance between visualization quality and memory usage
-        if len(contact_forces) > 5000:
-            max_spheres = 1000  # Large datasets: show top 3000 points
+        if len(contact_forces) > 10000:
+            max_spheres = 2000  # Very large datasets: show top 2000 points (increased memory allocation)
+            print(f"Very large dataset detected ({len(contact_forces)} points), limiting to top {max_spheres} highest force points")
+        elif len(contact_forces) > 5000:
+            max_spheres = 1000  # Large datasets: show top 1000 points (increased from 500)
             print(f"Large dataset detected ({len(contact_forces)} points), limiting to top {max_spheres} highest force points")
         elif len(contact_forces) > 2000:
-            max_spheres = 500  # Medium datasets: show top 1500 points
+            max_spheres = 500   # Medium datasets: show top 500 points (increased from 300)
             print(f"Medium dataset detected ({len(contact_forces)} points), limiting to top {max_spheres} highest force points")
         elif len(contact_forces) > 500:
-            max_spheres = 200   # Small datasets: show top 800 points
+            max_spheres = 200   # Small datasets: show top 200 points (increased from 150)
             print(f"Small dataset detected ({len(contact_forces)} points), limiting to top {max_spheres} highest force points")
         else:
             max_spheres = len(contact_forces)  # Very small datasets: show all
@@ -332,9 +496,40 @@ def merge_xml_includes(xml_content, base_dir):
         print(f"Warning: Could not parse XML for include processing: {e}")
         return xml_content
 
+def adjust_memory_for_spheres(num_spheres):
+    """Adjust memory allocation based on number of spheres"""
+    if num_spheres > 1500:
+        # Very high memory usage - increase limits significantly
+        os.environ['MUJOCO_STACK_SIZE'] = '536870912'  # 512MB stack (doubled for 2000+ spheres)
+        os.environ['MUJOCO_ARENA_SIZE'] = '4294967296'  # 4GB arena (doubled for 2000+ spheres)
+        print(f"Very high memory mode: {num_spheres} spheres -> 512MB stack, 4GB arena")
+    elif num_spheres > 1000:
+        # High memory usage
+        os.environ['MUJOCO_STACK_SIZE'] = '268435456'  # 256MB stack
+        os.environ['MUJOCO_ARENA_SIZE'] = '2147483648'  # 2GB arena
+        print(f"High memory mode: {num_spheres} spheres -> 256MB stack, 2GB arena")
+    elif num_spheres > 500:
+        # Medium memory usage
+        os.environ['MUJOCO_STACK_SIZE'] = '134217728'   # 128MB stack
+        os.environ['MUJOCO_ARENA_SIZE'] = '1073741824'   # 1GB arena
+        print(f"Medium memory mode: {num_spheres} spheres -> 128MB stack, 1GB arena")
+    else:
+        # Normal memory usage
+        os.environ['MUJOCO_STACK_SIZE'] = '67108864'    # 64MB stack
+        os.environ['MUJOCO_ARENA_SIZE'] = '536870912'   # 512MB arena
+        print(f"Normal memory mode: {num_spheres} spheres -> 64MB stack, 512MB arena")
+
 def load_mujoco_model_with_contact_spheres(xml_file, contact_forces):
     """Load Mujoco model with contact spheres, handling relative paths correctly"""
     print(f"Loading Mujoco model from: {xml_file}")
+    
+    # Print current memory settings
+    print(f"Current MUJOCO_STACK_SIZE: {os.environ.get('MUJOCO_STACK_SIZE', 'Not set')}")
+    print(f"Current MUJOCO_ARENA_SIZE: {os.environ.get('MUJOCO_ARENA_SIZE', 'Not set')}")
+    
+    # Adjust memory allocation based on number of spheres
+    if contact_forces:
+        adjust_memory_for_spheres(len(contact_forces))
     
     # Get the absolute path of the XML file
     xml_abs_path = os.path.abspath(xml_file)
@@ -407,8 +602,12 @@ def load_mujoco_model_with_contact_spheres(xml_file, contact_forces):
         # Set MuJoCo memory options for better performance with many spheres
         # Note: These options may not be available in all MuJoCo versions
         try:
-            mj.mj_setOption(model, mj.mjtOption.mjOptionStack, 1)  # Use smaller stack
-            mj.mj_setOption(model, mj.mjtOption.mjOptionMemory, 1)  # Use smaller memory
+            # Increase memory allocation for large models with many constraints
+            mj.mj_setOption(model, mj.mjtOption.mjOptionStack, 0)  # Use larger stack
+            mj.mj_setOption(model, mj.mjtOption.mjOptionMemory, 0)  # Use larger memory
+            # Set arena size for constraints (if available)
+            if hasattr(mj, 'mj_setOption'):
+                mj.mj_setOption(model, mj.mjtOption.mjOptionArena, 0)  # Use larger arena
         except AttributeError:
             print("Note: MuJoCo memory optimization options not available in this version")
         
@@ -438,7 +637,7 @@ def load_mujoco_model_with_contact_spheres(xml_file, contact_forces):
 def main():
     """Main function"""
     if len(sys.argv) < 3:
-        print("Usage: python3 mujoco_xml_contact_display.py <csv_file> <xml_file> [world|robot_frame] [max_spheres]")
+        print("Usage: python3 mujoco_xml_contact_display.py <csv_file> <xml_file> [world|robot_frame] [max_spheres] [filter_foot] [joint_filter]")
         print("")
         print("Examples:")
         print("  # Using robot frame coordinates (default)")
@@ -450,6 +649,18 @@ def main():
         print("  # Limit to 100 spheres for memory optimization")
         print("  python3 mujoco_xml_contact_display.py logs/contact_data.csv src/simulation/mujoco/assets/resource/pm_v2_mesh.xml robot_frame 100")
         print("")
+        print("  # Display 2000 spheres (high memory usage)")
+        print("  python3 mujoco_xml_contact_display.py logs/contact_data.csv src/simulation/mujoco/assets/resource/pm_v2_mesh.xml robot_frame 2000")
+        print("")
+        print("  # Include foot contacts (default: filter out foot contacts)")
+        print("  python3 mujoco_xml_contact_display.py logs/contact_data.csv src/simulation/mujoco/assets/resource/pm_v2_mesh.xml robot_frame 500 false")
+        print("")
+        print("  # Filter specific joints by numbers (e.g., exclude joints 1,2)")
+        print("  python3 mujoco_xml_contact_display.py logs/contact_data.csv src/simulation/mujoco/assets/resource/pm_v2_mesh.xml robot_frame 500 true 1,2")
+        print("")
+        print("  # Filter specific joints by range (e.g., exclude joints 1-5)")
+        print("  python3 mujoco_xml_contact_display.py logs/contact_data.csv src/simulation/mujoco/assets/resource/pm_v2_mesh.xml robot_frame 500 true 1-5")
+        print("")
         print("CSV Format Support:")
         print("  - New format: timestamp, contact_id, body1_name, body2_name, pos_x/y/z, robot_frame_x/y/z, force_magnitude, force_normal, etc.")
         print("  - Includes: base_link pose, collision_link pose, joint angles")
@@ -459,8 +670,17 @@ def main():
         print("  xml_file: Path to XML model file (e.g., pm_v2_mesh.xml)")
         print("  world|robot_frame: Coordinate system (default: robot_frame)")
         print("  max_spheres: Maximum number of spheres to display (default: auto)")
+        print("  filter_foot: Filter out foot contacts (true/false, default: true)")
+        print("  joint_filter: Joint numbers to exclude (e.g., 1,2,3 or 1-5, default: interactive)")
         print("")
         print("Note: Contact forces will be displayed as spheres with sizes proportional to force magnitude")
+        print("Foot contacts (LINK_ANKLE_*, LINK_FOOT_*) are filtered out by default")
+        print("")
+        print("Memory Usage Guidelines:")
+        print("  - 100-500 spheres: Normal memory usage")
+        print("  - 500-1000 spheres: Moderate memory usage")
+        print("  - 1000-2000 spheres: High memory usage (64MB stack, 512MB arena)")
+        print("  - 2000+ spheres: Very high memory usage (may cause performance issues)")
         return
     
     csv_file = sys.argv[1]
@@ -469,6 +689,7 @@ def main():
     # Check for coordinate type
     coord_type = "robot_frame"    # default to robot frame coordinates
     max_spheres_override = None
+    filter_foot_contacts = True    # default to filter foot contacts
     
     if len(sys.argv) >= 4:
         # Check if the third argument is a number (max_spheres) or coordinate type
@@ -489,6 +710,22 @@ def main():
             print("Error: max_spheres must be a number")
             return
     
+    # Check for filter_foot parameter
+    if len(sys.argv) >= 6:
+        filter_foot_str = sys.argv[5].lower()
+        if filter_foot_str in ['true', '1', 'yes', 'y']:
+            filter_foot_contacts = True
+        elif filter_foot_str in ['false', '0', 'no', 'n']:
+            filter_foot_contacts = False
+        else:
+            print("Error: filter_foot must be true/false")
+            return
+    
+    # Check for joint_filter parameter
+    joint_filter_str = None
+    if len(sys.argv) >= 7:
+        joint_filter_str = sys.argv[6]
+    
     if not os.path.exists(csv_file):
         print(f"CSV file not found: {csv_file}")
         return
@@ -504,6 +741,10 @@ def main():
     
     # Analyze CSV data
     analyze_csv_data(df)
+    
+    # Show available joints and get user selection
+    available_bodies = show_available_joints(df)
+    custom_filter_bodies = get_user_joint_selection(available_bodies, joint_filter_str)
     
     # Check for coordinate columns
     if coord_type == "world":
@@ -531,7 +772,7 @@ def main():
                 return
     
     # Create contact force visualization
-    contact_forces = create_contact_force_visualization(df, x_col, y_col, z_col, max_spheres_override)
+    contact_forces = create_contact_force_visualization(df, x_col, y_col, z_col, max_spheres_override, filter_foot_contacts, custom_filter_bodies)
     
     if not contact_forces:
         print("No contact forces to display")
