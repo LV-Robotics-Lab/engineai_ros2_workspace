@@ -29,9 +29,12 @@ echo "程序开始时间: $PROGRAM_START_TIME"
 # 从YAML文件读取推力参数
 FORCE_MAGNITUDE=$(grep "default_force_magnitude:" src/simulation/mujoco/assets/config/pm_v2.yaml | sed 's/.*default_force_magnitude: *\([0-9.]*\).*/\1/')
 DEFAULT_DIRECTION=$(grep "auto_direction:" src/simulation/mujoco/assets/config/pm_v2.yaml | sed 's/.*auto_direction: *"\([^"]*\)".*/\1/')
+# 从YAML文件读取推力持续时间参数
+FORCE_DURATION=$(grep "perturb_duration:" src/simulation/mujoco/assets/config/pm_v2.yaml | sed 's/.*perturb_duration: *\([0-9.]*\).*/\1/')
+
 
 # 创建实验文件夹名称：推力方向-大小-程序开始时间
-EXPERIMENT_FOLDER="logs/${DEFAULT_DIRECTION}-${FORCE_MAGNITUDE}N-${PROGRAM_START_TIME}"
+EXPERIMENT_FOLDER="logs/${DEFAULT_DIRECTION}-${FORCE_MAGNITUDE}N-${FORCE_DURATION}s-${PROGRAM_START_TIME}"
 
 # 创建实验文件夹
 mkdir -p "$EXPERIMENT_FOLDER"
