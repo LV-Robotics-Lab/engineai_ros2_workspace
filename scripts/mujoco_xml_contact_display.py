@@ -744,7 +744,22 @@ def main():
     
     # Show available joints and get user selection
     available_bodies = show_available_joints(df)
-    custom_filter_bodies = get_user_joint_selection(available_bodies, joint_filter_str)
+    
+    # 直接在代码中设置要排除的link
+    excluded_links = ['LINK_ANKLE_PITCH_L', 'LINK_ANKLE_PITCH_R', 'LINK_ANKLE_ROLL_L', 'LINK_ANKLE_ROLL_R']
+    
+    # 打印所有可用的link
+    print(f"\n=== 所有可用的Link名称 ===")
+    for i, body in enumerate(available_bodies, 1):
+        print(f"  {i:2d}. {body}")
+    
+    # 打印要排除的link
+    print(f"\n=== 排除的Link名称 ===")
+    for i, link in enumerate(excluded_links, 1):
+        print(f"  {i}. {link}")
+    
+    # 使用预设的排除列表
+    custom_filter_bodies = excluded_links
     
     # Check for coordinate columns
     if coord_type == "world":
@@ -777,6 +792,24 @@ def main():
     if not contact_forces:
         print("No contact forces to display")
         return
+    
+    # 打印显示的力大小范围
+    if contact_forces:
+        max_force = max(cf['max_force'] for cf in contact_forces)
+        min_force = min(cf['max_force'] for cf in contact_forces)
+        print(f"\n=== 显示的力大小范围 ===")
+        print(f"最小力: {min_force:.3f} N")
+        print(f"最大力: {max_force:.3f} N")
+        print(f"力范围: {min_force:.3f} - {max_force:.3f} N")
+        print(f"力差值: {max_force - min_force:.3f} N")
+        
+        # 计算力的统计信息
+        forces = [cf['max_force'] for cf in contact_forces]
+        print(f"平均力: {np.mean(forces):.3f} N")
+        print(f"中位数力: {np.median(forces):.3f} N")
+        print(f"标准差: {np.std(forces):.3f} N")
+        print(f"显示接触点数量: {len(contact_forces)}")
+        print("=" * 50)
     
     # Load Mujoco model with contact spheres
     model, data, xml_temp_path = load_mujoco_model_with_contact_spheres(xml_file, contact_forces)

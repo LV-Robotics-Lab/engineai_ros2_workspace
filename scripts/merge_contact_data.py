@@ -45,8 +45,9 @@ def merge_contact_csv_files(log_dir, output_file=None):
             df = pd.read_csv(csv_file)
             print(f"  读取了 {len(df)} 行数据")
             
-            # 添加源文件信息
-            df['source_file'] = os.path.basename(csv_file)
+            # 添加源文件信息 - 使用文件名（不含扩展名）作为标识
+            source_name = os.path.splitext(os.path.basename(csv_file))[0]  # 去掉.csv扩展名
+            df['source_file'] = source_name
             
             all_dataframes.append(df)
             total_rows += len(df)
@@ -70,7 +71,12 @@ def merge_contact_csv_files(log_dir, output_file=None):
     # 生成输出文件名
     if output_file is None:
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        output_file = os.path.join(log_dir, f"merged_contact_data_{timestamp}.csv")
+        # 获取原文件夹名称
+        folder_name = os.path.basename(os.path.abspath(log_dir))
+        output_file = os.path.join(log_dir, f"merged_contact_data_{folder_name}_{timestamp}.csv")
+    elif not os.path.isabs(output_file):
+        # 如果输出文件不是绝对路径，则保存到log_dir目录中
+        output_file = os.path.join(log_dir, output_file)
     
     # 保存合并后的文件
     print(f"\n正在保存到: {output_file}")
@@ -92,6 +98,12 @@ def merge_contact_csv_files(log_dir, output_file=None):
     source_stats = merged_df.groupby('source_file').size().sort_values(ascending=False)
     for source, count in source_stats.items():
         print(f"  {source}: {count} 行")
+    
+    # 显示源文件列的信息
+    print(f"\n=== 源文件列信息 ===")
+    print(f"源文件列已添加到数据中，列名: 'source_file'")
+    print(f"包含 {len(source_stats)} 个不同的源文件")
+    print(f"源文件列示例值: {list(source_stats.index[:3])}")  # 显示前3个源文件名
     
     return output_file
 
