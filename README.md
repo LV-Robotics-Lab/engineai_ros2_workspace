@@ -156,10 +156,10 @@ python3 scripts/analyze_contact_forces.py logs/contact_data_20250913_181435.csv
 # 先升级mujoco
 pip install mujoco==3.3.6
 # 合并多次采样的contact point
-python3 scripts/merge_contact_data.py logs/forward-200.0N-20251005_162754
+python3 scripts/merge_contact_data.py logs/forward-200.0N-0.5s-20251006_024402
 # 对合并后的csv进行碰撞点显示
 # 使用机器人坐标系（默认）， 后面的参数 1000 是显示点数量，1、2是 过滤掉足部的点
-python3 scripts/mujoco_xml_contact_display.py logs/forward-200.0N-20251005_162754/merged_contact_data_forward-200.0N-20251005_162754_20251005_171533.csv src/simulation/mujoco/assets/resource/pm_v2_mesh.xml robot_frame 1500
+python3 scripts/mujoco_xml_contact_display.py logs/forward-200.0N-0.5s-20251006_024402/merged_contact_data_forward-200.0N-0.5s-20251006_024402_20251008_000639.csv src/simulation/mujoco/assets/resource/pm_v2_mesh.xml robot_frame 1500
 
 # 使用世界坐标系
 python3 scripts/mujoco_xml_contact_display.py logs/contact_data_20250831_125541.csv src/simulation/mujoco/assets/resource/pm_v2_mesh.xml world

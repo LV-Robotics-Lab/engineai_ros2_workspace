@@ -71,17 +71,24 @@ mkdir -p "$root_dir/build"
 
 # Use system Python and avoid conda completely
 echo "Using system Python and tools"
-export PATH="/usr/bin:/usr/local/bin:$PATH"
+# Completely remove conda from PATH
+export PATH="/usr/bin:/usr/local/bin:/usr/sbin:/usr/local/sbin:/sbin:/bin"
 export PYTHONPATH="/opt/ros/humble/lib/python3.10/site-packages:/opt/ros/humble/local/lib/python3.10/dist-packages"
 export PYTHONPATH="/usr/lib/python3/dist-packages:$PYTHONPATH"
 export ROSIDL_ADAPTER_PYTHON_EXECUTABLE="/usr/bin/python3"
+# Unset conda environment variables
+unset CONDA_DEFAULT_ENV
+unset CONDA_PREFIX
+unset CONDA_PYTHON_EXE
+unset CONDA_EXE
+unset CONDA_PROMPT_MODIFIER
 
 # No need for .colcon_ignore file when using system Python
 
 # Set environment variables to fix iceoryx issues
 export AMENT_TRACE_SETUP_FILES=0
 export AMENT_PYTHON_EXECUTABLE=/usr/bin/python3
-export CMAKE_PREFIX_PATH="/opt/ros/humble:$CMAKE_PREFIX_PATH"
+export CMAKE_PREFIX_PATH="/opt/ros/humble:/usr/lib/x86_64-linux-gnu/cmake:$CMAKE_PREFIX_PATH"
 export iceoryx_binding_c_DIR="/opt/ros/humble/lib/x86_64-linux-gnu/cmake/iceoryx_binding_c"
 export iceoryx_hoofs_DIR="/opt/ros/humble/lib/x86_64-linux-gnu/cmake/iceoryx_hoofs"
 export iceoryx_posh_DIR="/opt/ros/humble/lib/x86_64-linux-gnu/cmake/iceoryx_posh"
@@ -93,13 +100,13 @@ echo "Running build with the following nodes: ${NODES[*]}"
 cd "$root_dir" && \
 colcon build \
     --cmake-args -DCMAKE_BUILD_TYPE=$BUILD_TYPE \
-    --cmake-args -DCMAKE_PREFIX_PATH="/opt/ros/humble:$CMAKE_PREFIX_PATH" \
+    --cmake-args -DCMAKE_PREFIX_PATH="/opt/ros/humble:/usr/lib/x86_64-linux-gnu/cmake:$CMAKE_PREFIX_PATH" \
     --cmake-args -Diceoryx_binding_c_DIR="/opt/ros/humble/lib/x86_64-linux-gnu/cmake/iceoryx_binding_c" \
     --build-base build \
     --install-base install \
     $PACKAGES_ARG 2>/dev/null || colcon build \
     --cmake-args -DCMAKE_BUILD_TYPE=$BUILD_TYPE \
-    --cmake-args -DCMAKE_PREFIX_PATH="/opt/ros/humble:$CMAKE_PREFIX_PATH" \
+    --cmake-args -DCMAKE_PREFIX_PATH="/opt/ros/humble:/usr/lib/x86_64-linux-gnu/cmake:$CMAKE_PREFIX_PATH" \
     --cmake-args -Diceoryx_binding_c_DIR="/opt/ros/humble/lib/x86_64-linux-gnu/cmake/iceoryx_binding_c" \
     --build-base build \
     --install-base install \

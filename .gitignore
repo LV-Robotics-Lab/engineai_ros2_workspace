@@ -27,3 +27,5 @@ logs/*.jpeg
 
 # 保留logs目录但忽略数据文件
 !logs/.gitkeep
+
+MUJOCO_LOG.TXT
