@@ -207,9 +207,74 @@ def get_user_joint_selection(available_bodies, joint_filter_str=None):
             print("\nOperation cancelled.")
             return ['LINK_ANKLE_ROLL_L', 'LINK_ANKLE_ROLL_R', 'LINK_ANKLE_PITCH_L', 'LINK_ANKLE_PITCH_R', 'LINK_FOOT_L', 'LINK_FOOT_R']
 
-def create_contact_force_visualization(df, x_col, y_col, z_col, max_spheres_override=None, filter_foot_contacts=True, custom_filter_bodies=None, min_points_per_link=5):
+def cluster_nearby_contacts(contact_forces, min_distance=0.1):
+    """Cluster nearby contact points to avoid overlapping spheres
+    min_distance: minimum distance between sphere centers in meters
+    Uses proper clustering algorithm that groups all points within distance threshold"""
+    if not contact_forces:
+        return []
+    
+    print(f"Clustering nearby contacts with minimum distance: {min_distance}m")
+    
+    # Convert to numpy arrays for easier computation
+    positions = np.array([cf['position'] for cf in contact_forces])
+    forces = [cf['max_force'] for cf in contact_forces]
+    
+    # Initialize clusters - each point starts as its own cluster
+    n_points = len(contact_forces)
+    cluster_ids = list(range(n_points))
+    
+    # Union-Find data structure for clustering
+    def find_root(x):
+        if cluster_ids[x] != x:
+            cluster_ids[x] = find_root(cluster_ids[x])
+        return cluster_ids[x]
+    
+    def union(x, y):
+        root_x, root_y = find_root(x), find_root(y)
+        if root_x != root_y:
+            cluster_ids[root_x] = root_y
+    
+    # Build distance matrix and merge nearby clusters
+    for i in range(n_points):
+        for j in range(i + 1, n_points):
+            distance = np.linalg.norm(positions[i] - positions[j])
+            if distance < min_distance:
+                union(i, j)
+    
+    # Group points by cluster
+    clusters = {}
+    for i in range(n_points):
+        root = find_root(i)
+        if root not in clusters:
+            clusters[root] = []
+        clusters[root].append(i)
+    
+    # For each cluster, select the contact with maximum force
+    clustered_forces = []
+    for cluster_indices in clusters.values():
+        cluster_contacts = [contact_forces[i] for i in cluster_indices]
+        max_force_cf = max(cluster_contacts, key=lambda x: x['max_force'])
+        clustered_forces.append(max_force_cf)
+    
+    print(f"Clustered {len(contact_forces)} contacts into {len(clustered_forces)} non-overlapping spheres")
+    
+    # Debug: Show clustering statistics
+    if len(contact_forces) > 0:
+        reduction_ratio = len(clustered_forces) / len(contact_forces)
+        print(f"Clustering reduction: {reduction_ratio:.1%} ({len(contact_forces)} -> {len(clustered_forces)})")
+        
+        if reduction_ratio < 0.1:  # Less than 10% remaining
+            print("Warning: Heavy clustering detected. Consider increasing min_distance for more points.")
+        elif reduction_ratio > 0.8:  # More than 80% remaining
+            print("Info: Light clustering. Consider decreasing min_distance to reduce overlaps.")
+    
+    return clustered_forces
+
+def create_contact_force_visualization(df, x_col, y_col, z_col, max_spheres_override=None, custom_filter_bodies=None, min_points_per_link=5, min_sphere_distance=0.01, enable_clustering=True):
     """Create contact force visualization data with sphere sizes based on force magnitude
-    Now supports proportional distribution by body2_name with minimum points per link"""
+    Now supports proportional distribution by body2_name with minimum points per link
+    min_sphere_distance: minimum distance between sphere centers to avoid overlap"""
     print("Processing contact force data for sphere visualization...")
     
     # Filter valid coordinates
@@ -228,14 +293,6 @@ def create_contact_force_visualization(df, x_col, y_col, z_col, max_spheres_over
         # Use custom filter bodies
         filter_bodies = custom_filter_bodies
         filter_name = "custom joints"
-    elif filter_foot_contacts:
-        # Use default foot filter
-        filter_bodies = [
-            'LINK_ANKLE_ROLL_L', 'LINK_ANKLE_ROLL_R',
-            'LINK_ANKLE_PITCH_L', 'LINK_ANKLE_PITCH_R',
-            'LINK_FOOT_L', 'LINK_FOOT_R'
-        ]
-        filter_name = "foot contacts"
     else:
         filter_bodies = []
         filter_name = "no filtering"
@@ -293,20 +350,39 @@ def create_contact_force_visualization(df, x_col, y_col, z_col, max_spheres_over
                 'count': 1
             }
     
-    # Convert to contact forces per body
-    body_contact_forces = {}
+    # Convert to contact forces list for clustering
+    all_contact_forces = []
     for body_name, position_groups in body_groups.items():
-        contact_forces = []
         for pos, data in position_groups.items():
             max_force = max(data['forces'])
-            contact_forces.append({
+            all_contact_forces.append({
+                'body2_name': body_name,
                 'position': data['position'],
                 'max_force': max_force,
                 'count': data['count']
             })
-        # Sort by force magnitude (highest first)
-        contact_forces.sort(key=lambda x: x['max_force'], reverse=True)
-        body_contact_forces[body_name] = contact_forces
+    
+    print(f"Found {len(all_contact_forces)} unique contact positions")
+    
+    # STEP 1: Apply clustering based on user setting
+    if enable_clustering:
+        print("Step 1: Clustering nearby contacts...")
+        clustered_contact_forces = cluster_nearby_contacts(all_contact_forces, min_sphere_distance)
+    else:
+        print("Step 1: Using all unique contact positions (clustering disabled)")
+        clustered_contact_forces = all_contact_forces  # 直接使用所有唯一位置
+    
+    # STEP 2: Group results by body2_name for proportional distribution
+    body_contact_forces = {}
+    for cf in clustered_contact_forces:
+        body_name = cf['body2_name']
+        if body_name not in body_contact_forces:
+            body_contact_forces[body_name] = []
+        body_contact_forces[body_name].append(cf)
+    
+    # Sort each body's contacts by force magnitude (highest first)
+    for body_name in body_contact_forces:
+        body_contact_forces[body_name].sort(key=lambda x: x['max_force'], reverse=True)
     
     # Calculate total contact points and determine max spheres
     total_contacts = sum(len(forces) for forces in body_contact_forces.values())
@@ -334,8 +410,8 @@ def create_contact_force_visualization(df, x_col, y_col, z_col, max_spheres_over
             print(f"Small dataset ({total_contacts} points), displaying all contact points")
     
     # Calculate proportional distribution
-    print(f"\n=== 按body2_name分配显示点 ===")
-    print(f"总接触点数: {total_contacts}")
+    print(f"\n=== Step 2: 按body2_name分配显示点 ===")
+    print(f"聚类后接触点数: {total_contacts}")
     print(f"总body数量: {num_bodies}")
     print(f"最大显示点数: {max_spheres}")
     print(f"每个body最少显示点数: {min_points_per_link}")
@@ -397,6 +473,8 @@ def create_contact_force_visualization(df, x_col, y_col, z_col, max_spheres_over
     
     # Sort final results by force magnitude for consistent visualization
     final_contact_forces.sort(key=lambda x: x['max_force'], reverse=True)
+    
+    # Clustering already applied in Step 1, no need to cluster again
     
     print(f"Created {len(final_contact_forces)} contact points for visualization")
     if final_contact_forces:
@@ -793,7 +871,7 @@ def load_mujoco_model_with_contact_spheres(xml_file, contact_forces):
 def main():
     """Main function"""
     if len(sys.argv) < 3:
-        print("Usage: python3 mujoco_xml_contact_display.py <csv_file> <xml_file> [world|robot_frame] [max_spheres] [filter_foot] [joint_filter]")
+        print("Usage: python3 mujoco_xml_contact_display.py <csv_file> <xml_file> [world|robot_frame] [max_spheres] [joint_filter] [enable_clustering]")
         print("")
         print("Examples:")
         print("  # Using robot frame coordinates (default)")
@@ -808,14 +886,17 @@ def main():
         print("  # Display 2000 spheres (high memory usage)")
         print("  python3 mujoco_xml_contact_display.py logs/contact_data.csv src/simulation/mujoco/assets/resource/pm_v2_mesh.xml robot_frame 2000")
         print("")
-        print("  # Include foot contacts (default: filter out foot contacts)")
-        print("  python3 mujoco_xml_contact_display.py logs/contact_data.csv src/simulation/mujoco/assets/resource/pm_v2_mesh.xml robot_frame 500 false")
-        print("")
         print("  # Filter specific joints by numbers (e.g., exclude joints 1,2)")
-        print("  python3 mujoco_xml_contact_display.py logs/contact_data.csv src/simulation/mujoco/assets/resource/pm_v2_mesh.xml robot_frame 500 true 1,2")
+        print("  python3 mujoco_xml_contact_display.py logs/contact_data.csv src/simulation/mujoco/assets/resource/pm_v2_mesh.xml robot_frame 500 1,2")
         print("")
         print("  # Filter specific joints by range (e.g., exclude joints 1-5)")
-        print("  python3 mujoco_xml_contact_display.py logs/contact_data.csv src/simulation/mujoco/assets/resource/pm_v2_mesh.xml robot_frame 500 true 1-5")
+        print("  python3 mujoco_xml_contact_display.py logs/contact_data.csv src/simulation/mujoco/assets/resource/pm_v2_mesh.xml robot_frame 500 1-5")
+        print("")
+        print("  # Enable clustering to reduce overlapping spheres")
+        print("  python3 mujoco_xml_contact_display.py logs/contact_data.csv src/simulation/mujoco/assets/resource/pm_v2_mesh.xml robot_frame 1500 \"\" true")
+        print("")
+        print("  # Disable clustering to show more points (default)")
+        print("  python3 mujoco_xml_contact_display.py logs/contact_data.csv src/simulation/mujoco/assets/resource/pm_v2_mesh.xml robot_frame 1500 \"\" false")
         print("")
         print("CSV Format Support:")
         print("  - New format: timestamp, contact_id, body1_name, body2_name, pos_x/y/z, robot_frame_x/y/z, force_magnitude, force_normal, etc.")
@@ -837,6 +918,12 @@ def main():
         print("  - Each link gets a minimum of 5 points to ensure visibility")
         print("  - Remaining points are distributed based on contact point density per link")
         print("  - This ensures all links are visible, not just the highest force areas")
+        print("")
+        print("New Feature - Contact Clustering:")
+        print("  - Nearby contact points are clustered to avoid overlapping spheres")
+        print("  - Each cluster uses the contact with maximum force to represent the area")
+        print("  - This prevents visual occlusion and ensures all important force areas are visible")
+        print("  - Clustering distance can be adjusted in main() function (min_sphere_distance)")
         print("")
         print("Memory Usage Guidelines:")
         print("  - 100-500 spheres: Normal memory usage")
@@ -872,21 +959,22 @@ def main():
             print("Error: max_spheres must be a number")
             return
     
-    # Check for filter_foot parameter
-    if len(sys.argv) >= 6:
-        filter_foot_str = sys.argv[5].lower()
-        if filter_foot_str in ['true', '1', 'yes', 'y']:
-            filter_foot_contacts = True
-        elif filter_foot_str in ['false', '0', 'no', 'n']:
-            filter_foot_contacts = False
-        else:
-            print("Error: filter_foot must be true/false")
-            return
-    
     # Check for joint_filter parameter
     joint_filter_str = None
+    if len(sys.argv) >= 6:
+        joint_filter_str = sys.argv[5]
+    
+    # Check for enable_clustering parameter
+    enable_clustering = False  # default to disabled
     if len(sys.argv) >= 7:
-        joint_filter_str = sys.argv[6]
+        clustering_str = sys.argv[6].lower()
+        if clustering_str in ['true', '1', 'yes', 'y']:
+            enable_clustering = True
+        elif clustering_str in ['false', '0', 'no', 'n']:
+            enable_clustering = False
+        else:
+            print("Error: enable_clustering must be true/false")
+            return
     
     if not os.path.exists(csv_file):
         print(f"CSV file not found: {csv_file}")
@@ -907,8 +995,34 @@ def main():
     # Show available joints and get user selection
     available_bodies = show_available_joints(df)
     
-    # 直接在代码中设置要排除的link
-    excluded_links = ['LINK_ANKLE_PITCH_L', 'LINK_ANKLE_PITCH_R', 'LINK_ANKLE_ROLL_L', 'LINK_ANKLE_ROLL_R']
+    # 基础排除的link（写死的）
+    base_excluded_links = ['LINK_ANKLE_PITCH_L', 'LINK_ANKLE_PITCH_R', 'LINK_ANKLE_ROLL_L', 'LINK_ANKLE_ROLL_R', 'LINK_HEAD_YAW']
+    
+    # 处理用户指定的关节过滤
+    if joint_filter_str:
+        print(f"\n=== 处理关节过滤参数 ===")
+        print(f"用户指定过滤: {joint_filter_str}")
+        user_excluded_links = parse_joint_filter(joint_filter_str, available_bodies)
+        if user_excluded_links:
+            excluded_links = base_excluded_links + user_excluded_links
+            print(f"额外排除的关节: {user_excluded_links}")
+        else:
+            excluded_links = base_excluded_links
+    else:
+        excluded_links = base_excluded_links
+        print(f"\n=== 使用默认关节过滤 ===")
+    
+    print(f"总共排除的关节: {excluded_links}")
+    
+    # 聚类参数设置
+    min_sphere_distance = 0.05  # 最小球体中心距离 (米) - 可调整此参数
+    print(f"\n=== 聚类参数设置 ===")
+    print(f"聚类功能: {'启用' if enable_clustering else '禁用'}")
+    if enable_clustering:
+        print(f"最小球体距离: {min_sphere_distance}m ({min_sphere_distance*1000:.1f}mm)")
+        print("提示: 减小此值可显示更多点，增大此值可减少重叠")
+    else:
+        print("提示: 聚类已禁用，将显示所有唯一位置点")
     
     # 打印所有可用的link
     print(f"\n=== 所有可用的Link名称 ===")
@@ -949,7 +1063,8 @@ def main():
                 return
     
     # Create contact force visualization with proportional distribution by body2_name
-    contact_forces = create_contact_force_visualization(df, x_col, y_col, z_col, max_spheres_override, filter_foot_contacts, custom_filter_bodies, min_points_per_link=5)
+    # Use clustering settings from main function
+    contact_forces = create_contact_force_visualization(df, x_col, y_col, z_col, max_spheres_override, excluded_links, min_points_per_link=5, min_sphere_distance=min_sphere_distance, enable_clustering=enable_clustering)
     
     if not contact_forces:
         print("No contact forces to display")
