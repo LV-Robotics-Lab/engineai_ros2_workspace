@@ -207,8 +207,9 @@ def get_user_joint_selection(available_bodies, joint_filter_str=None):
             print("\nOperation cancelled.")
             return ['LINK_ANKLE_ROLL_L', 'LINK_ANKLE_ROLL_R', 'LINK_ANKLE_PITCH_L', 'LINK_ANKLE_PITCH_R', 'LINK_FOOT_L', 'LINK_FOOT_R']
 
-def create_contact_force_visualization(df, x_col, y_col, z_col, max_spheres_override=None, filter_foot_contacts=True, custom_filter_bodies=None):
-    """Create contact force visualization data with sphere sizes based on force magnitude"""
+def create_contact_force_visualization(df, x_col, y_col, z_col, max_spheres_override=None, filter_foot_contacts=True, custom_filter_bodies=None, min_points_per_link=5):
+    """Create contact force visualization data with sphere sizes based on force magnitude
+    Now supports proportional distribution by body2_name with minimum points per link"""
     print("Processing contact force data for sphere visualization...")
     
     # Filter valid coordinates
@@ -255,6 +256,164 @@ def create_contact_force_visualization(df, x_col, y_col, z_col, max_spheres_over
             print(f"Warning: All contacts were {filter_name} and have been filtered out")
             return []
     
+    # Check if body2_name column exists
+    if 'body2_name' not in df_valid.columns:
+        print("Warning: body2_name column not found, using original method")
+        return create_contact_force_visualization_original(df_valid, x_col, y_col, z_col, max_spheres_override)
+    
+    # Group by body2_name and position to aggregate forces
+    print("Grouping contact points by body2_name and position...")
+    body_groups = {}
+    
+    for _, row in df_valid.iterrows():
+        body2_name = row['body2_name']
+        pos = (row[x_col], row[y_col], row[z_col])
+        
+        # Use force magnitude if available, otherwise calculate from components
+        if 'force_magnitude' in row and pd.notna(row['force_magnitude']):
+            force_mag = row['force_magnitude']
+        elif all(col in row for col in ['force_x', 'force_y', 'force_z']) and all(pd.notna(row[col]) for col in ['force_x', 'force_y', 'force_z']):
+            force_mag = np.sqrt(row['force_x']**2 + row['force_y']**2 + row['force_z']**2)
+        elif 'force_normal' in row and pd.notna(row['force_normal']):
+            # Use normal force as fallback
+            force_mag = abs(row['force_normal'])
+        else:
+            force_mag = 1.0  # Default force if not available
+        
+        if body2_name not in body_groups:
+            body_groups[body2_name] = {}
+        
+        if pos in body_groups[body2_name]:
+            body_groups[body2_name][pos]['forces'].append(force_mag)
+            body_groups[body2_name][pos]['count'] += 1
+        else:
+            body_groups[body2_name][pos] = {
+                'position': pos,
+                'forces': [force_mag],
+                'count': 1
+            }
+    
+    # Convert to contact forces per body
+    body_contact_forces = {}
+    for body_name, position_groups in body_groups.items():
+        contact_forces = []
+        for pos, data in position_groups.items():
+            max_force = max(data['forces'])
+            contact_forces.append({
+                'position': data['position'],
+                'max_force': max_force,
+                'count': data['count']
+            })
+        # Sort by force magnitude (highest first)
+        contact_forces.sort(key=lambda x: x['max_force'], reverse=True)
+        body_contact_forces[body_name] = contact_forces
+    
+    # Calculate total contact points and determine max spheres
+    total_contacts = sum(len(forces) for forces in body_contact_forces.values())
+    num_bodies = len(body_contact_forces)
+    
+    if max_spheres_override is not None:
+        max_spheres = max_spheres_override
+        print(f"Using user-specified max spheres: {max_spheres}")
+    else:
+        # Smart limit based on data size
+        if total_contacts > 10000:
+            max_spheres = 2000
+            print(f"Very large dataset detected ({total_contacts} points), limiting to top {max_spheres} points")
+        elif total_contacts > 5000:
+            max_spheres = 1000
+            print(f"Large dataset detected ({total_contacts} points), limiting to top {max_spheres} points")
+        elif total_contacts > 2000:
+            max_spheres = 500
+            print(f"Medium dataset detected ({total_contacts} points), limiting to top {max_spheres} points")
+        elif total_contacts > 500:
+            max_spheres = 200
+            print(f"Small dataset detected ({total_contacts} points), limiting to top {max_spheres} points")
+        else:
+            max_spheres = total_contacts
+            print(f"Small dataset ({total_contacts} points), displaying all contact points")
+    
+    # Calculate proportional distribution
+    print(f"\n=== 按body2_name分配显示点 ===")
+    print(f"总接触点数: {total_contacts}")
+    print(f"总body数量: {num_bodies}")
+    print(f"最大显示点数: {max_spheres}")
+    print(f"每个body最少显示点数: {min_points_per_link}")
+    
+    # Calculate points per body
+    body_point_counts = {}
+    remaining_points = max_spheres
+    
+    # First pass: assign minimum points to each body
+    for body_name in body_contact_forces.keys():
+        body_point_counts[body_name] = min_points_per_link
+        remaining_points -= min_points_per_link
+    
+    # If we don't have enough points for minimum, adjust
+    if remaining_points < 0:
+        print(f"Warning: Not enough points for minimum per body. Adjusting minimum to {max_spheres // num_bodies}")
+        min_points_per_link = max_spheres // num_bodies
+        for body_name in body_contact_forces.keys():
+            body_point_counts[body_name] = min_points_per_link
+        remaining_points = max_spheres - (min_points_per_link * num_bodies)
+    
+    # Second pass: distribute remaining points proportionally
+    if remaining_points > 0:
+        # Calculate total available points per body (excluding already assigned minimum)
+        total_available = sum(max(0, len(body_contact_forces[body_name]) - min_points_per_link) 
+                            for body_name in body_contact_forces.keys())
+        
+        if total_available > 0:
+            for body_name, contact_forces in body_contact_forces.items():
+                available_points = max(0, len(contact_forces) - min_points_per_link)
+                if available_points > 0:
+                    # Proportional distribution
+                    additional_points = int(remaining_points * available_points / total_available)
+                    body_point_counts[body_name] += additional_points
+    
+    # Final pass: ensure we don't exceed available points for each body
+    for body_name, contact_forces in body_contact_forces.items():
+        body_point_counts[body_name] = min(body_point_counts[body_name], len(contact_forces))
+    
+    # Select contact forces for each body
+    final_contact_forces = []
+    total_selected = 0
+    
+    print(f"\n=== 各body分配结果 ===")
+    for body_name, contact_forces in body_contact_forces.items():
+        num_to_select = body_point_counts[body_name]
+        selected_forces = contact_forces[:num_to_select]
+        final_contact_forces.extend(selected_forces)
+        total_selected += num_to_select
+        
+        if selected_forces:
+            max_force = max(cf['max_force'] for cf in selected_forces)
+            min_force = min(cf['max_force'] for cf in selected_forces)
+            print(f"  {body_name}: {num_to_select}/{len(contact_forces)} 点, 力范围: {min_force:.3f}-{max_force:.3f} N")
+        else:
+            print(f"  {body_name}: 0/{len(contact_forces)} 点")
+    
+    print(f"\n总计选择: {total_selected} 个接触点")
+    
+    # Sort final results by force magnitude for consistent visualization
+    final_contact_forces.sort(key=lambda x: x['max_force'], reverse=True)
+    
+    print(f"Created {len(final_contact_forces)} contact points for visualization")
+    if final_contact_forces:
+        max_force = max(cf['max_force'] for cf in final_contact_forces)
+        min_force = min(cf['max_force'] for cf in final_contact_forces)
+        print(f"Overall force range: {min_force:.3f} - {max_force:.3f} N")
+        
+        # Debug: Show force distribution
+        forces = [cf['max_force'] for cf in final_contact_forces]
+        print(f"Force statistics: mean={np.mean(forces):.3f}, std={np.std(forces):.3f}, median={np.median(forces):.3f}")
+    
+    return final_contact_forces
+
+def create_contact_force_visualization_original(df_valid, x_col, y_col, z_col, max_spheres_override=None):
+    """Original contact force visualization method (fallback)"""
+    print("Using original contact force visualization method...")
+    
     # Group by position to aggregate forces at the same location
     position_groups = {}
     
@@ -292,54 +451,29 @@ def create_contact_force_visualization(df, x_col, y_col, z_col, max_spheres_over
             'count': data['count']
         })
     
-    # Sort by force magnitude (highest first) - no limit needed for visual spheres
+    # Sort by force magnitude (highest first)
     contact_forces.sort(key=lambda x: x['max_force'], reverse=True)
     
-    # Since spheres are now visual-only (group="1"), we can display more contact points
-    # But still need reasonable limits to avoid memory issues
+    # Apply limits
     if max_spheres_override is not None:
-        # User specified a limit, respect it
         max_spheres = max_spheres_override
-        print(f"Using user-specified max spheres: {max_spheres}")
         if len(contact_forces) > max_spheres:
-            print(f"Limiting to {max_spheres} highest force points as requested")
             contact_forces = contact_forces[:max_spheres]
     else:
-        # Smart limit based on data size - balance between visualization quality and memory usage
+        # Smart limit based on data size
         if len(contact_forces) > 10000:
-            max_spheres = 2000  # Very large datasets: show top 2000 points (increased memory allocation)
-            print(f"Very large dataset detected ({len(contact_forces)} points), limiting to top {max_spheres} highest force points")
+            max_spheres = 2000
         elif len(contact_forces) > 5000:
-            max_spheres = 1000  # Large datasets: show top 1000 points (increased from 500)
-            print(f"Large dataset detected ({len(contact_forces)} points), limiting to top {max_spheres} highest force points")
+            max_spheres = 1000
         elif len(contact_forces) > 2000:
-            max_spheres = 500   # Medium datasets: show top 500 points (increased from 300)
-            print(f"Medium dataset detected ({len(contact_forces)} points), limiting to top {max_spheres} highest force points")
+            max_spheres = 500
         elif len(contact_forces) > 500:
-            max_spheres = 200   # Small datasets: show top 200 points (increased from 150)
-            print(f"Small dataset detected ({len(contact_forces)} points), limiting to top {max_spheres} highest force points")
+            max_spheres = 200
         else:
-            max_spheres = len(contact_forces)  # Very small datasets: show all
-            print(f"Small dataset ({len(contact_forces)} points), displaying all contact points")
+            max_spheres = len(contact_forces)
         
         if len(contact_forces) > max_spheres:
             contact_forces = contact_forces[:max_spheres]
-            print(f"Limited to {max_spheres} highest force points to ensure stable visualization")
-    
-    print(f"Created {len(contact_forces)} unique contact points for visualization")
-    if contact_forces:
-        max_force = max(cf['max_force'] for cf in contact_forces)
-        min_force = min(cf['max_force'] for cf in contact_forces)
-        print(f"Force range: {min_force:.3f} - {max_force:.3f} N")
-        
-        # Debug: Show first few contact forces
-        print(f"First 5 contact forces:")
-        for i, cf in enumerate(contact_forces[:5]):
-            print(f"  {i}: pos={cf['position']}, force={cf['max_force']:.3f}N, count={cf['count']}")
-        
-        # Debug: Show force distribution
-        forces = [cf['max_force'] for cf in contact_forces]
-        print(f"Force statistics: mean={np.mean(forces):.3f}, std={np.std(forces):.3f}, median={np.median(forces):.3f}")
     
     return contact_forces
 
@@ -402,6 +536,8 @@ def show_mujoco_viewer_with_spheres(model, data, contact_forces):
     print("  - Scroll: Zoom")
     print("  - Right click: Pan")
     print("  - ESC: Exit")
+    print("  - 右键点击查看器窗口可以打开菜单，查看Contact、Force等信息")
+    print("  - 菜单中可以启用/禁用各种渲染选项")
     
     # Import viewer module
     try:
@@ -421,6 +557,9 @@ def show_mujoco_viewer_with_spheres(model, data, contact_forces):
         viewer_handle.cam.azimuth = 45
         viewer_handle.cam.elevation = -20
         
+        # Enable contact force visualization
+        viewer_handle.opt.flags[mj.mjtVisFlag.mjVIS_CONTACTPOINT] = 1  # 显示接触点
+        
         # Add contact force information to viewer
         if contact_forces:
             max_force = max(cf['max_force'] for cf in contact_forces)
@@ -429,6 +568,16 @@ def show_mujoco_viewer_with_spheres(model, data, contact_forces):
             print(f"Max force: {max_force:.3f} N")
             print(f"Sphere sizes represent force magnitude")
             print(f"Colors: Red (high force) to Yellow (low force)")
+            print(f"Contact points are enabled")
+            print(f"Force values are printed to console")
+            
+            # Print top 10 highest force values for reference
+            print(f"\nTop 10 Highest Force Values:")
+            sorted_forces = sorted(contact_forces, key=lambda x: x['max_force'], reverse=True)
+            for i, cf in enumerate(sorted_forces[:10]):
+                pos = cf['position']
+                force = cf['max_force']
+                print(f"  {i+1:2d}. {force:8.3f} N at ({pos[0]:6.3f}, {pos[1]:6.3f}, {pos[2]:6.3f})")
         
         # Keep viewer open
         while viewer_handle.is_running():
@@ -580,7 +729,6 @@ def load_mujoco_model_with_contact_spheres(xml_file, contact_forces):
             
             spheres_xml += f'''    <body name="contact_sphere_{i}" pos="{pos[0]:.6f} {pos[1]:.6f} {pos[2]:.6f}">
       <geom name="contact_geom_{i}" type="sphere" size="{radius:.6f}" rgba="{r:.2f} {g:.2f} {b:.2f} {a:.2f}" group="1"/>
-      <site name="contact_site_{i}" pos="0 0 0" size="0.001"/>
     </body>
 '''
         
@@ -675,6 +823,12 @@ def main():
         print("")
         print("Note: Contact forces will be displayed as spheres with sizes proportional to force magnitude")
         print("Foot contacts (LINK_ANKLE_*, LINK_FOOT_*) are filtered out by default")
+        print("")
+        print("New Feature - Proportional Distribution by body2_name:")
+        print("  - Contact points are now distributed proportionally across different body2_name links")
+        print("  - Each link gets a minimum of 5 points to ensure visibility")
+        print("  - Remaining points are distributed based on contact point density per link")
+        print("  - This ensures all links are visible, not just the highest force areas")
         print("")
         print("Memory Usage Guidelines:")
         print("  - 100-500 spheres: Normal memory usage")
@@ -786,8 +940,8 @@ def main():
                 print("No valid coordinate columns found")
                 return
     
-    # Create contact force visualization
-    contact_forces = create_contact_force_visualization(df, x_col, y_col, z_col, max_spheres_override, filter_foot_contacts, custom_filter_bodies)
+    # Create contact force visualization with proportional distribution by body2_name
+    contact_forces = create_contact_force_visualization(df, x_col, y_col, z_col, max_spheres_override, filter_foot_contacts, custom_filter_bodies, min_points_per_link=5)
     
     if not contact_forces:
         print("No contact forces to display")
