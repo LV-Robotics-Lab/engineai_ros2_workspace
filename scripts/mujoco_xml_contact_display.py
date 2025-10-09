@@ -536,8 +536,11 @@ def show_mujoco_viewer_with_spheres(model, data, contact_forces):
     print("  - Scroll: Zoom")
     print("  - Right click: Pan")
     print("  - ESC: Exit")
-    print("  - 右键点击查看器窗口可以打开菜单，查看Contact、Force等信息")
-    print("  - 菜单中可以启用/禁用各种渲染选项")
+    print("  - 在左侧Rendering面板中，将Label设置为'Force'")
+    print("  - 在Model Elements中，点击'Contact Force'按钮（会显示红色边框）")
+    print("  - 这样就会在3D视图中显示接触力的数值标签")
+    print("  - 按 'L' 键也可以切换标签显示")
+    print("  - 当前已启用接触力数值标签显示")
     
     # Import viewer module
     try:
@@ -569,7 +572,12 @@ def show_mujoco_viewer_with_spheres(model, data, contact_forces):
             print(f"Sphere sizes represent force magnitude")
             print(f"Colors: Red (high force) to Yellow (low force)")
             print(f"Contact points are enabled")
-            print(f"Force values are printed to console")
+            print(f"Contact force labels are enabled")
+            print(f"To see force values in 3D viewer:")
+            print(f"  1. Set Label to 'Force' in left panel")
+            print(f"  2. Click 'Contact Force' button in Model Elements")
+            print(f"  3. Force values will appear as white text labels")
+            print(f"Force values are also printed to console")
             
             # Print top 10 highest force values for reference
             print(f"\nTop 10 Highest Force Values:")
