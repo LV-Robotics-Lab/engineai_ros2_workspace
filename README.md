@@ -108,7 +108,7 @@ cd /home/wang22/engineai/engineai_ros2_workspace && conda activate engineai_ros2
 ./src/third_party/install.sh
 ./scripts/build_nodes.sh sim    # or colcon build --packages-select mujoco_simulator , or colcon build
 ./scripts/build_nodes_4090.sh sim
-source install/setup.bash
+source install/setup.bash 
 # ros2 launch mujoco_simulator mujoco_simulator.launch.py
 ros2 launch mujoco_simulator mujoco_simulator.launch.py export_contact:=true save_contact_csv:=true save_perturbation_csv:=true 
 
@@ -118,9 +118,15 @@ ros2 launch mujoco_simulator mujoco_simulator.launch.py export_contact:=true sav
 
 # terminal 2 开RL
 ## XZL policy from engineai, 先开RL控制器，再开mujoco
+source install/setup.bash
 ros2 launch interface_example rl_basic_example_XZL.launch.py
 ## 通过修改 pm_v2.yaml 里 perturbation 组参数来改变推力大小；
 ## 通过修改 rl_basic_param_XZL.yaml 里 initial_velocity 组参数来改变初始速度
+## 滑倒采样, 如果没有设置priority属性，MuJoCo会取最大值
+## ground.xml friction="0.1"
+## serial_pm_v2_mesh.xml foot 和 toe 的 friction=0.1
+## pm_v2.yaml default_force_magnitude = 0.0, auto_sampling = true
+## rl_basic_param_XZL.yaml linear velocity = 2.0
 
 # # 自定义推倒采样参数
 # ros2 launch mujoco_simulator perturbation_simulator.launch.py \

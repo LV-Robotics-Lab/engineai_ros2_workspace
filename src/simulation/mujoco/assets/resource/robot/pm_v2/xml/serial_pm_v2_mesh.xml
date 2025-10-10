@@ -55,18 +55,18 @@
                 <!-- 左脚碰撞几何体 - 使用mesh模型进行精确碰撞检测 -->
                 <default class="collision_left_foot">
                     <!-- <geom type="mesh" mesh="LINK_ANKLE_ROLL_L" rgba="0.804 0.361 0.031 0.5"/> -->
-                    <geom type="box" size="0.102292353 0.053555 0.01" pos="0.0170 0.00166 -0.03631" rgba="0.804 0.361 0.031 0.5"/>
+                    <geom type="box" size="0.102292353 0.053555 0.01" pos="0.0170 0.00166 -0.03631" rgba="0.804 0.361 0.031 0.5" friction="0.1 0.005 0.0001"/>
                 </default>
 
                 <!-- 左脚脚趾碰撞几何体 - 使用mesh模型进行精确碰撞检测 -->
                 <default class="collision_left_foot_toe">
-                    <geom type="box" size="0.028 0.047805 0.01" quat="0.9741537 0 -0.2258863 0" pos="0.139 0.0 -0.0235" rgba="0.804 0.361 0.031 0.5"/>
+                    <geom type="box" size="0.028 0.047805 0.01" quat="0.9741537 0 -0.2258863 0" pos="0.139 0.0 -0.0235" rgba="0.804 0.361 0.031 0.5" friction="0.1 0.005 0.0001"/>
                 </default>
 
                 <!-- 右脚碰撞几何体 - 使用mesh模型进行精确碰撞检测 -->
                 <default class="collision_right_foot">
                     <!-- <geom type="mesh" mesh="LINK_ANKLE_ROLL_R" rgba="0.804 0.361 0.031 0.5"/> -->
-                    <geom type="box" size="0.102292353 0.053555 0.01" pos="0.0170 -0.00166 -0.03631" rgba="0.804 0.361 0.031 0.5"/>
+                    <geom type="box" size="0.102292353 0.053555 0.01" pos="0.0170 -0.00166 -0.03631" rgba="0.804 0.361 0.031 0.5" friction="0.1 0.005 0.0001"/>
                 </default>
 
                 <!-- 右脚脚趾碰撞几何体 - 使用mesh模型进行精确碰撞检测 -->
