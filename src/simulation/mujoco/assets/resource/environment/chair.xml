@@ -1,12 +1,36 @@
-<mujoco model = "chair">
+<mujoco model="chair">
+
+    <!-- 椅子材质定义 -->
+    <asset>
+        <material name="chair_material" rgba="0.6 0.4 0.2 1" specular="0.3" shininess="0.1"/>
+    </asset>
+
+    <!-- 椅子物理属性默认设置 -->
+    <default>
+        <default class="chair_geom">
+            <geom material="chair_material" 
+                   contype="2" conaffinity="3" 
+                   friction="0.7 0.005 0.0001" 
+                   condim="6" 
+                   solimp="0.9 0.95" 
+                   solref="0.0005 1"/>
+        </default>
+    </default>
 
     <worldbody>
-        <body name="chair" pos="-0.20 0 0.475">
-            <geom name="chair_box" type="box" size="0.2 0.20 0.02" pos="0 0 0" mass="10" class="collision"/>
-            <geom name="chair_cylinder_front_left" type="cylinder" size="0.02 0.23" pos="0.2 0.18 -0.23" mass="10" class="collision"/>
-            <geom name="chair_cylinder_front_right" type="cylinder" size="0.02 0.23" pos="0.2 -0.18 -0.23" mass="10" class="collision"/>
-            <geom name="chair_cylinder_behind_left" type="cylinder" size="0.02 0.23" pos="-0.2 0.18 -0.23" mass="10" class="collision"/>
-            <geom name="chair_cylinder_behind_right" type="cylinder" size="0.02 0.23" pos="-0.2 -0.18 -0.23" mass="10" class="collision"/>
+        <!-- 椅子主体 - 放置在机器人前方，让机器人能撞到它 -->
+        <body name="chair" pos="0.8 0 0.475">
+            <!-- 椅子座面 -->
+            <geom name="chair_seat" type="box" size="0.2 0.20 0.02" pos="0 0 0" mass="5" class="chair_geom"/>
+            
+            <!-- 椅子靠背 -->
+            <geom name="chair_back" type="box" size="0.02 0.20 0.25" pos="0.18 0 0.125" mass="3" class="chair_geom"/>
+            
+            <!-- 椅子腿 -->
+            <geom name="chair_leg_front_left" type="cylinder" size="0.02 0.23" pos="0.15 0.15 -0.23" mass="2" class="chair_geom"/>
+            <geom name="chair_leg_front_right" type="cylinder" size="0.02 0.23" pos="0.15 -0.15 -0.23" mass="2" class="chair_geom"/>
+            <geom name="chair_leg_back_left" type="cylinder" size="0.02 0.23" pos="-0.15 0.15 -0.23" mass="2" class="chair_geom"/>
+            <geom name="chair_leg_back_right" type="cylinder" size="0.02 0.23" pos="-0.15 -0.15 -0.23" mass="2" class="chair_geom"/>
         </body>
     </worldbody>
 
