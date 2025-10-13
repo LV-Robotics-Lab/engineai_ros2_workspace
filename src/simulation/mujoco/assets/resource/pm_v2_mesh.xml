@@ -9,4 +9,5 @@
     
     <!-- 环境配置 -->
     <include file="environment/ground.xml"/>
+    <!-- <include file="environment/terrain.xml"/> -->
 </mujoco>
