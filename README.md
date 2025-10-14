@@ -122,11 +122,18 @@ source install/setup.bash
 ros2 launch interface_example rl_basic_example_XZL.launch.py
 ## 通过修改 pm_v2.yaml 里 perturbation 组参数来改变推力大小；
 ## 通过修改 rl_basic_param_XZL.yaml 里 initial_velocity 组参数来改变初始速度
-## 滑倒采样, 如果没有设置priority属性，MuJoCo会取最大值
+
+## 滑倒采样（如果没有设置priority属性，MuJoCo会取最大值）
 ## ground.xml friction="0.1"
 ## serial_pm_v2_mesh.xml foot 和 toe 的 friction=0.1
 ## pm_v2.yaml default_force_magnitude = 0.0, auto_sampling = true
 ## rl_basic_param_XZL.yaml linear velocity = 2.0
+
+## 绊倒采样
+## pm_v2_mesh.xml, 取消 terrain.xml的注释
+## pm_v2.yaml default_force_magnitude = 0.0, auto_sampling = true
+
+
 
 # # 自定义推倒采样参数
 # ros2 launch mujoco_simulator perturbation_simulator.launch.py \
@@ -157,7 +164,7 @@ chmod +x /home/wang22/engineai/engineai_ros2_workspace/scripts/automated_collect
 cd /home/wang22/engineai/engineai_ros2_workspace
 conda activate engineai_ros2
 # plot contact force max
-python3 scripts/analyze_contact_forces.py logs/contact_data_20250913_181435.csv
+python3 scripts/analyze_contact_forces.py logs/forward-200.0N-20251005_162754/merged_contact_data_forward-200.0N-20251005_162754_20251005_171533.csv
 # plot contact point with force
 # 先升级mujoco
 pip install mujoco==3.3.6
@@ -196,6 +203,7 @@ python /home/wang22/engineai/engineai_ros2_workspace/scripts/FreeBallTest/iron_b
 # main中，urdf提供机器人link父子关系，xml提供初始位姿，
 chmod +x ./scripts/MeshCombine/install_dependencies.sh
 ./scripts/MeshCombine/install_dependencies.sh
+conda activate urdf_mesh_tools
 python ./scripts/MeshCombine/urdf_mesh_combiner.py
 
 git push origin bench
