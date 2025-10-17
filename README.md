@@ -157,6 +157,10 @@ ros2 launch interface_example rl_basic_example_XZL.launch.py
 # terminal 1&2 自动采集碰撞
 chmod +x /home/wang22/engineai/engineai_ros2_workspace/scripts/automated_collection.sh
 ./scripts/automated_collection.sh
+# 断电摔倒采样
+# pm_v2.yaml default_force_magnitude = 0.0, auto_sampling = true, 然后运行下面代码
+chmod +x /home/wang22/engineai/engineai_ros2_workspace/scripts/automated_collection_poweroff.sh
+./scripts/automated_collection_poweroff.sh
 
 # terminal 3
 # choose mesh or geometry: in src/simulation/mujoco/assets/config/pm_v2.yaml

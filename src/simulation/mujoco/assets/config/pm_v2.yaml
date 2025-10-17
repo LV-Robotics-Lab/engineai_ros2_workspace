@@ -38,7 +38,7 @@ perturbation:
   force_step: 20.0                  # 推力调整步长（牛顿），用于+/-键调整推力大小
   torque_step: 5.0                  # 扭矩调整步长（牛·米），用于+/-键调整推力大小
   force_duration: 0.5               # 推力持续时间（秒），按下键盘后推力持续的时间
-  auto_sampling: true
+  auto_sampling: false
   auto_direction: "forward"         # 施加推力时的推力方向（forward/backward/left/right）
   auto_delay: 2.0                   # 施加推力等待时间（秒）
 
