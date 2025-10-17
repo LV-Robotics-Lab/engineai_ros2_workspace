@@ -132,7 +132,10 @@ ros2 launch interface_example rl_basic_example_XZL.launch.py
 ## 绊倒采样
 ## pm_v2_mesh.xml, 取消 terrain.xml的注释
 ## pm_v2.yaml default_force_magnitude = 0.0, auto_sampling = true
-
+## 前进绊倒，linear: [2.0, 0.0, 0.0], geom pos="2.5 0.0 0.075" type="box" size="0.15 5.0 0.075"
+## 后退绊倒，linear: [-2.0, 0.0, 0.0], geom pos="-2.5 0.0 0.075" type="box" size="0.15 5.0 0.075"
+## 左移绊倒，linear: [0.0, 2.0, 0.0], geom pos="0.0 2.5 0.075" type="box" size="5.0 0.15 0.075"
+## 右移绊倒，linear: [0.0, -2.0, 0.0], geom pos="0.0 -2.5 0.075" type="box" size="5.0 0.15 0.075"
 
 
 # # 自定义推倒采样参数
