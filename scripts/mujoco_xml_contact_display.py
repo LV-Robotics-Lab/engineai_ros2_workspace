@@ -166,7 +166,7 @@ def get_user_joint_selection(available_bodies, joint_filter_str=None):
             
             if not user_input:
                 # Default: only filter foot contacts
-                return ['LINK_ANKLE_ROLL_L', 'LINK_ANKLE_ROLL_R', 'LINK_ANKLE_PITCH_L', 'LINK_ANKLE_PITCH_R', 'LINK_FOOT_L', 'LINK_FOOT_R']
+                return ['LINK_ANKLE_ROLL_L', 'LINK_ANKLE_ROLL_R', 'LINK_ANKLE_PITCH_L', 'LINK_ANKLE_PITCH_R']
             
             if user_input.lower() == 'all':
                 return available_bodies
@@ -205,7 +205,7 @@ def get_user_joint_selection(available_bodies, joint_filter_str=None):
             print("Invalid input. Please enter numbers separated by commas, or 'all'/'none'")
         except KeyboardInterrupt:
             print("\nOperation cancelled.")
-            return ['LINK_ANKLE_ROLL_L', 'LINK_ANKLE_ROLL_R', 'LINK_ANKLE_PITCH_L', 'LINK_ANKLE_PITCH_R', 'LINK_FOOT_L', 'LINK_FOOT_R']
+            return ['LINK_ANKLE_ROLL_L', 'LINK_ANKLE_ROLL_R', 'LINK_ANKLE_PITCH_L', 'LINK_ANKLE_PITCH_R']
 
 def cluster_nearby_contacts(contact_forces, min_distance=0.1):
     """Cluster nearby contact points to avoid overlapping spheres
@@ -271,7 +271,7 @@ def cluster_nearby_contacts(contact_forces, min_distance=0.1):
     
     return clustered_forces
 
-def create_contact_force_visualization(df, x_col, y_col, z_col, max_spheres_override=None, custom_filter_bodies=None, min_points_per_link=5, min_sphere_distance=0.01, enable_clustering=True):
+def create_contact_force_visualization(df, x_col, y_col, z_col, max_spheres_override=None, custom_filter_bodies=None, min_points_per_link=5, min_sphere_distance=0.01, enable_clustering=True, uniform_distribution=False):
     """Create contact force visualization data with sphere sizes based on force magnitude
     Now supports proportional distribution by body2_name with minimum points per link
     min_sphere_distance: minimum distance between sphere centers to avoid overlap"""
@@ -409,8 +409,14 @@ def create_contact_force_visualization(df, x_col, y_col, z_col, max_spheres_over
             max_spheres = total_contacts
             print(f"Small dataset ({total_contacts} points), displaying all contact points")
     
-    # Calculate proportional distribution
-    print(f"\n=== Step 2: 按body2_name分配显示点 ===")
+    # Calculate distribution based on uniform_distribution parameter
+    if uniform_distribution:
+        print(f"\n=== Step 2: 按body2_name均匀分配显示点 ===")
+        print(f"分配方式: 均匀分配（每个link获得相同数量的额外点）")
+    else:
+        print(f"\n=== Step 2: 按body2_name比例分配显示点 ===")
+        print(f"分配方式: 比例分配（接触点多的link获得更多显示点）")
+    
     print(f"聚类后接触点数: {total_contacts}")
     print(f"总body数量: {num_bodies}")
     print(f"最大显示点数: {max_spheres}")
@@ -433,23 +439,72 @@ def create_contact_force_visualization(df, x_col, y_col, z_col, max_spheres_over
             body_point_counts[body_name] = min_points_per_link
         remaining_points = max_spheres - (min_points_per_link * num_bodies)
     
-    # Second pass: distribute remaining points proportionally
+    # Second pass: distribute remaining points based on distribution type
     if remaining_points > 0:
-        # Calculate total available points per body (excluding already assigned minimum)
-        total_available = sum(max(0, len(body_contact_forces[body_name]) - min_points_per_link) 
-                            for body_name in body_contact_forces.keys())
-        
-        if total_available > 0:
-            for body_name, contact_forces in body_contact_forces.items():
-                available_points = max(0, len(contact_forces) - min_points_per_link)
-                if available_points > 0:
-                    # Proportional distribution
-                    additional_points = int(remaining_points * available_points / total_available)
-                    body_point_counts[body_name] += additional_points
+        if uniform_distribution:
+            # Uniform distribution: each body gets equal additional points
+            points_per_body = remaining_points // num_bodies
+            extra_points = remaining_points % num_bodies
+            
+            for i, body_name in enumerate(body_contact_forces.keys()):
+                additional_points = points_per_body + (1 if i < extra_points else 0)
+                body_point_counts[body_name] += additional_points
+        else:
+            # Proportional distribution: bodies with more contacts get more points
+            total_available = sum(max(0, len(body_contact_forces[body_name]) - min_points_per_link) 
+                                for body_name in body_contact_forces.keys())
+            
+            if total_available > 0:
+                for body_name, contact_forces in body_contact_forces.items():
+                    available_points = max(0, len(contact_forces) - min_points_per_link)
+                    if available_points > 0:
+                        # Proportional distribution
+                        additional_points = int(remaining_points * available_points / total_available)
+                        body_point_counts[body_name] += additional_points
     
     # Final pass: ensure we don't exceed available points for each body
     for body_name, contact_forces in body_contact_forces.items():
         body_point_counts[body_name] = min(body_point_counts[body_name], len(contact_forces))
+    
+    # Redistribute points from bodies with no contacts to bodies with contacts
+    bodies_with_contacts = [body_name for body_name, contact_forces in body_contact_forces.items() if len(contact_forces) > 0]
+    bodies_without_contacts = [body_name for body_name, contact_forces in body_contact_forces.items() if len(contact_forces) == 0]
+    
+    if bodies_without_contacts and bodies_with_contacts:
+        print(f"\n=== 重新分配无碰撞点的显示量 ===")
+        print(f"无碰撞点的body: {bodies_without_contacts}")
+        print(f"有碰撞点的body: {bodies_with_contacts}")
+        
+        # Calculate total points to redistribute
+        points_to_redistribute = sum(body_point_counts[body_name] for body_name in bodies_without_contacts)
+        print(f"需要重新分配的显示点: {points_to_redistribute}")
+        
+        if points_to_redistribute > 0:
+            # Reset points for bodies without contacts
+            for body_name in bodies_without_contacts:
+                body_point_counts[body_name] = 0
+            
+            # Redistribute points to bodies with contacts
+            if uniform_distribution:
+                # Uniform redistribution
+                points_per_body = points_to_redistribute // len(bodies_with_contacts)
+                extra_points = points_to_redistribute % len(bodies_with_contacts)
+                
+                for i, body_name in enumerate(bodies_with_contacts):
+                    additional_points = points_per_body + (1 if i < extra_points else 0)
+                    body_point_counts[body_name] += additional_points
+            else:
+                # Proportional redistribution based on contact count
+                total_contacts = sum(len(body_contact_forces[body_name]) for body_name in bodies_with_contacts)
+                if total_contacts > 0:
+                    for body_name in bodies_with_contacts:
+                        contact_count = len(body_contact_forces[body_name])
+                        additional_points = int(points_to_redistribute * contact_count / total_contacts)
+                        body_point_counts[body_name] += additional_points
+            
+            print(f"重新分配完成，各body新的显示点数:")
+            for body_name in bodies_with_contacts:
+                print(f"  {body_name}: {body_point_counts[body_name]} 点")
     
     # Select contact forces for each body
     final_contact_forces = []
@@ -871,7 +926,7 @@ def load_mujoco_model_with_contact_spheres(xml_file, contact_forces):
 def main():
     """Main function"""
     if len(sys.argv) < 3:
-        print("Usage: python3 mujoco_xml_contact_display.py <csv_file> <xml_file> [world|robot_frame] [max_spheres] [joint_filter] [enable_clustering]")
+        print("Usage: python3 mujoco_xml_contact_display.py <csv_file> <xml_file> [world|robot_frame] [max_spheres] [joint_filter] [enable_clustering] [uniform_distribution]")
         print("")
         print("Examples:")
         print("  # Using robot frame coordinates (default)")
@@ -898,6 +953,12 @@ def main():
         print("  # Disable clustering to show more points (default)")
         print("  python3 mujoco_xml_contact_display.py logs/contact_data.csv src/simulation/mujoco/assets/resource/pm_v2_mesh.xml robot_frame 1500 \"\" false")
         print("")
+        print("  # Enable uniform distribution (each link gets equal points)")
+        print("  python3 mujoco_xml_contact_display.py logs/contact_data.csv src/simulation/mujoco/assets/resource/pm_v2_mesh.xml robot_frame 1500 \"\" false true")
+        print("")
+        print("  # Use proportional distribution (default)")
+        print("  python3 mujoco_xml_contact_display.py logs/contact_data.csv src/simulation/mujoco/assets/resource/pm_v2_mesh.xml robot_frame 1500 \"\" false false")
+        print("")
         print("CSV Format Support:")
         print("  - New format: timestamp, contact_id, body1_name, body2_name, pos_x/y/z, robot_frame_x/y/z, force_magnitude, force_normal, etc.")
         print("  - Includes: base_link pose, collision_link pose, joint angles")
@@ -909,9 +970,11 @@ def main():
         print("  max_spheres: Maximum number of spheres to display (default: auto)")
         print("  filter_foot: Filter out foot contacts (true/false, default: true)")
         print("  joint_filter: Joint numbers to exclude (e.g., 1,2,3 or 1-5, default: interactive)")
+        print("  enable_clustering: Enable contact clustering (true/false, default: false)")
+        print("  uniform_distribution: Use uniform distribution (true/false, default: false)")
         print("")
         print("Note: Contact forces will be displayed as spheres with sizes proportional to force magnitude")
-        print("Foot contacts (LINK_ANKLE_*, LINK_FOOT_*) are filtered out by default")
+        print("Foot contacts (LINK_ANKLE_*) are filtered out by default")
         print("")
         print("New Feature - Proportional Distribution by body2_name:")
         print("  - Contact points are now distributed proportionally across different body2_name links")
@@ -974,6 +1037,18 @@ def main():
             enable_clustering = False
         else:
             print("Error: enable_clustering must be true/false")
+            return
+    
+    # Check for uniform_distribution parameter
+    uniform_distribution = False  # default to proportional distribution
+    if len(sys.argv) >= 8:
+        uniform_str = sys.argv[7].lower()
+        if uniform_str in ['true', '1', 'yes', 'y']:
+            uniform_distribution = True
+        elif uniform_str in ['false', '0', 'no', 'n']:
+            uniform_distribution = False
+        else:
+            print("Error: uniform_distribution must be true/false")
             return
     
     if not os.path.exists(csv_file):
@@ -1062,9 +1137,9 @@ def main():
                 print("No valid coordinate columns found")
                 return
     
-    # Create contact force visualization with proportional distribution by body2_name
+    # Create contact force visualization with distribution by body2_name
     # Use clustering settings from main function
-    contact_forces = create_contact_force_visualization(df, x_col, y_col, z_col, max_spheres_override, excluded_links, min_points_per_link=5, min_sphere_distance=min_sphere_distance, enable_clustering=enable_clustering)
+    contact_forces = create_contact_force_visualization(df, x_col, y_col, z_col, max_spheres_override, excluded_links, min_points_per_link=1, min_sphere_distance=min_sphere_distance, enable_clustering=enable_clustering, uniform_distribution=uniform_distribution)
     
     if not contact_forces:
         print("No contact forces to display")

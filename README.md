@@ -179,7 +179,8 @@ pip install mujoco==3.3.6
 python3 scripts/merge_contact_data.py logs/forward-200.0N-0.5s-20251006_024402
 # 对合并后的csv进行碰撞点显示
 # 使用机器人坐标系（默认）， 后面的参数 1000 是显示点数量，1、2是 过滤掉足部的点
-python3 scripts/mujoco_xml_contact_display.py logs/forward-00.0N-0.5s-20251021_184351/contact_data_20251021_184355.csv src/simulation/mujoco/assets/resource/pm_v2_mesh.xml robot_frame 1500
+# python3 mujoco_xml_contact_display.py <csv_file> <xml_file> [world|robot_frame] [max_spheres] [joint_filter] [enable_clustering] [uniform_distribution]
+python3 scripts/mujoco_xml_contact_display.py logs/forward-00.0N-0.5s-20251021_190128/contact_data_20251021_190131.csv src/simulation/mujoco/assets/resource/pm_v2_mesh.xml robot_frame 1500 "" false true
 
 # 排除特定关节
 python3 scripts/mujoco_xml_contact_display.py csv_file xml_file robot_frame 1500 "1,2,3"
@@ -189,6 +190,12 @@ python3 scripts/mujoco_xml_contact_display.py csv_file xml_file robot_frame 1500
 
 # 禁用聚类（默认）
 python3 scripts/mujoco_xml_contact_display.py csv_file xml_file robot_frame 1500 "" false
+
+# 均匀分配（每个link获得相同数量的点）
+python3 scripts/mujoco_xml_contact_display.py csv_file xml_file robot_frame 1500 "" false true
+
+# 比例分配（默认，接触点多的link获得更多点）
+python3 scripts/mujoco_xml_contact_display.py csv_file xml_file robot_frame 1500 "" false false
 
 # 使用世界坐标系
 python3 scripts/mujoco_xml_contact_display.py logs/contact_data_20250831_125541.csv src/simulation/mujoco/assets/resource/pm_v2_mesh.xml world

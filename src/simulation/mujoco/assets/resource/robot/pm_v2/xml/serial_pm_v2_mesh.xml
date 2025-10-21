@@ -43,13 +43,15 @@
                 </default>
 
                 <!-- 基座上部碰撞几何体 - 使用mesh模型进行精确碰撞检测 -->
+                <!-- contype="4" conaffinity="4": 基座碰撞组，与HIP_PITCH不产生碰撞 -->
                 <default class="collision_base_upper_box">
-                    <geom type="mesh" mesh="LINK_BASE" rgba="0.804 0.361 0.031 0.5"/>
+                    <geom type="mesh" mesh="LINK_BASE" rgba="0.804 0.361 0.031 0.5" contype="4" conaffinity="4"/>
                 </default>
 
                 <!-- 基座下部碰撞几何体 - 使用mesh模型进行精确碰撞检测 -->
+                <!-- contype="4" conaffinity="4": 基座碰撞组，与HIP_PITCH不产生碰撞 -->
                 <default class="collision_base_lower_box">
-                    <geom type="mesh" mesh="LINK_BASE" rgba="0.804 0.361 0.031 0.5"/>
+                    <geom type="mesh" mesh="LINK_BASE" rgba="0.804 0.361 0.031 0.5" contype="4" conaffinity="4"/>
                 </default>
 
                 <!-- 左脚碰撞几何体 - 使用mesh模型进行精确碰撞检测 -->
@@ -105,13 +107,15 @@
                 </default>
 
                 <!-- 左髋关节碰撞几何体 - 使用mesh模型进行精确碰撞检测 -->
+                <!-- contype="8" conaffinity="8": 髋关节碰撞组，与BASE不产生碰撞 -->
                 <default class="collision_hip_left">
-                    <geom type="mesh" mesh="LINK_HIP_PITCH_L" rgba="0.804 0.361 0.031 0.5"/>
+                    <geom type="mesh" mesh="LINK_HIP_PITCH_L" rgba="0.804 0.361 0.031 0.5" contype="8" conaffinity="8"/>
                 </default>
 
                 <!-- 右髋关节碰撞几何体 - 使用mesh模型进行精确碰撞检测 -->
+                <!-- contype="8" conaffinity="8": 髋关节碰撞组，与BASE不产生碰撞 -->
                 <default class="collision_hip_right">
-                    <geom type="mesh" mesh="LINK_HIP_PITCH_R" rgba="0.804 0.361 0.031 0.5"/>
+                    <geom type="mesh" mesh="LINK_HIP_PITCH_R" rgba="0.804 0.361 0.031 0.5" contype="8" conaffinity="8"/>
                 </default>
 
                 <!-- 左膝盖碰撞几何体 - 使用mesh模型进行精确碰撞检测 -->
