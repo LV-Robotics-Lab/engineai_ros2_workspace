@@ -800,7 +800,7 @@ def load_mujoco_model_with_contact_spheres(xml_file, contact_forces):
             force_ratio = cf['max_force'] / max_force if max_force > 0 else 0
             # Use logarithmic scaling for better visualization
             log_ratio = np.log10(1 + 9 * force_ratio) / np.log10(10)  # Maps 0-1 to 0-1 with log scaling
-            radius = 0.005 + 0.045 * log_ratio  # Range: 0.005 - 0.05 meters
+            radius = 0.003 + 0.01 * log_ratio  # Range: 0.003 - 0.01 meters (3-10mm)
             pos = cf['position']
             
             # Color based on force magnitude (red for high force, yellow for low force)
