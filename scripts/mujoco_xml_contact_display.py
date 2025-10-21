@@ -216,6 +216,11 @@ def cluster_nearby_contacts(contact_forces, min_distance=0.1):
     
     print(f"Clustering nearby contacts with minimum distance: {min_distance}m")
     
+    # For very large datasets, use simpler clustering
+    if len(contact_forces) > 10000:
+        print("Large dataset detected, using simplified clustering...")
+        return cluster_nearby_contacts_simple(contact_forces, min_distance)
+    
     # Convert to numpy arrays for easier computation
     positions = np.array([cf['position'] for cf in contact_forces])
     forces = [cf['max_force'] for cf in contact_forces]
@@ -226,9 +231,11 @@ def cluster_nearby_contacts(contact_forces, min_distance=0.1):
     
     # Union-Find data structure for clustering
     def find_root(x):
-        if cluster_ids[x] != x:
-            cluster_ids[x] = find_root(cluster_ids[x])
-        return cluster_ids[x]
+        # Use iterative approach to avoid recursion depth issues
+        while cluster_ids[x] != x:
+            cluster_ids[x] = cluster_ids[cluster_ids[x]]  # Path compression
+            x = cluster_ids[x]
+        return x
     
     def union(x, y):
         root_x, root_y = find_root(x), find_root(y)
@@ -236,11 +243,23 @@ def cluster_nearby_contacts(contact_forces, min_distance=0.1):
             cluster_ids[root_x] = root_y
     
     # Build distance matrix and merge nearby clusters
+    # Limit the number of comparisons for large datasets
+    max_comparisons = min(1000000, n_points * (n_points - 1) // 2)  # Limit to 1M comparisons
+    comparison_count = 0
+    
     for i in range(n_points):
         for j in range(i + 1, n_points):
+            if comparison_count >= max_comparisons:
+                print(f"Warning: Reached maximum comparisons limit ({max_comparisons}), stopping clustering")
+                break
+                
             distance = np.linalg.norm(positions[i] - positions[j])
             if distance < min_distance:
                 union(i, j)
+            comparison_count += 1
+        
+        if comparison_count >= max_comparisons:
+            break
     
     # Group points by cluster
     clusters = {}
@@ -269,6 +288,58 @@ def cluster_nearby_contacts(contact_forces, min_distance=0.1):
         elif reduction_ratio > 0.8:  # More than 80% remaining
             print("Info: Light clustering. Consider decreasing min_distance to reduce overlaps.")
     
+    return clustered_forces
+
+def cluster_nearby_contacts_simple(contact_forces, min_distance=0.1):
+    """Simplified clustering for large datasets using spatial hashing"""
+    if not contact_forces:
+        return []
+    
+    print(f"Using simplified clustering for large dataset with minimum distance: {min_distance}m")
+    
+    # Use spatial hashing for faster clustering
+    hash_size = min_distance
+    spatial_hash = {}
+    
+    # Hash all points
+    for i, cf in enumerate(contact_forces):
+        pos = cf['position']
+        hash_key = (int(pos[0] / hash_size), int(pos[1] / hash_size), int(pos[2] / hash_size))
+        if hash_key not in spatial_hash:
+            spatial_hash[hash_key] = []
+        spatial_hash[hash_key].append((i, cf))
+    
+    # Cluster points within the same or adjacent hash cells
+    clustered_forces = []
+    processed = set()
+    
+    for hash_key, points in spatial_hash.items():
+        if len(points) == 0:
+            continue
+            
+        # Find the point with maximum force in this cell
+        max_force_cf = max(points, key=lambda x: x[1]['max_force'])
+        clustered_forces.append(max_force_cf[1])
+        processed.add(max_force_cf[0])
+        
+        # Check adjacent cells for nearby points
+        for dx in [-1, 0, 1]:
+            for dy in [-1, 0, 1]:
+                for dz in [-1, 0, 1]:
+                    if dx == 0 and dy == 0 and dz == 0:
+                        continue
+                    adj_key = (hash_key[0] + dx, hash_key[1] + dy, hash_key[2] + dz)
+                    if adj_key in spatial_hash:
+                        for i, cf in spatial_hash[adj_key]:
+                            if i not in processed:
+                                # Check if within distance
+                                pos1 = max_force_cf[1]['position']
+                                pos2 = cf['position']
+                                distance = np.linalg.norm(np.array(pos1) - np.array(pos2))
+                                if distance < min_distance:
+                                    processed.add(i)
+    
+    print(f"Simplified clustering: {len(contact_forces)} -> {len(clustered_forces)} points")
     return clustered_forces
 
 def create_contact_force_visualization(df, x_col, y_col, z_col, max_spheres_override=None, custom_filter_bodies=None, min_points_per_link=5, min_sphere_distance=0.01, enable_clustering=True, uniform_distribution=False):
@@ -1090,7 +1161,7 @@ def main():
     print(f"总共排除的关节: {excluded_links}")
     
     # 聚类参数设置
-    min_sphere_distance = 0.05  # 最小球体中心距离 (米) - 可调整此参数
+    min_sphere_distance = 0.005  # 最小球体中心距离 (米) - 如果两个点距离 < min_sphere_distance，就合并为一类
     print(f"\n=== 聚类参数设置 ===")
     print(f"聚类功能: {'启用' if enable_clustering else '禁用'}")
     if enable_clustering:
