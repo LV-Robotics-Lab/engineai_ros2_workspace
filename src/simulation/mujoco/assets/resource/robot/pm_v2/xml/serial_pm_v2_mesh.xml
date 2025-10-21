@@ -244,7 +244,7 @@
                  fullinertia: 完整惯性矩阵，包含转动惯量和惯性积 -->
             <inertial pos="0.01525750 -0.00001621 -0.02333111" mass="4.08640035" fullinertia="0.02021593 0.01531282 0.01216285 -0.00000120 -0.00037784 -0.00000295"/>
             <!-- 基座视觉几何体 - 使用高精度mesh模型显示基座外观 -->
-            <geom type="mesh" rgba="0.75294 0.75294 0.75294 1" mesh="LINK_BASE" class="visual"/>
+            <geom type="mesh" rgba="0.5 0.5 0.5 1" mesh="LINK_BASE" class="visual"/>
             <!-- 基座碰撞几何体 - 使用mesh模型进行精确碰撞检测 -->
             <geom class="collision_base_lower_box"/>
             <!-- 基座参考点设置 -->
