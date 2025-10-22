@@ -69,6 +69,7 @@ class SimManager {
 
 // 全局函数声明
 void ApplyPerturbationForcesFromSimManager();
+bool IsContactVisualizationEnabled();
   
   // Get all active perturbations for CSV recording
   std::vector<PerturbationData> GetActivePerturbations() const;
@@ -89,6 +90,9 @@ void ApplyPerturbationForcesFromSimManager();
   
   // 重置auto_sampling状态，用于MuJoCo重置后重新触发推力
   void ResetAutoSampling();
+  
+  // 获取配置加载器
+  std::shared_ptr<ConfigLoader> GetConfigLoader() const { return config_loader_; }
 
  private:
   // Private constructor for singleton

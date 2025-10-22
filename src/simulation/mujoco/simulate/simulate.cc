@@ -21,6 +21,7 @@ class SimManager;
 
 // 全局函数声明
 void ApplyPerturbationForcesFromSimManager();
+bool IsContactVisualizationEnabled();
 
 #include <algorithm>
 #include <atomic>
@@ -2367,7 +2368,7 @@ void Simulate::Render() {
 
   // 设置接触点可视化选项 - 在每次渲染时都确保设置
   this->opt.flags[mjVIS_CONTACTPOINT] = 1;  // 显示接触点
-  this->opt.flags[mjVIS_CONTACTFORCE] = 1;  // 显示接触力
+  this->opt.flags[mjVIS_CONTACTFORCE] = IsContactVisualizationEnabled() ? 1 : 0;  // 根据配置文件决定是否显示接触力
   this->opt.flags[mjVIS_CONTACTSPLIT] = 1;  // 显示接触分离
   this->opt.flags[mjVIS_PERTFORCE] = 1;  // 显示施加的外力
 
