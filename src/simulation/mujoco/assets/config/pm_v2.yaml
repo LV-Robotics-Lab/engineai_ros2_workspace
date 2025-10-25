@@ -33,7 +33,7 @@ model_param:
 
 # 干扰力配置 - 定义默认的推力大小
 perturbation:
-  default_force_magnitude: 00.0    # 默认推力大小（牛顿），系统会自动按前后左右方向分配
+  default_force_magnitude: 200.0    # 默认推力大小（牛顿），系统会自动按前后左右方向分配
   default_torque_magnitude: 5.0     # 默认扭矩大小（牛·米）
   force_step: 20.0                  # 推力调整步长（牛顿），用于+/-键调整推力大小
   torque_step: 5.0                  # 扭矩调整步长（牛·米），用于+/-键调整推力大小

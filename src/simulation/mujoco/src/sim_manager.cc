@@ -522,6 +522,15 @@ void ApplyPerturbationForcesFromSimManager() {
 }
 
 /**
+ * @brief 全局函数：获取接触力可视化设置
+ * @return 是否启用接触力可视化
+ * @details 这个函数被simulate.cc调用，用于获取配置文件中的接触力可视化设置
+ */
+bool IsContactVisualizationEnabled() {
+  return SimManager::GetInstance().GetConfigLoader()->IsContactVisualizationEnabled();
+}
+
+/**
  * @brief 重置auto_sampling状态
  * @details 用于MuJoCo重置后重新触发推力施加
  */
@@ -623,7 +632,7 @@ bool SimManager::Initialize() {
   
   // 启用接触点可视化 - 这是关键设置
   opt.flags[mjVIS_CONTACTPOINT] = 1;  // 显示接触点
-  opt.flags[mjVIS_CONTACTFORCE] = 1;  // 显示接触力
+  opt.flags[mjVIS_CONTACTFORCE] = config_loader_->IsContactVisualizationEnabled() ? 1 : 0;  // 根据配置文件决定是否显示接触力
   opt.flags[mjVIS_CONTACTSPLIT] = 1;  // 显示接触分离
   
   // 启用外力可视化 - 显示TorqueController施加的推力
@@ -1278,7 +1287,7 @@ void SimManager::PhysicsThread(std::string_view filename) {
 
       // 设置可视化选项 - 在模型加载后设置
       sim_->opt.flags[mjVIS_CONTACTPOINT] = 1;  // 显示接触点
-      sim_->opt.flags[mjVIS_CONTACTFORCE] = 1;  // 显示接触力
+      sim_->opt.flags[mjVIS_CONTACTFORCE] = config_loader_->IsContactVisualizationEnabled() ? 1 : 0;  // 根据配置文件决定是否显示接触力
       sim_->opt.flags[mjVIS_CONTACTSPLIT] = 1;  // 显示接触分离
       sim_->opt.flags[mjVIS_PERTFORCE] = 1;  // 显示施加的外力
       RCLCPP_INFO(logger, "Visualization flags set in sim_->opt: CONTACTPOINT=%d, CONTACTFORCE=%d, CONTACTSPLIT=%d, PERTFORCE=%d", 
