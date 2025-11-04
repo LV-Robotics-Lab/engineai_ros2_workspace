@@ -200,11 +200,24 @@ python3 scripts/mujoco_xml_contact_display.py csv_file xml_file robot_frame 1500
 # 使用世界坐标系
 python3 scripts/mujoco_xml_contact_display.py logs/contact_data_20250831_125541.csv src/simulation/mujoco/assets/resource/pm_v2_mesh.xml world
 
+python3 scripts/mujoco_xml_contact_display.py logs/4in1/merged_contact_data_4in1_20251026_194302.csv src/simulation/mujoco/assets/resource/pm_v2_mesh.xml robot_frame 1000 "" true true
+
+python3 scripts/mujoco_xml_contact_display.py logs/3in1/merged_contact_data_3in1_20251026_175503.csv src/simulation/mujoco/assets/resource/pm_v2_mesh.xml robot_frame 1000 "" true true
+
+python3 scripts/mujoco_xml_contact_display.py logs/test_push_100/merged_contact_data_test_push_100_20251026_033834.csv src/simulation/mujoco/assets/resource/pm_v2_mesh.xml robot_frame 1000 "" true true
+
 # 完整参数说明
 # 参数1: CSV文件路径
 # 参数2: XML或URDF文件路径
 # 参数3: 可视化类型 (sphere|cylinder) - 可选，默认为cylinder
 # 参数4: 坐标系统 (world|urdf) - 可选，默认为urdf
+
+1. Shoulder: shoulder_pitch, shoulder_roll;
+2. Elbow: shoulder_yaw, elbow_yaw, elbow_pitch;
+3. Torso: torso, 不分左右;
+4. Hip: base（根据robot_frame_y区分，y+是左，y-是右）, hip_pitch, hip_roll, hip_yaw（robot_frame_z > -0.25m);
+5. Knee: hip_yaw(robot_frame_z < -0.25m), knee_pitch (robot_frame_z >-0.5m)
+6. Crus: knee_pitch(robot_frame_z<-0.5m)
 
 # terminal 4
 # 小球撞地测试
