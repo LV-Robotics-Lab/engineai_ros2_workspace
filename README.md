@@ -215,9 +215,9 @@ python3 scripts/mujoco_xml_contact_display.py logs/test_push_100/merged_contact_
 1. Shoulder: shoulder_pitch, shoulder_roll;
 2. Elbow: shoulder_yaw, elbow_yaw, elbow_pitch;
 3. Torso: torso, 不分左右;
-4. Hip: base（根据robot_frame_y区分，y+是左，y-是右）, hip_pitch, hip_roll, hip_yaw（robot_frame_z > -0.25m);
-5. Knee: hip_yaw(robot_frame_z < -0.25m), knee_pitch (robot_frame_z >-0.5m)
-6. Crus: knee_pitch(robot_frame_z<-0.5m)
+4. Hip: base（根据robot_frame_y区分，y+是左，y-是右）, hip_pitch, hip_roll, hip_yaw（robot_frame_z > 0.55m);
+5. Knee: hip_yaw(robot_frame_z < 0.55m), knee_pitch (robot_frame_z >0.23m)
+6. Crus: knee_pitch(robot_frame_z<0.23m)
 
 # terminal 4
 # 小球撞地测试

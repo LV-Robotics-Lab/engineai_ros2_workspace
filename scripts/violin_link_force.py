@@ -227,17 +227,17 @@ def get_group_name(row):
         return f"{side}_Hip"
     if "hip_pitch" in link_name or "hip_roll" in link_name:
         return f"{side}_Hip"
-    if "hip_yaw" in link_name and robot_z > -0.25:
+    if "hip_yaw" in link_name and robot_z > 0.55:
         return f"{side}_Hip"
     
     # 5. Knee: hip_yaw (robot_frame_z < -0.25m), knee_pitch (robot_frame_z >= -0.5m)
-    if "hip_yaw" in link_name and robot_z < -0.25:
+    if "hip_yaw" in link_name and robot_z < 0.55:
         return f"{side}_Knee"
-    if "knee_pitch" in link_name and robot_z >= -0.5:
+    if "knee_pitch" in link_name and robot_z >= 0.23:
         return f"{side}_Knee"
     
     # 6. Crus: knee_pitch (robot_frame_z < -0.5m)
-    if "knee_pitch" in link_name and robot_z < -0.5:
+    if "knee_pitch" in link_name and robot_z < 0.23:
         return f"{side}_Crus"
     
     # Default: return original link name with side
