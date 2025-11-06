@@ -10,8 +10,19 @@ import pandas as pd
 import os
 import xml.etree.ElementTree as ET
 
-# 加载模型
-xml_path = "engineai_ros2_workspace/scripts/FreeBallTest/iron_ball_drop.xml"
+# 加载模型 - 使用脚本所在目录构建路径
+script_dir = os.path.dirname(os.path.abspath(__file__))
+xml_path = os.path.join(script_dir, "iron_ball_drop.xml")
+
+if not os.path.exists(xml_path):
+    # 如果当前目录找不到，尝试从工作空间根目录
+    workspace_root = os.path.dirname(os.path.dirname(os.path.dirname(script_dir)))
+    xml_path = os.path.join(workspace_root, "scripts", "FreeBallTest", "iron_ball_drop.xml")
+    
+if not os.path.exists(xml_path):
+    raise FileNotFoundError(f"无法找到 XML 文件: {xml_path}")
+
+print(f"加载 XML 文件: {xml_path}")
 model = mujoco.MjModel.from_xml_path(xml_path)
 data = mujoco.MjData(model)
 
@@ -231,138 +242,37 @@ def get_contact_forces_mj_contactForce(model, data):
     
     return contact_data, total_world_force, total_world_torque, total_force_magnitude
 
-# 创建传感器位置映射
-def create_sensor_positions():
-    """创建传感器位置映射，返回位置字典和传感器名称列表"""
-    positions = {}
-    sensor_names = []
-    
-    # 中心传感器
-    positions['center'] = (0, 0)
-    sensor_names.append('center')
-    
-    # 北方向传感器 (y轴正方向)
-    for i in range(1, 6):
-        name = f'n{i}'
-        positions[name] = (0, i * 0.01)
-        sensor_names.append(name)
-    
-    # 南方向传感器 (y轴负方向)
-    for i in range(1, 6):
-        name = f's{i}'
-        positions[name] = (0, -i * 0.01)
-        sensor_names.append(name)
-    
-    # 东方向传感器 (x轴正方向)
-    for i in range(1, 6):
-        name = f'e{i}'
-        positions[name] = (i * 0.01, 0)
-        sensor_names.append(name)
-    
-    # 西方向传感器 (x轴负方向)
-    for i in range(1, 6):
-        name = f'w{i}'
-        positions[name] = (-i * 0.01, 0)
-        sensor_names.append(name)
-    
-    # 东北方向传感器
-    for i in range(1, 6):
-        name = f'ne{i}'
-        positions[name] = (i * 0.01, i * 0.01)
-        sensor_names.append(name)
-    
-    # 西北方向传感器
-    for i in range(1, 6):
-        name = f'nw{i}'
-        positions[name] = (-i * 0.01, i * 0.01)
-        sensor_names.append(name)
-    
-    # 东南方向传感器
-    for i in range(1, 6):
-        name = f'se{i}'
-        positions[name] = (i * 0.01, -i * 0.01)
-        sensor_names.append(name)
-    
-    # 西南方向传感器
-    for i in range(1, 6):
-        name = f'sw{i}'
-        positions[name] = (-i * 0.01, -i * 0.01)
-        sensor_names.append(name)
-    
-    # 填充其他位置的传感器
-    for i in range(1, 65):
-        name = f'{i:02d}'
-        # 根据编号计算位置
-        row = (i - 1) // 8
-        col = (i - 1) % 8
-        x = (col - 3.5) * 0.01
-        y = (row - 3.5) * 0.01
-        positions[name] = (x, y)
-        sensor_names.append(name)
-    
-    return positions, sensor_names
-
-# 创建传感器位置映射
-sensor_positions, sensor_names = create_sensor_positions()
-num_sensors = len(sensor_names)
-
-# 调试信息：检查传感器配置
-print(f"传感器数量: {model.nsensor}")
-print(f"传感器名称: {[model.sensor(i).name for i in range(min(10, model.nsensor))]}...")
-print(f"传感器类型: {[model.sensor(i).type for i in range(min(10, model.nsensor))]}...")
+# 使用碰撞力方法，不需要传感器配置
 
 # 模拟参数
 timesteps = 200000  # 模拟总步数 (增加步数以适应更小的时间步长)
 dt = model.opt.timestep
-force_log = []
-contact_force_log = []  # 新增：接触力数据日志
+contact_force_log = []  # 接触力数据日志
 
-# 记录每个传感器的最大力
-max_forces = {name: 0.0 for name in sensor_names}
-
+# 接触力分析变量
 impact_started = False
 impact_start_time = None
 impact_peak_force = 0.0
 impact_end_time = None
-
-# 新增：接触力分析变量
-contact_impact_started = False
-contact_impact_start_time = None
-contact_impact_peak_force = 0.0
-contact_impact_end_time = None
+impact_velocity = None  # 记录撞击时的实际速度
 
 print("开始运行模拟...")
 print(f"时间步长: {dt} 秒")
 print(f"总模拟时间: {timesteps * dt} 秒")
-print(f"传感器数量: {num_sensors}")
+print(f"使用碰撞力方法 (mj_contactForce)")
 
 # 运行模拟
 for i in range(timesteps):
     mujoco.mj_step(model, data)
     
-    # 获取所有touch传感器数据
-    sensor_data = data.sensordata[:num_sensors] if len(data.sensordata) >= num_sensors else [0.0] * num_sensors
-    total_force = sum(sensor_data)  # 总冲击力
-    max_force = max(sensor_data)    # 最大单个传感器力
     t = i * dt
     
-    # 新增：使用mj_contactForce获取接触力数据
+    # 使用mj_contactForce获取接触力数据
     contact_data, total_world_force, total_world_torque, total_contact_force_magnitude = get_contact_forces_mj_contactForce(model, data)
     
-    # 更新每个传感器的最大力
-    for j, name in enumerate(sensor_names):
-        if j < len(sensor_data):
-            max_forces[name] = max(max_forces[name], sensor_data[j])
-    
-    # 调试：打印传感器数据
+    # 调试：打印接触力数据
     if i % 1000 == 0:
         print(f"Step {i}, Time {t:.4f}s")
-        print(f"传感器数据: {[f'{f:.4f}' for f in sensor_data[:10]]}...")
-        print(f"总冲击力: {total_force:.4f} N")
-        print(f"最大传感器力: {max_force:.4f} N")
-        print(f"传感器数据形状: {data.sensordata.shape}")
-        
-        # 新增：打印接触力数据
         print(f"接触数量: {len(contact_data)}")
         if len(contact_data) > 0:
             print(f"接触力合力: {total_contact_force_magnitude:.4f} N")
@@ -373,120 +283,208 @@ for i in range(timesteps):
         print(f"球的位置: x={ball_pos[0]:.4f}, y={ball_pos[1]:.4f}, z={ball_pos[2]:.4f}")
         print("---")
 
-    # 记录数据（包含所有传感器）
-    force_log.append([t] + list(sensor_data) + [total_force, max_force])
-    
-    # 新增：记录接触力数据
+    # 记录接触力数据
     contact_force_log.append([t, len(contact_data), total_contact_force_magnitude, 
                              total_world_force[0], total_world_force[1], total_world_force[2],
                              total_world_torque[0], total_world_torque[1], total_world_torque[2]])
 
-    # 检测冲击开始（传感器方法）
-    if not impact_started and total_force > 0.001:  # 检测接触开始
+    # 检测冲击开始（碰撞力方法）
+    # 通过检测接触力阈值来判断碰撞开始（>0.001N）
+    if not impact_started and total_contact_force_magnitude > 0.001:
         impact_started = True
         impact_start_time = t
-        impact_peak_force = total_force
+        impact_peak_force = total_contact_force_magnitude
+        # 记录撞击时的实际速度
+        ball_body_id = 1  # iron_ball 的 body ID
+        if ball_body_id < model.nbody:
+            # 方法1: 使用 cvel (body 速度，包含线速度和角速度)
+            # cvel 是 6D 向量：前3个是线速度，后3个是角速度
+            cvel_start = ball_body_id * 6
+            if cvel_start + 3 <= len(data.cvel):
+                ball_lin_vel = data.cvel[cvel_start:cvel_start+3]
+                # z方向速度（向下为负，取绝对值）
+                impact_velocity = abs(ball_lin_vel[2])
+            # 方法2: 如果没有cvel，尝试从qvel获取
+            elif len(data.qvel) >= 6:
+                # 对于自由落体球，qvel的前3个可能是线速度
+                if len(data.qvel) >= 3:
+                    impact_velocity = abs(data.qvel[2])  # z方向速度
+                else:
+                    # 如果qvel只包含平移，直接使用
+                    impact_velocity = abs(data.qvel[0]) if len(data.qvel) > 0 else None
+            else:
+                impact_velocity = None
 
-    # 冲击过程：记录峰值（传感器方法）
+    # 冲击过程：记录峰值
     if impact_started:
-        impact_peak_force = max(impact_peak_force, total_force)
-        if total_force < 0.1 and impact_end_time is None:  # 调整结束条件
+        impact_peak_force = max(impact_peak_force, total_contact_force_magnitude)
+        # 通过检测接触力阈值来判断碰撞结束（<0.1N）
+        # 注意：这个阈值可以调整，如果接触力太小则认为碰撞结束
+        if total_contact_force_magnitude < 0.1 and impact_end_time is None:
             impact_end_time = t
-    
-    # 新增：检测冲击开始（接触力方法）
-    if not contact_impact_started and total_contact_force_magnitude > 0.001:
-        contact_impact_started = True
-        contact_impact_start_time = t
-        contact_impact_peak_force = total_contact_force_magnitude
-
-    # 冲击过程：记录峰值（接触力方法）
-    if contact_impact_started:
-        contact_impact_peak_force = max(contact_impact_peak_force, total_contact_force_magnitude)
-        if total_contact_force_magnitude < 0.1 and contact_impact_end_time is None:
-            contact_impact_end_time = t
 
 print("模拟完成，启动可视化...")
 # 可视化模拟（在模拟完成后）
 mujoco.viewer.launch(model, data)
 
-# 转为 DataFrame
-columns = ["time"] + [f"force_{name}" for name in sensor_names] + ["total_force", "max_force"]
-df = pd.DataFrame(force_log, columns=columns)
-
-# 新增：接触力DataFrame
+# 接触力DataFrame
 contact_columns = ["time", "num_contacts", "total_force_magnitude", 
                    "force_x", "force_y", "force_z",
                    "torque_x", "torque_y", "torque_z"]
 df_contact = pd.DataFrame(contact_force_log, columns=contact_columns)
 
-# 输出分析结果
+# 从XML文件中读取参数
+xml_params = read_xml_parameters(xml_path)
+
+# 生成包含小球重量和高度的文件名（用于后续保存文件）
+ball_mass = xml_params.get('ball_mass', 5.0)
+ball_height = xml_params.get('ball_height', 1.0)
+ball_radius = xml_params.get('ball_radius', 0.0534)
+
+# 格式化文件名
+mass_str = f"{ball_mass:.1f}kg"
+height_str = f"{ball_height:.1f}m"
+radius_str = f"{ball_radius*1000:.0f}mm"  # 转换为毫米
+
+# 输出碰撞力方法分析结果
 if impact_start_time is not None and impact_end_time is not None:
-
-    # 从XML文件中读取参数
-    xml_params = read_xml_parameters(xml_path)
-
-    print("\n=== 传感器方法冲击力分析结果 ===")
+    print("\n=== mj_contactForce方法冲击力分析结果 ===")
     print(f"冲击开始时间: {impact_start_time:.4f} 秒")
     print(f"冲击结束时间: {impact_end_time:.4f} 秒")
     
     # 计算总冲击时间
     total_impact_time = impact_end_time - impact_start_time
     print(f"冲击持续时间: {total_impact_time:.4f} 秒 ({total_impact_time*1000:.1f} 毫秒)")
-    print(f"最大冲击力: {impact_peak_force:.2f} N")
+    print(f"  (注：从仿真数据中检测，开始：接触力>0.001N，结束：接触力<0.1N)")
+    print(f"仿真最大冲击力: {impact_peak_force:.2f} N ({impact_peak_force/1000:.2f} kN)")
     
-    # 生成包含小球重量和高度的文件名
-    ball_mass = xml_params.get('ball_mass', 5.0)
+    # 与实测值对比
+    measured_force_kN = 85.0  # 实测值：85kN
+    measured_force_N = measured_force_kN * 1000
+    force_error = impact_peak_force - measured_force_N
+    force_error_percent = (force_error / measured_force_N) * 100
+    
+    print(f"\n=== 实测值对比与误差分析 ===")
+    print(f"实测最大冲击力: {measured_force_N:.2f} N ({measured_force_kN:.2f} kN)")
+    print(f"仿真最大冲击力: {impact_peak_force:.2f} N ({impact_peak_force/1000:.2f} kN)")
+    print(f"绝对误差: {force_error:.2f} N ({abs(force_error)/1000:.2f} kN)")
+    print(f"相对误差: {force_error_percent:.2f}%")
+    
+    if abs(force_error_percent) < 1.0:
+        print(f"  ✓ 误差很小（<1%），仿真结果与实测值非常接近")
+    elif abs(force_error_percent) < 5.0:
+        print(f"  ✓ 误差较小（<5%），仿真结果与实测值接近")
+    elif abs(force_error_percent) < 10.0:
+        print(f"  ⚠ 误差中等（<10%），可能需要微调参数")
+    else:
+        print(f"  ⚠ 误差较大（>10%），建议调整碰撞参数")
+    
+    # 提供调整建议
+    print(f"\n=== 参数调整建议 ===")
+    current_solref = xml_params.get('iron_solref', '0.0005 1').split()
+    current_solref_time = float(current_solref[0])
+    current_solimp = xml_params.get('iron_solimp', '0.9 0.95').split()
+    
+    print(f"当前 solimp: ({current_solimp[0]}, {current_solimp[1]})")
+    print(f"当前 solref: ({current_solref[0]}, {current_solref[1]})")
+    
+    if force_error > 0:
+        # 仿真值 > 实测值，需要减小峰值力
+        print(f"\n仿真值({impact_peak_force/1000:.2f} kN) > 实测值({measured_force_kN:.2f} kN)")
+        print(f"建议：减小峰值力（使接触更软）")
+        print(f"  1. 增大 solref[0]（时间常数）：从 {current_solref_time:.6f} 增大到 {current_solref_time * 1.2:.6f} 或更大")
+        print(f"     例如：solref=\"{current_solref_time * 1.2:.6f} {current_solref[1]}\"")
+        print(f"  2. 增大 solimp[0]（阻尼参数）：从 {current_solimp[0]} 增大到 {min(0.99, float(current_solimp[0]) * 1.05):.3f}")
+        print(f"     例如：solimp=\"{min(0.99, float(current_solimp[0]) * 1.05):.3f} {current_solimp[1]}\"")
+    else:
+        # 仿真值 < 实测值，需要增大峰值力
+        print(f"\n仿真值({impact_peak_force/1000:.2f} kN) < 实测值({measured_force_kN:.2f} kN)")
+        print(f"建议：增大峰值力（使接触更硬）")
+        print(f"  1. 减小 solref[0]（时间常数）：从 {current_solref_time:.6f} 减小到 {current_solref_time * 0.8:.6f} 或更小")
+        print(f"     例如：solref=\"{current_solref_time * 0.8:.6f} {current_solref[1]}\"")
+        print(f"  2. 减小 solimp[0]（阻尼参数）：从 {current_solimp[0]} 减小到 {max(0.1, float(current_solimp[0]) * 0.95):.3f}")
+        print(f"     例如：solimp=\"{max(0.1, float(current_solimp[0]) * 0.95):.3f} {current_solimp[1]}\"")
+    
+    # 理论验证
+    print(f"\n=== 速度验证 ===")
+    import math
+    # 计算理论撞击速度
     ball_height = xml_params.get('ball_height', 1.0)
-    ball_radius = xml_params.get('ball_radius', 0.0534)
+    g = 9.81
+    theoretical_velocity = math.sqrt(2 * g * ball_height)
+    print(f"理论撞击速度: {theoretical_velocity:.2f} m/s")
     
-    # 格式化文件名
-    mass_str = f"{ball_mass:.1f}kg"
-    height_str = f"{ball_height:.1f}m"
-    radius_str = f"{ball_radius*1000:.0f}mm"  # 转换为毫米
+    # 显示实际撞击速度（如果记录了）
+    if impact_velocity is not None:
+        actual_velocity = abs(impact_velocity)  # z方向向下为负，取绝对值
+        print(f"实际撞击速度: {actual_velocity:.2f} m/s (z方向)")
+        velocity_diff = abs(theoretical_velocity - actual_velocity)
+        velocity_ratio = actual_velocity / theoretical_velocity
+        print(f"速度差异: {velocity_diff:.3f} m/s")
+        print(f"速度比例: {velocity_ratio:.3f} (接近1.0表示模拟准确)")
+        if 0.95 < velocity_ratio < 1.05:
+            print(f"  ✓ 实际速度与理论值非常接近，模拟准确")
+        else:
+            print(f"  ⚠ 实际速度与理论值有差异，可能受到数值误差或重力配置影响")
+    else:
+        print(f"  ⚠ 未能记录实际撞击速度")
+        actual_velocity = theoretical_velocity  # 使用理论值作为备用
     
-    # 保存CSV到XML文件所在目录
-    csv_filename = f"Free_Fall_Impact_Force_{mass_str}_{height_str}height_{radius_str}radius.csv"
-    csv_path = os.path.join(xml_dir, csv_filename)
-    df.to_csv(csv_path, index=False)
-    print(f"已保存传感器接触力数据为 {csv_path}")
-
-# 新增：输出接触力方法分析结果
-if contact_impact_start_time is not None and contact_impact_end_time is not None:
-    print("\n=== mj_contactForce方法冲击力分析结果 ===")
-    print(f"冲击开始时间: {contact_impact_start_time:.4f} 秒")
-    print(f"冲击结束时间: {contact_impact_end_time:.4f} 秒")
-    
-    # 计算总冲击时间
-    contact_total_impact_time = contact_impact_end_time - contact_impact_start_time
-    print(f"冲击持续时间: {contact_total_impact_time:.4f} 秒 ({contact_total_impact_time*1000:.1f} 毫秒)")
-    print(f"最大冲击力: {contact_impact_peak_force:.2f} N")
-    
-    # 生成包含小球重量和高度的文件名
+    print(f"\n=== 动量验证 ===")
+    # 计算动量（使用实际速度，如果可用）
     ball_mass = xml_params.get('ball_mass', 5.0)
-    ball_height = xml_params.get('ball_height', 1.0)
-    ball_radius = xml_params.get('ball_radius', 0.0534)
+    if impact_velocity is not None:
+        actual_momentum = ball_mass * abs(impact_velocity)
+        theoretical_momentum = ball_mass * theoretical_velocity
+        print(f"理论动量: {theoretical_momentum:.2f} kg·m/s")
+        print(f"实际动量: {actual_momentum:.2f} kg·m/s")
+        momentum = actual_momentum  # 使用实际动量
+    else:
+        momentum = ball_mass * theoretical_velocity
+        print(f"撞击动量: {momentum:.2f} kg·m/s (使用理论速度)")
     
-    # 格式化文件名
-    mass_str = f"{ball_mass:.1f}kg"
-    height_str = f"{ball_height:.1f}m"
-    radius_str = f"{ball_radius*1000:.0f}mm"  # 转换为毫米
+    # 根据碰撞力和动量估算碰撞时间
+    print(f"\n=== 碰撞时间验证 ===")
+    if impact_peak_force > 0:
+        estimated_contact_time = momentum / impact_peak_force
+        print(f"根据峰值力({impact_peak_force/1000:.2f} kN)和动量估算的碰撞时间: {estimated_contact_time*1000:.3f} ms")
+        print(f"仿真中检测的碰撞时间: {total_impact_time*1000:.3f} ms")
+        print(f"  (说明：从仿真数据中检测，开始阈值：接触力>0.001N，结束阈值：接触力<0.1N)")
+        print(f"  (这不是外部测量值，而是从仿真接触力数据中根据阈值判断的)")
+        time_ratio = total_impact_time / estimated_contact_time
+        print(f"时间比例: {time_ratio:.2f} (接近1.0表示合理)")
+        if 0.5 < time_ratio < 2.0:
+            print(f"  ✓ 碰撞时间估算合理")
+        else:
+            print(f"  ⚠ 碰撞时间估算与实际值差异较大，可能受到接触刚度影响")
+            print(f"  (提示：如果比例>2，说明检测的碰撞时间比理论估算长，可能是阈值设置导致)")
+    
+    # 验证solref参数
+    solref = xml_params.get('iron_solref', '0.0005 1').split()
+    solref_time = float(solref[0])
+    print(f"\n=== solref参数验证 ===")
+    print(f"solref[0] (接触时间常数): {solref_time:.6f} s ({solref_time*1000:.3f} ms)")
+    print(f"实际碰撞时间: {total_impact_time*1000:.3f} ms")
+    if total_impact_time > 0:
+        solref_ratio = solref_time / total_impact_time
+        print(f"solref时间常数/实际碰撞时间: {solref_ratio:.2f}")
+        # solref时间常数通常可以比实际碰撞时间小一些（这是接触刚度的特征时间）
+        # 只要在同一数量级（都在毫秒级别），就可以认为是合理的
+        if 0.2 <= solref_ratio <= 10.0:
+            print(f"  ✓ solref时间常数与实际碰撞时间在同一量级，配置合理")
+            print(f"  说明: solref[0]是接触的特征时间常数，通常比实际接触时间稍短是正常的")
+        else:
+            print(f"  ⚠ solref时间常数与实际碰撞时间差异较大，可能需要调整")
+            if solref_ratio < 0.2:
+                print(f"  建议: solref[0]过小可能导致接触过度刚硬，可以适当增大")
+            else:
+                print(f"  建议: solref[0]过大可能导致接触过软，可以适当减小")
     
     # 保存接触力CSV
-    contact_csv_filename = f"Contact_Force_mj_contactForce_{mass_str}_{height_str}height_{radius_str}radius.csv"
-    contact_csv_path = os.path.join(xml_dir, contact_csv_filename)
-    df_contact.to_csv(contact_csv_path, index=False)
-    print(f"已保存mj_contactForce接触力数据为 {contact_csv_path}")
-    
-    # 对比两种方法的结果
-    print("\n=== 两种方法对比 ===")
-    print(f"传感器方法 - 冲击时间: {total_impact_time*1000:.1f} ms, 最大力: {impact_peak_force:.2f} N")
-    print(f"接触力方法 - 冲击时间: {contact_total_impact_time*1000:.1f} ms, 最大力: {contact_impact_peak_force:.2f} N")
-    
-    # 计算差异
-    time_diff = abs(total_impact_time - contact_total_impact_time) * 1000
-    force_diff = abs(impact_peak_force - contact_impact_peak_force)
-    print(f"时间差异: {time_diff:.1f} ms")
-    print(f"力差异: {force_diff:.2f} N")
+    csv_filename = f"Contact_Force_mj_contactForce_{mass_str}_{height_str}height_{radius_str}radius.csv"
+    csv_path = os.path.join(xml_dir, csv_filename)
+    df_contact.to_csv(csv_path, index=False)
+    print(f"已保存mj_contactForce接触力数据为 {csv_path}")
 
 # 打印XML碰撞参数
 print(f"\n=== XML碰撞参数 ===")
@@ -533,60 +531,31 @@ print(f"  - 数值容差: {xml_params.get('tolerance', '1e-12')}")
 
 # 打印冲击时间详细信息
 if impact_start_time is not None and impact_end_time is not None:
-    print(f"\n=== 传感器方法冲击时间详细信息 ===")
+    total_impact_time = impact_end_time - impact_start_time
+    print(f"\n=== mj_contactForce方法冲击时间详细信息 ===")
     print(f"冲击开始时间: {impact_start_time:.4f} 秒")
     print(f"冲击结束时间: {impact_end_time:.4f} 秒")
     print(f"总冲击时间: {total_impact_time:.4f} 秒")
     print(f"总冲击时间: {total_impact_time*1000:.1f} 毫秒")
     print(f"总冲击时间: {total_impact_time*1000000:.0f} 微秒")
 
-if contact_impact_start_time is not None and contact_impact_end_time is not None:
-    print(f"\n=== 接触力方法冲击时间详细信息 ===")
-    print(f"冲击开始时间: {contact_impact_start_time:.4f} 秒")
-    print(f"冲击结束时间: {contact_impact_end_time:.4f} 秒")
-    print(f"总冲击时间: {contact_total_impact_time:.4f} 秒")
-    print(f"总冲击时间: {contact_total_impact_time*1000:.1f} 毫秒")
-    print(f"总冲击时间: {contact_total_impact_time*1000000:.0f} 微秒")
-
 # 绘图
-plt.figure(figsize=(20, 10))
+plt.figure(figsize=(15, 10))
 
-# 子图1：传感器方法总冲击力
-plt.subplot(2, 3, 1)
-plt.plot(df["time"], df["total_force"], label="Sensor Total Force", linewidth=2, color='red')
-if impact_start_time is not None and impact_end_time is not None:
-    plt.axvline(impact_start_time, color="red", linestyle="--", label="Contact Start")
-    plt.axvline(impact_end_time, color="green", linestyle="--", label="Contact End")
-plt.title("Free Fall Impact Force Analysis")
-plt.xlabel("Time (s)")
-plt.ylabel("Total Force (N)")
-plt.legend()
-plt.grid(True)
-
-# 子图2：接触力方法总冲击力
-plt.subplot(2, 3, 2)
+# 子图1：碰撞力方法总冲击力
+plt.subplot(2, 2, 1)
 plt.plot(df_contact["time"], df_contact["total_force_magnitude"], label="Contact Total Force", linewidth=2, color='blue')
-if contact_impact_start_time is not None and contact_impact_end_time is not None:
-    plt.axvline(contact_impact_start_time, color="blue", linestyle="--", label="Contact Start")
-    plt.axvline(contact_impact_end_time, color="green", linestyle="--", label="Contact End")
+if impact_start_time is not None and impact_end_time is not None:
+    plt.axvline(impact_start_time, color="blue", linestyle="--", label="Contact Start")
+    plt.axvline(impact_end_time, color="green", linestyle="--", label="Contact End")
 plt.title("mj_contactForce Method - Total Impact Force")
 plt.xlabel("Time (s)")
 plt.ylabel("Total Force (N)")
 plt.legend()
 plt.grid(True)
 
-# 子图3：两种方法对比
-plt.subplot(2, 3, 3)
-plt.plot(df["time"], df["total_force"], label="Sensor Method", linewidth=2, color='red')
-plt.plot(df_contact["time"], df_contact["total_force_magnitude"], label="Contact Method", linewidth=2, color='blue')
-plt.title("Comparison of Two Methods")
-plt.xlabel("Time (s)")
-plt.ylabel("Total Force (N)")
-plt.legend()
-plt.grid(True)
-
-# 子图4：接触力分量
-plt.subplot(2, 3, 4)
+# 子图2：接触力分量
+plt.subplot(2, 2, 2)
 plt.plot(df_contact["time"], df_contact["force_x"], label="Force X", linewidth=1, color='red')
 plt.plot(df_contact["time"], df_contact["force_y"], label="Force Y", linewidth=1, color='green')
 plt.plot(df_contact["time"], df_contact["force_z"], label="Force Z", linewidth=1, color='blue')
@@ -596,8 +565,8 @@ plt.ylabel("Force (N)")
 plt.legend()
 plt.grid(True)
 
-# 子图5：接触数量
-plt.subplot(2, 3, 5)
+# 子图3：接触数量
+plt.subplot(2, 2, 3)
 plt.plot(df_contact["time"], df_contact["num_contacts"], label="Number of Contacts", linewidth=2, color='purple')
 plt.title("Number of Contact Points")
 plt.xlabel("Time (s)")
@@ -605,62 +574,32 @@ plt.ylabel("Number of Contacts")
 plt.legend()
 plt.grid(True)
 
-# 子图6：3D图显示各传感器力的最大值
-ax3d = plt.subplot(2, 3, 6, projection='3d')
-
-# 准备3D数据
-x_coords = []
-y_coords = []
-z_coords = []
-
-for name in sensor_names:
-    if name in sensor_positions:
-        x, y = sensor_positions[name]
-        x_coords.append(x)
-        y_coords.append(y)
-        z_coords.append(max_forces[name])
-
-# 创建3D散点图
-scatter = ax3d.scatter(x_coords, y_coords, z_coords, 
-                       c=z_coords, cmap='viridis', s=50, alpha=0.8)
-
-ax3d.set_xlabel('X Position (m)')
-ax3d.set_ylabel('Y Position (m)')
-ax3d.set_zlabel('Max Force (N)')
-ax3d.set_title('3D Sensor Force Distribution')
-
-# 添加颜色条
-plt.colorbar(scatter, ax=ax3d, label='Max Force (N)')
+# 子图4：力矩分量
+plt.subplot(2, 2, 4)
+plt.plot(df_contact["time"], df_contact["torque_x"], label="Torque X", linewidth=1, color='red')
+plt.plot(df_contact["time"], df_contact["torque_y"], label="Torque Y", linewidth=1, color='green')
+plt.plot(df_contact["time"], df_contact["torque_z"], label="Torque Z", linewidth=1, color='blue')
+plt.title("Contact Torque Components")
+plt.xlabel("Time (s)")
+plt.ylabel("Torque (N·m)")
+plt.legend()
+plt.grid(True)
 
 plt.tight_layout()
 
 # 保存图片到XML文件所在目录
-plot_filename = f"Free_Fall_Impact_Force_{mass_str}_{height_str}height_{radius_str}radius.png"
+plot_filename = f"Contact_Force_mj_contactForce_{mass_str}_{height_str}height_{radius_str}radius.png"
 plot_path = os.path.join(xml_dir, plot_filename)
 plt.savefig(plot_path, dpi=300, bbox_inches='tight')
 print(f"已保存冲击力图表为 {plot_path}")
 plt.show()
-
-# 保存3D数据
-sensor_data_3d = {
-    'sensor_name': sensor_names,
-    'x_position': [sensor_positions[name][0] for name in sensor_names],
-    'y_position': [sensor_positions[name][1] for name in sensor_names],
-    'max_force': [max_forces[name] for name in sensor_names]
-}
-
-df_3d = pd.DataFrame(sensor_data_3d)
-csv_filename = f"sensor_3d_data_{mass_str}_{height_str}height_{radius_str}radius.csv"
-csv_3d_path = os.path.join(xml_dir, csv_filename)
-df_3d.to_csv(csv_3d_path, index=False)
-print(f"已保存3D传感器数据为 {csv_3d_path}")
 
 # 检查是否检测到冲击
 if impact_start_time is None or impact_end_time is None:
     print("\n 未检测到有效冲击，可能原因：")
     print("- 球未接触地面（位置、半径、重力设定错误）")
     print("- 受力太小，未超过设定阈值")
-    print("- sensordata 未正确读取 site 上的受力")
+    print("- mj_contactForce 未检测到接触")
 
 
 

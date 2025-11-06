@@ -212,6 +212,8 @@ python3 scripts/mujoco_xml_contact_display.py logs/test_push_100/merged_contact_
 # 参数3: 可视化类型 (sphere|cylinder) - 可选，默认为cylinder
 # 参数4: 坐标系统 (world|urdf) - 可选，默认为urdf
 
+# 各部位碰撞力风琴图
+python3 scripts/violin_link_force.py
 1. Shoulder: shoulder_pitch, shoulder_roll;
 2. Elbow: shoulder_yaw, elbow_yaw, elbow_pitch;
 3. Torso: torso, 不分左右;

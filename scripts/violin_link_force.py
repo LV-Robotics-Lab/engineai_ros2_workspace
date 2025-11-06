@@ -55,6 +55,8 @@ if "force_normal" in all_csv_columns:
     columns_to_read.add("force_normal")
 if "normal_force" in all_csv_columns:
     columns_to_read.add("normal_force")
+if "force_magnitude" in all_csv_columns:
+    columns_to_read.add("force_magnitude")
 if "robot_frame_x" in all_csv_columns:
     columns_to_read.add("robot_frame_x")
 if "robot_frame_y" in all_csv_columns:
@@ -133,6 +135,8 @@ else:
 print(f"[3/7] 清理数据...")
 # Keep needed columns; clean
 cols_to_keep = ["body2_name", "force_normal"]
+if "force_magnitude" in data.columns:
+    cols_to_keep.append("force_magnitude")
 if "robot_frame_x" in data.columns:
     cols_to_keep.append("robot_frame_x")
 if "robot_frame_y" in data.columns:
@@ -143,6 +147,8 @@ if "robot_frame_z" in data.columns:
 df = data[cols_to_keep].copy()
 df["force_normal"] = pd.to_numeric(df["force_normal"], errors="coerce")
 df["body2_name"]   = df["body2_name"].astype(str)
+if "force_magnitude" in df.columns:
+    df["force_magnitude"] = pd.to_numeric(df["force_magnitude"], errors="coerce")
 if "robot_frame_x" in df.columns:
     df["robot_frame_x"] = pd.to_numeric(df["robot_frame_x"], errors="coerce")
 if "robot_frame_y" in df.columns:
@@ -272,45 +278,63 @@ for group, count in group_counts.items():
     print(f"        {group}: {count} 条数据")
 
 # -------------------------------
-# Output robot_frame x, y, z distribution for each link
+# Output force_normal, force_magnitude and robot_frame x, y, z distribution for each link
 # -------------------------------
-print(f"\n[调试] 每个 link 的 robot_frame_x, y, z 分布:")
+print(f"\n[调试] 每个 link 的 force_normal, force_magnitude 和 robot_frame_x, y, z 分布:")
 print(f"      df 中的列: {list(df.columns)}")
 
 # Check which columns exist
+has_magnitude = "force_magnitude" in df.columns
 has_x = "robot_frame_x" in df.columns
 has_y = "robot_frame_y" in df.columns
 has_z = "robot_frame_z" in df.columns
 
-if has_x and has_y and has_z:
-    print(f"      ✓ 找到所有 robot_frame_x/y/z 列")
-    for link in sorted(df["body2_name"].unique()):
-        link_data = df[df["body2_name"] == link]
-        if len(link_data) > 0:
-            print(f"\n  {link}:")
-            print(f"    数据条数: {len(link_data)}")
-            
-            # robot_frame_x
+for link in sorted(df["body2_name"].unique()):
+    link_data = df[df["body2_name"] == link]
+    if len(link_data) > 0:
+        print(f"\n  {link}:")
+        print(f"    数据条数: {len(link_data)}")
+        
+        # force_normal statistics
+        force_data = link_data["force_normal"].dropna()
+        if len(force_data) > 0:
+            print(f"    force_normal: min={force_data.min():.2f}, max={force_data.max():.2f}, mean={force_data.mean():.2f}, std={force_data.std():.2f}, median={force_data.median():.2f}")
+        else:
+            print(f"    force_normal: 无数据")
+        
+        # force_magnitude statistics
+        if has_magnitude:
+            magnitude_data = link_data["force_magnitude"].dropna()
+            if len(magnitude_data) > 0:
+                print(f"    force_magnitude: min={magnitude_data.min():.2f}, max={magnitude_data.max():.2f}, mean={magnitude_data.mean():.2f}, std={magnitude_data.std():.2f}, median={magnitude_data.median():.2f}")
+            else:
+                print(f"    force_magnitude: 无数据")
+        
+        # robot_frame_x
+        if has_x:
             x_data = link_data["robot_frame_x"].dropna()
             if len(x_data) > 0:
                 print(f"    robot_frame_x: min={x_data.min():.3f}, max={x_data.max():.3f}, mean={x_data.mean():.3f}, std={x_data.std():.3f}")
             else:
                 print(f"    robot_frame_x: 无数据")
-            
-            # robot_frame_y
+        
+        # robot_frame_y
+        if has_y:
             y_data = link_data["robot_frame_y"].dropna()
             if len(y_data) > 0:
                 print(f"    robot_frame_y: min={y_data.min():.3f}, max={y_data.max():.3f}, mean={y_data.mean():.3f}, std={y_data.std():.3f}")
             else:
                 print(f"    robot_frame_y: 无数据")
-            
-            # robot_frame_z
+        
+        # robot_frame_z
+        if has_z:
             z_data = link_data["robot_frame_z"].dropna()
             if len(z_data) > 0:
                 print(f"    robot_frame_z: min={z_data.min():.3f}, max={z_data.max():.3f}, mean={z_data.mean():.3f}, std={z_data.std():.3f}")
             else:
                 print(f"    robot_frame_z: 无数据")
-else:
+
+if not (has_x and has_y and has_z):
     missing_cols = []
     if not has_x:
         missing_cols.append("robot_frame_x")
@@ -318,7 +342,7 @@ else:
         missing_cols.append("robot_frame_y")
     if not has_z:
         missing_cols.append("robot_frame_z")
-    print(f"      ✗ 缺少以下列: {', '.join(missing_cols)}")
+    print(f"\n  警告: 缺少以下列: {', '.join(missing_cols)}")
     print(f"      提示: 这些列可能不在 CSV 文件中，或者列名不同")
 
 # -------------------------------

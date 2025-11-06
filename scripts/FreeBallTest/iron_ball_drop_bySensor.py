@@ -10,8 +10,19 @@ import pandas as pd
 import os
 import xml.etree.ElementTree as ET
 
-# 加载模型
-xml_path = "engineai_ros2_workspace/scripts/FreeBallTest/iron_ball_drop.xml"
+# 加载模型 - 使用脚本所在目录构建路径
+script_dir = os.path.dirname(os.path.abspath(__file__))
+xml_path = os.path.join(script_dir, "iron_ball_drop.xml")
+
+if not os.path.exists(xml_path):
+    # 如果当前目录找不到，尝试从工作空间根目录
+    workspace_root = os.path.dirname(os.path.dirname(os.path.dirname(script_dir)))
+    xml_path = os.path.join(workspace_root, "scripts", "FreeBallTest", "iron_ball_drop.xml")
+    
+if not os.path.exists(xml_path):
+    raise FileNotFoundError(f"无法找到 XML 文件: {xml_path}")
+
+print(f"加载 XML 文件: {xml_path}")
 model = mujoco.MjModel.from_xml_path(xml_path)
 data = mujoco.MjData(model)
 
