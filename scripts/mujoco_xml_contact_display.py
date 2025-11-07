@@ -73,6 +73,7 @@ def analyze_csv_data(df):
         print(f"  Total normal force: {df['force_normal'].sum():.3f} N")
         print(f"  Average force per contact: {df['force_magnitude'].mean():.3f} N")
         print(f"  Average normal force per contact: {df['force_normal'].mean():.3f} N")
+        print(f"  Note: Visualization will show NORMAL FORCE (force_normal) as primary")
         
         # Contact quality analysis
         if 'force_normal' in df.columns:
@@ -397,14 +398,13 @@ def create_contact_force_visualization(df, x_col, y_col, z_col, max_spheres_over
         body2_name = row['body2_name']
         pos = (row[x_col], row[y_col], row[z_col])
         
-        # Use force magnitude if available, otherwise calculate from components
-        if 'force_magnitude' in row and pd.notna(row['force_magnitude']):
-            force_mag = row['force_magnitude']
+        # Use normal force as primary, with fallbacks
+        if 'force_normal' in row and pd.notna(row['force_normal']):
+            force_mag = abs(row['force_normal'])  # Use normal force as primary
+        elif 'force_magnitude' in row and pd.notna(row['force_magnitude']):
+            force_mag = row['force_magnitude']  # Fallback to total force magnitude
         elif all(col in row for col in ['force_x', 'force_y', 'force_z']) and all(pd.notna(row[col]) for col in ['force_x', 'force_y', 'force_z']):
             force_mag = np.sqrt(row['force_x']**2 + row['force_y']**2 + row['force_z']**2)
-        elif 'force_normal' in row and pd.notna(row['force_normal']):
-            # Use normal force as fallback
-            force_mag = abs(row['force_normal'])
         else:
             force_mag = 1.0  # Default force if not available
         
@@ -606,11 +606,11 @@ def create_contact_force_visualization(df, x_col, y_col, z_col, max_spheres_over
     if final_contact_forces:
         max_force = max(cf['max_force'] for cf in final_contact_forces)
         min_force = min(cf['max_force'] for cf in final_contact_forces)
-        print(f"Overall force range: {min_force:.3f} - {max_force:.3f} N")
+        print(f"Overall normal force range: {min_force:.3f} - {max_force:.3f} N")
         
         # Debug: Show force distribution
         forces = [cf['max_force'] for cf in final_contact_forces]
-        print(f"Force statistics: mean={np.mean(forces):.3f}, std={np.std(forces):.3f}, median={np.median(forces):.3f}")
+        print(f"Normal force statistics: mean={np.mean(forces):.3f}, std={np.std(forces):.3f}, median={np.median(forces):.3f}")
     
     return final_contact_forces
 
@@ -624,14 +624,13 @@ def create_contact_force_visualization_original(df_valid, x_col, y_col, z_col, m
     for _, row in df_valid.iterrows():
         pos = (row[x_col], row[y_col], row[z_col])
         
-        # Use force magnitude if available, otherwise calculate from components
-        if 'force_magnitude' in row and pd.notna(row['force_magnitude']):
-            force_mag = row['force_magnitude']
+        # Use normal force as primary, with fallbacks
+        if 'force_normal' in row and pd.notna(row['force_normal']):
+            force_mag = abs(row['force_normal'])  # Use normal force as primary
+        elif 'force_magnitude' in row and pd.notna(row['force_magnitude']):
+            force_mag = row['force_magnitude']  # Fallback to total force magnitude
         elif all(col in row for col in ['force_x', 'force_y', 'force_z']) and all(pd.notna(row[col]) for col in ['force_x', 'force_y', 'force_z']):
             force_mag = np.sqrt(row['force_x']**2 + row['force_y']**2 + row['force_z']**2)
-        elif 'force_normal' in row and pd.notna(row['force_normal']):
-            # Use normal force as fallback
-            force_mag = abs(row['force_normal'])
         else:
             force_mag = 1.0  # Default force if not available
         
@@ -1044,7 +1043,7 @@ def main():
         print("  enable_clustering: Enable contact clustering (true/false, default: false)")
         print("  uniform_distribution: Use uniform distribution (true/false, default: false)")
         print("")
-        print("Note: Contact forces will be displayed as spheres with sizes proportional to force magnitude")
+        print("Note: Contact forces will be displayed as spheres with sizes proportional to NORMAL FORCE (force_normal)")
         print("Foot contacts (LINK_ANKLE_*) are filtered out by default")
         print("")
         print("New Feature - Proportional Distribution by body2_name:")
@@ -1220,16 +1219,16 @@ def main():
     if contact_forces:
         max_force = max(cf['max_force'] for cf in contact_forces)
         min_force = min(cf['max_force'] for cf in contact_forces)
-        print(f"\n=== 显示的力大小范围 ===")
-        print(f"最小力: {min_force:.3f} N")
-        print(f"最大力: {max_force:.3f} N")
-        print(f"力范围: {min_force:.3f} - {max_force:.3f} N")
-        print(f"力差值: {max_force - min_force:.3f} N")
+        print(f"\n=== 显示的法向力大小范围 ===")
+        print(f"最小法向力: {min_force:.3f} N")
+        print(f"最大法向力: {max_force:.3f} N")
+        print(f"法向力范围: {min_force:.3f} - {max_force:.3f} N")
+        print(f"法向力差值: {max_force - min_force:.3f} N")
         
         # 计算力的统计信息
         forces = [cf['max_force'] for cf in contact_forces]
-        print(f"平均力: {np.mean(forces):.3f} N")
-        print(f"中位数力: {np.median(forces):.3f} N")
+        print(f"平均法向力: {np.mean(forces):.3f} N")
+        print(f"中位数法向力: {np.median(forces):.3f} N")
         print(f"标准差: {np.std(forces):.3f} N")
         print(f"显示接触点数量: {len(contact_forces)}")
         print("=" * 50)
