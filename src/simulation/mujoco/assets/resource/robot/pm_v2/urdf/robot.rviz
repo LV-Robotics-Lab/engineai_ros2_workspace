@@ -1,0 +1,63 @@
+Panels:
+  - Class: rviz_common/Displays
+    Name: Displays
+  - Class: rviz_common/Views
+    Name: Views
+
+Visualization Manager:
+  Class: ""
+  Enable Stereo Rendering:
+    Stereo Eye Separation: 0.06
+    Stereo Focal Distance: 1.0
+    Swap Stereo Eyes: false
+    Value: false
+  Global Options:
+    Background Color: 48; 48; 48
+    Fixed Frame: world
+    Frame Rate: 30
+  Displays:
+    - Class: rviz_default_plugins/Grid
+      Name: Grid
+      Enabled: true
+      Cell Size: 1
+      Plane Cell Count: 20
+      Color: 160;160;160
+      Alpha: 0.5
+      Line Width: 0.03
+      Reference Frame: <Fixed Frame>
+      Plane: XY
+    - Class: rviz_default_plugins/RobotModel
+      Name: Robot
+      Enabled: true
+      Alpha: 1.0
+      Visual Enabled: true
+      Collision Enabled: false
+      TF Prefix: ""
+      Update Interval: 0
+      Description Source: Topic
+      Description File: ""
+      # 下面两项确保整机以默认零位显示，不用考虑关节与动态
+      Description Param: robot_description
+      Robot Description: robot_description
+  Transformation:
+    Current:
+      Class: rviz_default_plugins/TF
+
+Views:
+  Current:
+    Class: rviz_default_plugins/Orbit
+    Distance: 3.0
+    Focal Point:
+      X: 0
+      Y: 0
+      Z: 0.5
+    Pitch: 0.6
+    Yaw: 0.8
+    Near Clip Distance: 0.01
+    Target Frame: world
+
+Window Geometry:
+  Width: 1280
+  Height: 720
+  X: 50
+  Y: 50

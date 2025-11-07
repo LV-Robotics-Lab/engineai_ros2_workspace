@@ -371,3 +371,11 @@ sudo apt install ffmpeg -y
 
 ffmpeg -i input.webm output.mp4
 ```
+
+
+# 碰撞点viewer
+## 启动必要的节点
+cd /home/wang22/engineai/engineai_ros2_workspace && source install/setup.bash && ros2 launch launch_urdf_only.launch.py
+
+## 在另一个终端启动RViz
+cd /home/wang22/engineai/engineai_ros2_workspace/src/simulation/mujoco/assets/resource/robot/pm_v2/urdf && rviz2 -d robot.rviz
