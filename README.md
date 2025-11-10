@@ -180,7 +180,7 @@ python3 scripts/merge_contact_data.py logs/forward-00.0N-0.5s-20251021_193237
 # 对合并后的csv进行碰撞点显示
 # 使用机器人坐标系（默认）， 后面的参数 1000 是显示点数量，1、2是 过滤掉足部的点
 # python3 mujoco_xml_contact_display.py <csv_file> <xml_file> [world|robot_frame] [max_spheres] [joint_filter] [enable_clustering] [uniform_distribution]
-python3 scripts/mujoco_xml_contact_display.py logs/4in1/merged_contact_data_4in1_20251026_194302.csv src/simulation/mujoco/assets/resource/pm_v2_mesh.xml robot_frame 1500 "" true true
+python3 scripts/mujoco_xml_contact_display.py logs/4in1/merged_contact_data_4in1_20251026_194302.csv src/simulation/mujoco/assets/resource/pm_v2_mesh.xml robot_frame 1000 "" true true
 
 # 排除特定关节
 python3 scripts/mujoco_xml_contact_display.py csv_file xml_file robot_frame 1500 "1,2,3"
@@ -218,8 +218,30 @@ python3 scripts/violin_link_force.py
 2. Elbow: shoulder_yaw, elbow_yaw, elbow_pitch;
 3. Torso: torso, 不分左右;
 4. Hip: base（根据robot_frame_y区分，y+是左，y-是右）, hip_pitch, hip_roll, hip_yaw（robot_frame_z > 0.55m);
-5. Knee: hip_yaw(robot_frame_z < 0.55m), knee_pitch (robot_frame_z >0.23m)
-6. Crus: knee_pitch(robot_frame_z<0.23m)
+5. Knee: hip_yaw(robot_frame_z < 0.55m), knee_pitch # (robot_frame_z >0.23m)
+# 6. Crus: knee_pitch(robot_frame_z<0.23m)
+
+# grid map of force
+# 基本用法（会自动生成输出文件名）
+python3 scripts/plot_contact_grid.py logs/4in1/merged_contact_data_4in1_20251026_194302_clustered_20251111_012128.csv
+
+# 指定输出路径
+python3 scripts/plot_contact_grid.py logs/4in1/merged_contact_data_4in1_20251026_194302_clustered_20251111_012128.csv -o output.png
+
+# 自定义网格分辨率和颜色映射
+python3 scripts/plot_contact_grid.py logs/4in1/merged_contact_data_4in1_20251026_194302_clustered_20251111_012128.csv -b 100 -c plasma
+
+# 使用默认大小（两个图都是 10x8）
+python3 scripts/plot_contact_grid.py logs/4in1/merged_contact_data_4in1_20251026_194302_clustered_20251111_012128.csv
+
+# 设置两个图都使用相同大小
+python3 scripts/plot_contact_grid.py logs/4in1/merged_contact_data_4in1_20251026_194302_clustered_20251111_012128.csv --figsize 12 10
+
+# 分别设置两个图的大小
+python3 scripts/plot_contact_grid.py logs/4in1/merged_contact_data_4in1_20251026_194302_clustered_20251111_012128.csv --force-figsize 12 8 --thickness-figsize 12 10
+
+# 只设置力图大小，厚度图使用默认值
+python3 scripts/plot_contact_grid.py logs/4in1/merged_contact_data_4in1_20251026_194302_clustered_20251111_012128.csv --force-figsize 12 8
 
 # terminal 4
 # 小球撞地测试
