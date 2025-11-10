@@ -806,6 +806,16 @@ def show_mujoco_viewer_with_spheres(model, data, contact_forces):
             print("Please install mujoco with viewer support")
             return
     
+    # Pre-allocate memory by running a forward pass before launching viewer
+    # This helps avoid stack overflow errors with large models
+    print("Pre-allocating memory with forward pass...")
+    try:
+        mj.mj_forward(model, data)
+        print("Memory pre-allocation successful")
+    except Exception as e:
+        print(f"Warning: Pre-allocation failed: {e}")
+        print("Attempting to continue anyway...")
+    
     # Set up the viewer
     with viewer.launch_passive(model, data) as viewer_handle:
         # Set initial camera position
