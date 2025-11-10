@@ -612,7 +612,56 @@ def create_contact_force_visualization(df, x_col, y_col, z_col, max_spheres_over
         forces = [cf['max_force'] for cf in final_contact_forces]
         print(f"Normal force statistics: mean={np.mean(forces):.3f}, std={np.std(forces):.3f}, median={np.median(forces):.3f}")
     
-    return final_contact_forces
+    # Return both visualization points and all clustered points
+    return final_contact_forces, clustered_contact_forces
+
+def save_clustered_contacts_to_csv(clustered_contact_forces, csv_file, coord_type="robot_frame"):
+    """Save all clustered contact points to CSV file"""
+    if not clustered_contact_forces:
+        print("No clustered contact points to save")
+        return
+    
+    print(f"\n=== 保存聚类结果到CSV ===")
+    print(f"聚类后接触点数量: {len(clustered_contact_forces)}")
+    
+    # Prepare data for CSV
+    data_rows = []
+    for cf in clustered_contact_forces:
+        pos = cf['position']
+        row = {
+            'body2_name': cf.get('body2_name', ''),
+            'force_magnitude': cf.get('max_force', 0.0),
+            'contact_count': cf.get('count', 1)
+        }
+        
+        # Add coordinate columns based on coordinate type
+        if coord_type == "robot_frame":
+            row['robot_frame_x'] = pos[0]
+            row['robot_frame_y'] = pos[1]
+            row['robot_frame_z'] = pos[2]
+        else:
+            row['pos_x'] = pos[0]
+            row['pos_y'] = pos[1]
+            row['pos_z'] = pos[2]
+        
+        data_rows.append(row)
+    
+    # Create DataFrame
+    df_clustered = pd.DataFrame(data_rows)
+    
+    # Generate output filename
+    base_name = os.path.splitext(os.path.basename(csv_file))[0]
+    base_dir = os.path.dirname(csv_file)
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    output_file = os.path.join(base_dir, f"{base_name}_clustered_{timestamp}.csv")
+    
+    # Save to CSV
+    df_clustered.to_csv(output_file, index=False)
+    print(f"已保存聚类结果到: {output_file}")
+    print(f"保存了 {len(df_clustered)} 个接触点")
+    print(f"列名: {list(df_clustered.columns)}")
+    
+    return output_file
 
 def create_contact_force_visualization_original(df_valid, x_col, y_col, z_col, max_spheres_override=None):
     """Original contact force visualization method (fallback)"""
@@ -678,7 +727,8 @@ def create_contact_force_visualization_original(df_valid, x_col, y_col, z_col, m
         if len(contact_forces) > max_spheres:
             contact_forces = contact_forces[:max_spheres]
     
-    return contact_forces
+    # Return both visualization points and all points (same in original method)
+    return contact_forces, contact_forces
 
 def add_contact_spheres_to_xml(xml_path, contact_forces):
     """Add contact force spheres to XML file"""
@@ -1209,11 +1259,22 @@ def main():
     
     # Create contact force visualization with distribution by body2_name
     # Use clustering settings from main function
-    contact_forces = create_contact_force_visualization(df, x_col, y_col, z_col, max_spheres_override, excluded_links, min_points_per_link=1, min_sphere_distance=min_sphere_distance, enable_clustering=enable_clustering, uniform_distribution=uniform_distribution)
+    result = create_contact_force_visualization(df, x_col, y_col, z_col, max_spheres_override, excluded_links, min_points_per_link=1, min_sphere_distance=min_sphere_distance, enable_clustering=enable_clustering, uniform_distribution=uniform_distribution)
+    
+    # Handle return value (tuple or single value for backward compatibility)
+    if isinstance(result, tuple):
+        contact_forces, all_clustered_contact_forces = result
+    else:
+        contact_forces = result
+        all_clustered_contact_forces = result  # Fallback for old code
     
     if not contact_forces:
         print("No contact forces to display")
         return
+    
+    # Save all clustered contact points to CSV
+    if isinstance(result, tuple) and all_clustered_contact_forces:
+        save_clustered_contacts_to_csv(all_clustered_contact_forces, csv_file, coord_type)
     
     # 打印显示的力大小范围
     if contact_forces:

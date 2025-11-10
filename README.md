@@ -180,7 +180,7 @@ python3 scripts/merge_contact_data.py logs/forward-00.0N-0.5s-20251021_193237
 # 对合并后的csv进行碰撞点显示
 # 使用机器人坐标系（默认）， 后面的参数 1000 是显示点数量，1、2是 过滤掉足部的点
 # python3 mujoco_xml_contact_display.py <csv_file> <xml_file> [world|robot_frame] [max_spheres] [joint_filter] [enable_clustering] [uniform_distribution]
-python3 scripts/mujoco_xml_contact_display.py logs/forward-00.0N-0.5s-20251021_193237/merged_contact_data_forward-00.0N-0.5s-20251021_193237_20251021_194141.csv src/simulation/mujoco/assets/resource/pm_v2_mesh.xml robot_frame 1500 "" true true
+python3 scripts/mujoco_xml_contact_display.py logs/4 src/simulation/mujoco/assets/resource/pm_v2_mesh.xml robot_frame 1500 "" true true
 
 # 排除特定关节
 python3 scripts/mujoco_xml_contact_display.py csv_file xml_file robot_frame 1500 "1,2,3"
