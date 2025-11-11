@@ -71,24 +71,43 @@ def create_blue_cmap():
     return cmap
 
 
-def load_stl_mesh(stl_path):
+def load_stl_mesh(stl_path, convert_to_meters=True):
     """
     加载STL文件并返回网格对象
     
     参数:
         stl_path: STL文件路径
+        convert_to_meters: 是否将STL坐标转换为米（默认True，假设STL是毫米单位）
     
     返回:
-        mesh: 网格对象（trimesh或numpy-stl）
+        mesh: 网格对象（trimesh或numpy-stl），坐标已转换为米
     """
     if not os.path.exists(stl_path):
         raise FileNotFoundError(f"STL文件不存在: {stl_path}")
     
     if HAS_TRIMESH:
         mesh_obj = trimesh.load(str(stl_path))
+        # 检查STL文件的单位：如果最大坐标值大于10，可能是毫米单位
+        if convert_to_meters and mesh_obj.vertices.size > 0:
+            max_coord = np.abs(mesh_obj.vertices).max()
+            if max_coord > 10:
+                print(f"检测到STL文件坐标范围较大（最大: {max_coord:.2f}），假设为毫米单位，转换为米")
+                # 将毫米转换为米
+                mesh_obj.vertices = mesh_obj.vertices / 1000.0
+            else:
+                print(f"STL文件坐标范围: {max_coord:.2f}，假设为米单位")
         return mesh_obj
     elif HAS_STL:
         mesh_obj = mesh.Mesh.from_file(str(stl_path))
+        # 检查STL文件的单位
+        if convert_to_meters and mesh_obj.vectors.size > 0:
+            max_coord = np.abs(mesh_obj.vectors).max()
+            if max_coord > 10:
+                print(f"检测到STL文件坐标范围较大（最大: {max_coord:.2f}），假设为毫米单位，转换为米")
+                # 将毫米转换为米
+                mesh_obj.vectors = mesh_obj.vectors / 1000.0
+            else:
+                print(f"STL文件坐标范围: {max_coord:.2f}，假设为米单位")
         return mesh_obj
     else:
         raise ImportError("无法加载STL文件：未找到trimesh或numpy-stl库")
@@ -110,7 +129,23 @@ def calculate_surface_area_for_grid_cells(grid_centers, stl_path, search_radius=
         raise ImportError("无法计算表面积：未找到trimesh或numpy-stl库")
     
     print(f"正在加载STL文件: {stl_path}")
-    mesh_obj = load_stl_mesh(stl_path)
+    mesh_obj = load_stl_mesh(stl_path, convert_to_meters=True)
+    
+    # 检查网格和接触点的坐标范围是否匹配
+    if HAS_TRIMESH:
+        mesh_coords = mesh_obj.vertices
+    elif HAS_STL:
+        mesh_coords = mesh_obj.vectors.reshape(-1, 3)
+    else:
+        mesh_coords = np.array([])
+    
+    if mesh_coords.size > 0:
+        mesh_max = np.abs(mesh_coords).max()
+        grid_max = np.abs(grid_centers).max()
+        print(f"STL网格坐标范围: ±{mesh_max:.3f} m")
+        print(f"接触点坐标范围: ±{grid_max:.3f} m")
+        if mesh_max > 10 * grid_max or grid_max > 10 * mesh_max:
+            print(f"警告: STL网格和接触点的坐标范围差异较大，可能存在单位不匹配问题")
     
     print(f"正在计算 {len(grid_centers)} 个网格单元的表面积...")
     surface_areas = np.zeros(len(grid_centers))
@@ -931,26 +966,230 @@ def plot_surface_area_grid(csv_path, stl_path, output_path=None, bins=50, cmap=N
     plt.close()
 
 
+def plot_pressure_grid(csv_path, stl_path, output_path=None, bins=50, cmap=None, figsize=(10, 8), 
+                       margin_left=5.0, margin_right=5.0, margin_top=5.0, margin_bottom=5.0,
+                       search_radius=0.01):
+    """
+    绘制表面压强的网格颜色图（力/面积）
+    
+    参数:
+        csv_path: CSV文件路径
+        stl_path: STL文件路径
+        output_path: 输出图片路径（可选，如果为None则显示图片）
+        bins: 网格分辨率
+        cmap: 颜色映射（如果为None，则使用绿色到红色的默认映射）
+        figsize: 图片大小
+        margin_left: 左边距（百分比，默认5.0）
+        margin_right: 右边距（百分比，默认5.0）
+        margin_top: 上边距（百分比，默认5.0）
+        margin_bottom: 下边距（百分比，默认5.0）
+        search_radius: 搜索半径（米），用于计算每个点周围的表面积
+    """
+    if not HAS_TRIMESH and not HAS_STL:
+        raise ImportError("无法绘制压强图：未找到trimesh或numpy-stl库，请安装: pip install trimesh")
+    
+    # 如果没有指定颜色映射，使用绿色到红色的默认映射（表示从低到高的压强）
+    if cmap is None:
+        colors = ['green', 'yellow', 'red']
+        n_bins = 256
+        cmap = LinearSegmentedColormap.from_list('green_to_red', colors, N=n_bins)
+    elif isinstance(cmap, str):
+        # 如果是指定的字符串，尝试使用matplotlib内置的colormap
+        try:
+            cmap = plt.get_cmap(cmap)
+        except ValueError:
+            print(f"警告: 无法找到颜色映射 '{cmap}'，使用默认的绿色到红色映射")
+            colors = ['green', 'yellow', 'red']
+            n_bins = 256
+            cmap = LinearSegmentedColormap.from_list('green_to_red', colors, N=n_bins)
+    
+    # 读取CSV文件
+    print(f"正在读取CSV文件: {csv_path}")
+    df = pd.read_csv(csv_path)
+    
+    # 确定使用的力列（优先使用force_normal，与统计部分保持一致）
+    force_column = 'force_normal' if 'force_normal' in df.columns else 'force_magnitude'
+    if force_column not in df.columns:
+        raise ValueError(f"CSV文件缺少必要的力列: force_normal 和 force_magnitude 都不存在")
+    
+    # 检查必要的列是否存在
+    required_columns = ['robot_frame_z', 'robot_frame_y', force_column]
+    missing_columns = [col for col in required_columns if col not in df.columns]
+    if missing_columns:
+        raise ValueError(f"CSV文件缺少必要的列: {missing_columns}")
+    
+    print(f"绘图使用力列: {force_column}")
+    
+    # 检查是否是原始CSV（通过检查是否有contact_count列，或者文件名是否包含"clustered"）
+    csv_file = Path(csv_path)
+    is_clustered = 'clustered' in csv_file.stem.lower() or 'contact_count' in df.columns
+    
+    if not is_clustered:
+        # 原始CSV：按位置分组，找到每个位置的最大力
+        df = find_max_force_per_position(df, force_column=force_column)
+    else:
+        print("检测到聚类后的CSV文件，直接使用数据")
+    
+    # 提取数据
+    z = df['robot_frame_z'].values
+    y = df['robot_frame_y'].values
+    force = df[force_column].values
+    
+    # 将 y 从 cm 转换为 m（如果数据是 cm 单位）
+    if len(y) > 0 and np.abs(y).max() > 10:
+        # 数据可能是 cm，转换为 m
+        y = y / 100.0
+    
+    # 创建图形
+    fig, ax = plt.subplots(figsize=figsize)
+    
+    # 设置绘图区域边距（百分比，仅针对绘图区域，不包括标题）
+    # 将百分比转换为0-1之间的值
+    left = margin_left / 100.0
+    right_margin = margin_right / 100.0
+    bottom = margin_bottom / 100.0
+    top = 1.0 - margin_top / 100.0
+    
+    # 为颜色条预留空间（约5%），然后设置右边距
+    # 颜色条会占用一些空间，所以需要调整right值
+    colorbar_space = 0.05  # 颜色条占用的空间比例
+    right = 1.0 - right_margin - colorbar_space
+    
+    # 先设置边距
+    plt.subplots_adjust(left=left, bottom=bottom, right=right, top=top)
+    
+    # 先创建hexbin网格以获取网格单元中心
+    # 使用虚拟数据创建网格结构
+    hb_temp = ax.hexbin(y, z, C=np.ones_like(y), gridsize=bins, reduce_C_function=np.mean)
+    
+    # 获取网格单元的中心坐标
+    offsets = hb_temp.get_offsets()  # 获取所有网格单元的中心坐标 (N, 2) - (y, z)
+    
+    # 对于每个网格单元，计算其x坐标（使用该网格单元内所有点的x坐标平均值）
+    # 检查是否有robot_frame_x列
+    if 'robot_frame_x' in df.columns:
+        x_data = df['robot_frame_x'].values
+        if len(x_data) > 0 and np.abs(x_data).max() > 10:
+            x_data = x_data / 100.0
+    else:
+        x_data = np.zeros_like(y)
+    
+    # 为每个网格单元找到对应的x坐标
+    # 使用KD树找到每个网格单元中心对应的最近点，然后使用该点的x坐标
+    try:
+        from scipy.spatial import cKDTree
+        point_tree = cKDTree(np.column_stack([y, z]))
+        _, nearest_indices = point_tree.query(offsets)
+        grid_x = x_data[nearest_indices]
+    except ImportError:
+        # 如果没有scipy，使用简单的平均值
+        grid_x = np.zeros(len(offsets))
+        print("警告: 未找到scipy，使用x=0作为网格单元的x坐标")
+    
+    # 构建网格单元中心坐标（3D）
+    grid_centers = np.column_stack([grid_x, offsets[:, 0], offsets[:, 1]])
+    
+    # 清理临时图形
+    ax.clear()
+    plt.subplots_adjust(left=left, bottom=bottom, right=right, top=top)
+    
+    # 计算每个网格单元的表面积
+    print("正在计算网格单元的表面积...")
+    surface_areas = calculate_surface_area_for_grid_cells(grid_centers, stl_path, search_radius=search_radius)
+    
+    # 验证表面积值的合理性（应该在合理的范围内）
+    if len(surface_areas) > 0:
+        print(f"表面积统计: min={surface_areas.min():.6e} m², max={surface_areas.max():.6e} m², mean={surface_areas.mean():.6e} m²")
+        # 如果表面积太小（可能是单位错误），给出警告
+        if surface_areas.max() < 1e-6:
+            print("警告: 表面积值异常小，可能存在单位转换问题")
+        elif surface_areas.max() > 1.0:
+            print("警告: 表面积值异常大，可能存在单位转换问题")
+    
+    # 创建映射：将网格单元的表面积映射回原始数据点
+    # 对于每个原始点，找到它所属的网格单元
+    try:
+        from scipy.spatial import cKDTree
+        grid_tree = cKDTree(offsets)
+        _, point_to_grid = grid_tree.query(np.column_stack([y, z]))
+        # 将网格单元的表面积分配给对应的点
+        point_surface_areas = surface_areas[point_to_grid]
+    except ImportError:
+        # 如果没有scipy，使用简单的最近邻匹配
+        print("警告: 未找到scipy，使用简单匹配方法")
+        point_surface_areas = np.zeros_like(y)
+        for i, (yi, zi) in enumerate(zip(y, z)):
+            dists = np.sqrt((offsets[:, 0] - yi)**2 + (offsets[:, 1] - zi)**2)
+            nearest_idx = np.argmin(dists)
+            point_surface_areas[i] = surface_areas[nearest_idx]
+    
+    # 计算压强：压强 = 力 / 面积
+    # 力单位：N，面积单位：m²，压强单位：Pa (N/m²)
+    # 避免除以0
+    pressure = np.where(point_surface_areas > 1e-10, force / point_surface_areas, 0.0)
+    
+    # 将压强从Pa转换为MPa以便显示
+    # 1 MPa = 1,000,000 Pa
+    pressure_mpa = pressure / 1e6
+    
+    print(f"压强范围: {pressure_mpa.min():.4f} - {pressure_mpa.max():.4f} MPa")
+    
+    # 使用hexbin创建网格颜色图
+    # x轴: robot_frame_y, y轴: robot_frame_z
+    # 使用np.max以显示每个网格单元内的最大压强（与其他图保持一致）
+    hb = ax.hexbin(y, z, C=pressure_mpa, gridsize=bins, cmap=cmap, reduce_C_function=np.max)
+    
+    # 添加颜色条，使用shrink参数控制大小
+    cb = plt.colorbar(hb, ax=ax, shrink=0.8, aspect=20, pad=0.02)
+    cb.set_label('Pressure (MPa)', fontsize=12)
+    
+    # 设置标签和标题
+    ax.set_xlabel('robot_frame_y (m)', fontsize=12)
+    ax.set_ylabel('robot_frame_z (m)', fontsize=12)
+    ax.set_title('Surface Pressure Distribution', fontsize=12)
+    
+    # 设置坐标轴范围
+    ax.set_xlim(-0.4, 0.4)
+    ax.set_ylim(0, 1.4)
+    
+    # 添加网格
+    ax.grid(True, alpha=0.3)
+    
+    # 确保边距设置正确
+    plt.subplots_adjust(left=left, bottom=bottom, right=right, top=top)
+    
+    # 保存或显示（不使用bbox_inches='tight'以保持设置的边距）
+    if output_path:
+        plt.savefig(output_path, dpi=300, bbox_inches=None, pad_inches=0)
+        print(f"图片已保存到: {output_path}")
+    else:
+        plt.show()
+    
+    plt.close()
+
+
 def main():
-    parser = argparse.ArgumentParser(description='绘制接触力数据、保护层厚度和表面积的网格颜色图')
+    parser = argparse.ArgumentParser(description='绘制接触力数据、保护层厚度、表面积和压强的网格颜色图')
     parser.add_argument('csv_path', type=str, help='CSV文件路径')
-    parser.add_argument('--stl-path', type=str, default=None, help='STL文件路径（用于表面积计算，默认: src/simulation/mujoco/assets/resource/robot/pm_v2/meshes/serial_pm_v2_combined.stl）')
+    parser.add_argument('--stl-path', type=str, default=None, help='STL文件路径（用于表面积和压强计算，默认: src/simulation/mujoco/assets/resource/robot/pm_v2/meshes/serial_pm_v2_combined.stl）')
     parser.add_argument('-o', '--output', type=str, default=None, help='输出图片路径前缀（可选，会自动添加后缀）')
     parser.add_argument('-b', '--bins', type=int, default=50, help='网格分辨率（默认: 50）')
-    parser.add_argument('-c', '--cmap', type=str, default=None, help='颜色映射（默认: None，力图使用白色到红色，厚度图使用橙色，表面积图使用蓝色）')
-    parser.add_argument('--figsize', type=float, nargs=2, default=[15, 15], help='图片大小（单位: cm，默认: 4 10，如果未指定单独大小则两个图都使用）')
+    parser.add_argument('-c', '--cmap', type=str, default=None, help='颜色映射（默认: None，力图使用白色到红色，厚度图使用橙色，表面积图使用蓝色，压强图使用绿色到红色）')
+    parser.add_argument('--figsize', type=float, nargs=2, default=[15, 15], help='图片大小（单位: cm，默认: 4 10，如果未指定单独大小则所有图都使用）')
     parser.add_argument('--force-figsize', type=float, nargs=2, default=None, help='力图大小（单位: cm，宽 高，默认使用--figsize）')
     parser.add_argument('--thickness-figsize', type=float, nargs=2, default=None, help='厚度图大小（单位: cm，宽 高，默认使用--figsize）')
     parser.add_argument('--surface-figsize', type=float, nargs=2, default=None, help='表面积图大小（单位: cm，宽 高，默认使用--figsize）')
+    parser.add_argument('--pressure-figsize', type=float, nargs=2, default=None, help='压强图大小（单位: cm，宽 高，默认使用--figsize）')
     parser.add_argument('--density', type=float, default=0.4, help='材料密度（默认: 0.4）')
     parser.add_argument('--target-force', type=float, default=1.0, help='目标衰减后的力（kN，默认: 3.0）')
     parser.add_argument('--margin-left', type=float, default=15.0, help='左边距（百分比，默认: 5.0）')
     parser.add_argument('--margin-right', type=float, default=5.0, help='右边距（百分比，默认: 5.0）')
     parser.add_argument('--margin-top', type=float, default=5.0, help='上边距（百分比，默认: 5.0）')
     parser.add_argument('--margin-bottom', type=float, default=10.0, help='下边距（百分比，默认: 5.0）')
-    parser.add_argument('--force-only', action='store_true', help='仅绘制力图，不绘制厚度图和表面积图')
-    parser.add_argument('--thickness-only', action='store_true', help='仅绘制厚度图，不绘制力图和表面积图')
-    parser.add_argument('--surface-only', action='store_true', help='仅绘制表面积图，不绘制力图和厚度图')
+    parser.add_argument('--force-only', action='store_true', help='仅绘制力图，不绘制其他图')
+    parser.add_argument('--thickness-only', action='store_true', help='仅绘制厚度图，不绘制其他图')
+    parser.add_argument('--surface-only', action='store_true', help='仅绘制表面积图，不绘制其他图')
+    parser.add_argument('--pressure-only', action='store_true', help='仅绘制压强图，不绘制其他图')
     parser.add_argument('--search-radius', type=float, default=0.01, help='表面积计算搜索半径（米，默认: 0.01）')
     
     args = parser.parse_args()
@@ -974,6 +1213,7 @@ def main():
     force_figsize = cm_to_inch(args.force_figsize) if args.force_figsize else cm_to_inch(args.figsize)
     thickness_figsize = cm_to_inch(args.thickness_figsize) if args.thickness_figsize else cm_to_inch(args.figsize)
     surface_figsize = cm_to_inch(args.surface_figsize) if args.surface_figsize else cm_to_inch(args.figsize)
+    pressure_figsize = cm_to_inch(args.pressure_figsize) if args.pressure_figsize else cm_to_inch(args.figsize)
     
     # 确定STL文件路径
     if args.stl_path:
@@ -1047,7 +1287,7 @@ def main():
         traceback.print_exc()
     
     # 绘制力图
-    if not args.thickness_only and not args.surface_only:
+    if not args.thickness_only and not args.surface_only and not args.pressure_only:
         if args.output is None:
             force_output = csv_file.parent / f"{csv_file.stem}_force_grid_plot.png"
         else:
@@ -1074,7 +1314,7 @@ def main():
             traceback.print_exc()
     
     # 绘制厚度图
-    if not args.force_only and not args.surface_only:
+    if not args.force_only and not args.surface_only and not args.pressure_only:
         if args.output is None:
             thickness_output = csv_file.parent / f"{csv_file.stem}_thickness_grid_plot.png"
         else:
@@ -1103,7 +1343,7 @@ def main():
             traceback.print_exc()
     
     # 绘制表面积图
-    if not args.force_only and not args.thickness_only and stl_path is not None:
+    if not args.force_only and not args.thickness_only and not args.pressure_only and stl_path is not None:
         if args.output is None:
             surface_output = csv_file.parent / f"{csv_file.stem}_surface_area_grid_plot.png"
         else:
@@ -1128,6 +1368,35 @@ def main():
             )
         except Exception as e:
             print(f"绘制表面积图时出错: {e}")
+            import traceback
+            traceback.print_exc()
+    
+    # 绘制压强图
+    if not args.force_only and not args.thickness_only and not args.surface_only and stl_path is not None:
+        if args.output is None:
+            pressure_output = csv_file.parent / f"{csv_file.stem}_pressure_grid_plot.png"
+        else:
+            pressure_output = Path(args.output).parent / f"{Path(args.output).stem}_pressure.png"
+        
+        try:
+            print("\n" + "="*60)
+            print("绘制表面压强图")
+            print("="*60)
+            plot_pressure_grid(
+                args.csv_path,
+                str(stl_path),
+                str(pressure_output),
+                bins=args.bins,
+                cmap=args.cmap,
+                figsize=pressure_figsize,
+                margin_left=args.margin_left,
+                margin_right=args.margin_right,
+                margin_top=args.margin_top,
+                margin_bottom=args.margin_bottom,
+                search_radius=args.search_radius
+            )
+        except Exception as e:
+            print(f"绘制压强图时出错: {e}")
             import traceback
             traceback.print_exc()
 
