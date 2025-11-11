@@ -121,7 +121,7 @@ For more information, please see http://wiki.ros.org/sw_urdf_exporter -->
         <visual>
             <origin xyz="0 0 0" rpy="0 0 0"/>
             <geometry>
-                <mesh filename="/home/wang22/engineai/engineai_ros2_workspace/src/simulation/mujoco/assets/resource/robot/pm_v2/meshes/LINK_KNEE_PITCH_L.STL"/>
+                <mesh filename="/home/wang22/engineai/engineai_ros2_workspace/src/simulation/mujoco/assets/resource/robot/pm_v2/meshes/LINK_KNEE_PITCH_L_VISUAL.STL"/>
             </geometry>
             <material name="">
                 <color rgba="0.75294 0.75294 0.75294 1"/>
@@ -317,7 +317,7 @@ For more information, please see http://wiki.ros.org/sw_urdf_exporter -->
         <visual>
             <origin xyz="0 0 0" rpy="0 0 0"/>
             <geometry>
-                <mesh filename="/home/wang22/engineai/engineai_ros2_workspace/src/simulation/mujoco/assets/resource/robot/pm_v2/meshes/LINK_KNEE_PITCH_R.STL"/>
+                <mesh filename="/home/wang22/engineai/engineai_ros2_workspace/src/simulation/mujoco/assets/resource/robot/pm_v2/meshes/LINK_KNEE_PITCH_R_VISUAL.STL"/>
             </geometry>
             <material name="">
                 <color rgba="0.75294 0.75294 0.75294 1"/>
