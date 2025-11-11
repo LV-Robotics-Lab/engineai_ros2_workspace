@@ -519,11 +519,17 @@ def plot_thickness_grid(csv_path, output_path=None, bins=50, cmap=None, figsize=
     # 使用hexbin创建网格颜色图
     # x轴: robot_frame_y, y轴: robot_frame_z
     # 使用np.max以显示每个网格单元内的最大厚度（与力图保持一致）
-    hb = ax.hexbin(y, z, C=thicknesses, gridsize=bins, cmap=cmap, reduce_C_function=np.max)
+    # 设置颜色范围以匹配标准厚度值 6, 12, 18, 24mm
+    hb = ax.hexbin(y, z, C=thicknesses, gridsize=bins, cmap=cmap, reduce_C_function=np.max,
+                   vmin=0.0, vmax=24.0)
     
     # 添加颜色条，使用shrink参数控制大小
     cb = plt.colorbar(hb, ax=ax, shrink=0.8, aspect=20, pad=0.02)
     cb.set_label('Protector Thickness (mm)', fontsize=12)
+    
+    # 设置颜色条刻度标签为 6, 12, 18, 24mm
+    cb.set_ticks([6, 12, 18, 24])
+    cb.set_ticklabels(['6', '12', '18', '24'])
     
     # 设置标签和标题
     ax.set_xlabel('robot_frame_y (cm)', fontsize=12)
