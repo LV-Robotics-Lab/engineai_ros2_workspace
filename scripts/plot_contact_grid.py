@@ -94,17 +94,17 @@ def load_stl_mesh(stl_path):
         raise ImportError("无法加载STL文件：未找到trimesh或numpy-stl库")
 
 
-def calculate_surface_area_for_points(contact_points, stl_path, search_radius=0.01):
+def calculate_surface_area_for_grid_cells(grid_centers, stl_path, search_radius=0.01):
     """
-    为每个接触点计算表面积
+    为每个网格单元计算表面积
     
     参数:
-        contact_points: 接触点坐标数组，形状为 (N, 3)，单位：米
+        grid_centers: 网格单元中心坐标数组，形状为 (N, 3)，单位：米
         stl_path: STL文件路径
-        search_radius: 搜索半径（米），用于计算每个点周围的表面积
+        search_radius: 搜索半径（米），用于计算每个网格单元周围的表面积
     
     返回:
-        surface_areas: 每个点的表面积数组（单位：m²）
+        surface_areas: 每个网格单元的表面积数组（单位：m²）
     """
     if not HAS_TRIMESH and not HAS_STL:
         raise ImportError("无法计算表面积：未找到trimesh或numpy-stl库")
@@ -112,8 +112,16 @@ def calculate_surface_area_for_points(contact_points, stl_path, search_radius=0.
     print(f"正在加载STL文件: {stl_path}")
     mesh_obj = load_stl_mesh(stl_path)
     
-    print(f"正在计算 {len(contact_points)} 个接触点的表面积...")
-    surface_areas = np.zeros(len(contact_points))
+    print(f"正在计算 {len(grid_centers)} 个网格单元的表面积...")
+    surface_areas = np.zeros(len(grid_centers))
+    
+    # 尝试导入tqdm显示进度
+    try:
+        from tqdm import tqdm
+        has_tqdm = True
+    except ImportError:
+        has_tqdm = False
+        print("提示: 安装tqdm可以显示进度条 (pip install tqdm)")
     
     if HAS_TRIMESH:
         # 使用trimesh计算
@@ -122,19 +130,40 @@ def calculate_surface_area_for_points(contact_points, stl_path, search_radius=0.
         triangle_centers = triangles.mean(axis=1)
         triangle_areas = mesh_obj.area_faces
         
-        # 对于每个接触点，找到附近的三角形并累加面积
-        for i, point in enumerate(contact_points):
-            # 计算点到所有三角形中心的距离
-            distances = np.linalg.norm(triangle_centers - point, axis=1)
-            # 找到在搜索半径内的三角形
-            nearby_mask = distances < search_radius
-            if np.any(nearby_mask):
-                # 累加附近三角形的面积
-                surface_areas[i] = triangle_areas[nearby_mask].sum()
+        # 使用KD树加速最近邻搜索
+        try:
+            from scipy.spatial import cKDTree
+            tree = cKDTree(triangle_centers)
+            use_kdtree = True
+        except ImportError:
+            use_kdtree = False
+            print("提示: 安装scipy可以加速计算 (pip install scipy)")
+        
+        # 对于每个网格单元，找到附近的三角形并累加面积
+        iterator = tqdm(enumerate(grid_centers), total=len(grid_centers), desc="计算表面积") if has_tqdm else enumerate(grid_centers)
+        
+        for i, center in iterator:
+            if use_kdtree:
+                # 使用KD树查找搜索半径内的点
+                indices = tree.query_ball_point(center, search_radius)
+                if len(indices) > 0:
+                    surface_areas[i] = triangle_areas[indices].sum()
+                else:
+                    # 如果找不到附近的三角形，使用最近三角形的面积
+                    dist, nearest_idx = tree.query(center)
+                    surface_areas[i] = triangle_areas[nearest_idx]
             else:
-                # 如果找不到附近的三角形，使用最近三角形的面积
-                nearest_idx = np.argmin(distances)
-                surface_areas[i] = triangle_areas[nearest_idx]
+                # 计算点到所有三角形中心的距离
+                distances = np.linalg.norm(triangle_centers - center, axis=1)
+                # 找到在搜索半径内的三角形
+                nearby_mask = distances < search_radius
+                if np.any(nearby_mask):
+                    # 累加附近三角形的面积
+                    surface_areas[i] = triangle_areas[nearby_mask].sum()
+                else:
+                    # 如果找不到附近的三角形，使用最近三角形的面积
+                    nearest_idx = np.argmin(distances)
+                    surface_areas[i] = triangle_areas[nearest_idx]
     
     elif HAS_STL:
         # 使用numpy-stl计算
@@ -151,19 +180,40 @@ def calculate_surface_area_for_points(contact_points, stl_path, search_radius=0.
         
         triangle_areas = np.array([triangle_area(tri) for tri in triangles])
         
-        # 对于每个接触点，找到附近的三角形并累加面积
-        for i, point in enumerate(contact_points):
-            # 计算点到所有三角形中心的距离
-            distances = np.linalg.norm(triangle_centers - point, axis=1)
-            # 找到在搜索半径内的三角形
-            nearby_mask = distances < search_radius
-            if np.any(nearby_mask):
-                # 累加附近三角形的面积
-                surface_areas[i] = triangle_areas[nearby_mask].sum()
+        # 使用KD树加速最近邻搜索
+        try:
+            from scipy.spatial import cKDTree
+            tree = cKDTree(triangle_centers)
+            use_kdtree = True
+        except ImportError:
+            use_kdtree = False
+            print("提示: 安装scipy可以加速计算 (pip install scipy)")
+        
+        # 对于每个网格单元，找到附近的三角形并累加面积
+        iterator = tqdm(enumerate(grid_centers), total=len(grid_centers), desc="计算表面积") if has_tqdm else enumerate(grid_centers)
+        
+        for i, center in iterator:
+            if use_kdtree:
+                # 使用KD树查找搜索半径内的点
+                indices = tree.query_ball_point(center, search_radius)
+                if len(indices) > 0:
+                    surface_areas[i] = triangle_areas[indices].sum()
+                else:
+                    # 如果找不到附近的三角形，使用最近三角形的面积
+                    dist, nearest_idx = tree.query(center)
+                    surface_areas[i] = triangle_areas[nearest_idx]
             else:
-                # 如果找不到附近的三角形，使用最近三角形的面积
-                nearest_idx = np.argmin(distances)
-                surface_areas[i] = triangle_areas[nearest_idx]
+                # 计算点到所有三角形中心的距离
+                distances = np.linalg.norm(triangle_centers - center, axis=1)
+                # 找到在搜索半径内的三角形
+                nearby_mask = distances < search_radius
+                if np.any(nearby_mask):
+                    # 累加附近三角形的面积
+                    surface_areas[i] = triangle_areas[nearby_mask].sum()
+                else:
+                    # 如果找不到附近的三角形，使用最近三角形的面积
+                    nearest_idx = np.argmin(distances)
+                    surface_areas[i] = triangle_areas[nearest_idx]
     
     print(f"表面积计算完成，范围: {surface_areas.min():.6f} - {surface_areas.max():.6f} m²")
     return surface_areas
@@ -534,7 +584,7 @@ def plot_contact_grid(csv_path, output_path=None, bins=50, cmap=None, figsize=(1
     # 设置标签和标题
     ax.set_xlabel('robot_frame_y (m)', fontsize=12)
     ax.set_ylabel('robot_frame_z (m)', fontsize=12)
-    ax.set_title('Contact Force Distribution (Grid Color Plot)', fontsize=12)
+    ax.set_title('Collision Force Distribution', fontsize=12)
     
     # 设置坐标轴范围
     ax.set_xlim(-0.4, 0.4)
@@ -675,7 +725,7 @@ def plot_thickness_grid(csv_path, output_path=None, bins=50, cmap=None, figsize=
     # 设置标签和标题
     ax.set_xlabel('robot_frame_y (m)', fontsize=12)
     ax.set_ylabel('robot_frame_z (m)', fontsize=12)
-    ax.set_title('Protector Thickness Distribution (Grid Color Plot)', fontsize=12)
+    ax.set_title('Protector Thickness Distribution', fontsize=12)
     
     # 设置坐标轴范围
     ax.set_xlim(-0.4, 0.4)
@@ -774,12 +824,6 @@ def plot_surface_area_grid(csv_path, stl_path, output_path=None, bins=50, cmap=N
     else:
         x = np.zeros_like(y)
     
-    # 构建接触点坐标（3D）
-    contact_points = np.column_stack([x, y, z])
-    
-    # 计算每个接触点的表面积
-    surface_areas = calculate_surface_area_for_points(contact_points, stl_path, search_radius=search_radius)
-    
     # 创建图形
     fig, ax = plt.subplots(figsize=figsize)
     
@@ -798,10 +842,65 @@ def plot_surface_area_grid(csv_path, stl_path, output_path=None, bins=50, cmap=N
     # 先设置边距
     plt.subplots_adjust(left=left, bottom=bottom, right=right, top=top)
     
+    # 先创建hexbin网格以获取网格单元中心
+    # 使用虚拟数据创建网格结构
+    hb_temp = ax.hexbin(y, z, C=np.ones_like(y), gridsize=bins, reduce_C_function=np.mean)
+    
+    # 获取网格单元的中心坐标
+    offsets = hb_temp.get_offsets()  # 获取所有网格单元的中心坐标 (N, 2) - (y, z)
+    
+    # 对于每个网格单元，计算其x坐标（使用该网格单元内所有点的x坐标平均值）
+    # 检查是否有robot_frame_x列
+    if 'robot_frame_x' in df.columns:
+        x_data = df['robot_frame_x'].values
+        if len(x_data) > 0 and np.abs(x_data).max() > 10:
+            x_data = x_data / 100.0
+    else:
+        x_data = np.zeros_like(y)
+    
+    # 为每个网格单元找到对应的x坐标
+    # 使用KD树找到每个网格单元中心对应的最近点，然后使用该点的x坐标
+    try:
+        from scipy.spatial import cKDTree
+        point_tree = cKDTree(np.column_stack([y, z]))
+        _, nearest_indices = point_tree.query(offsets)
+        grid_x = x_data[nearest_indices]
+    except ImportError:
+        # 如果没有scipy，使用简单的平均值
+        grid_x = np.zeros(len(offsets))
+        print("警告: 未找到scipy，使用x=0作为网格单元的x坐标")
+    
+    # 构建网格单元中心坐标（3D）
+    grid_centers = np.column_stack([grid_x, offsets[:, 0], offsets[:, 1]])
+    
+    # 清理临时图形
+    ax.clear()
+    plt.subplots_adjust(left=left, bottom=bottom, right=right, top=top)
+    
+    # 计算每个网格单元的表面积
+    surface_areas = calculate_surface_area_for_grid_cells(grid_centers, stl_path, search_radius=search_radius)
+    
+    # 创建映射：将网格单元的表面积映射回原始数据点
+    # 对于每个原始点，找到它所属的网格单元
+    try:
+        from scipy.spatial import cKDTree
+        grid_tree = cKDTree(offsets)
+        _, point_to_grid = grid_tree.query(np.column_stack([y, z]))
+        # 将网格单元的表面积分配给对应的点
+        point_surface_areas = surface_areas[point_to_grid]
+    except ImportError:
+        # 如果没有scipy，使用简单的最近邻匹配
+        print("警告: 未找到scipy，使用简单匹配方法")
+        point_surface_areas = np.zeros_like(y)
+        for i, (yi, zi) in enumerate(zip(y, z)):
+            dists = np.sqrt((offsets[:, 0] - yi)**2 + (offsets[:, 1] - zi)**2)
+            nearest_idx = np.argmin(dists)
+            point_surface_areas[i] = surface_areas[nearest_idx]
+    
     # 使用hexbin创建网格颜色图
     # x轴: robot_frame_y, y轴: robot_frame_z
     # 使用np.max以显示每个网格单元内的最大表面积（与其他图保持一致）
-    hb = ax.hexbin(y, z, C=surface_areas, gridsize=bins, cmap=cmap, reduce_C_function=np.max)
+    hb = ax.hexbin(y, z, C=point_surface_areas, gridsize=bins, cmap=cmap, reduce_C_function=np.max)
     
     # 添加颜色条，使用shrink参数控制大小
     cb = plt.colorbar(hb, ax=ax, shrink=0.8, aspect=20, pad=0.02)
@@ -810,7 +909,7 @@ def plot_surface_area_grid(csv_path, stl_path, output_path=None, bins=50, cmap=N
     # 设置标签和标题
     ax.set_xlabel('robot_frame_y (m)', fontsize=12)
     ax.set_ylabel('robot_frame_z (m)', fontsize=12)
-    ax.set_title('Surface Area Distribution (Grid Color Plot)', fontsize=12)
+    ax.set_title('Surface Area Distribution', fontsize=12)
     
     # 设置坐标轴范围
     ax.set_xlim(-0.4, 0.4)
