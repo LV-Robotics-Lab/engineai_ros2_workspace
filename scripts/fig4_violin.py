@@ -232,7 +232,7 @@ def read_contact_data(csv_path):
     return df
 
 
-def plot_force_normal_violin(csv_path, figsize=(11.5, 5), dpi=300, output_path=None, force_max=None):
+def plot_force_normal_violin(csv_path, figsize=(11.5, 5), dpi=300, output_path=None, force_max=None, use_quantile=True):
     """
     从接触数据 CSV 文件读入数据（body2_name 和 force_normal），
     对 body2_name 进行分类后绘制小提琴图。
@@ -244,6 +244,8 @@ def plot_force_normal_violin(csv_path, figsize=(11.5, 5), dpi=300, output_path=N
         dpi: 图片分辨率，默认 300
         output_path: 输出 PNG 文件路径，如果为 None 则自动生成
         force_max: force_normal 的最大值，超过此值的数据将被过滤（如果为 None 则不过滤）
+        use_quantile: 如果为 True，使用99分位数设置y轴范围（更好地显示中位数附近的数据）；
+                      如果为 False，使用实际最大值（显示所有数据，但可能有极值压缩）
     """
     # 将厘米转换为英寸（matplotlib 使用英寸）
     figsize_inches = (figsize[0] / 2.54, figsize[1] / 2.54)
@@ -397,14 +399,30 @@ def plot_force_normal_violin(csv_path, figsize=(11.5, 5), dpi=300, output_path=N
     ax.spines['right'].set_visible(False)
     
     # 设置 y 轴范围和刻度（单位：kN）
-    # 使用实际的最大值，而不是分位数，确保显示所有数据
     y_min_data = data['force_kN'].min() if len(data) > 0 else 0.0
     y_max_data = data['force_kN'].max() if len(data) > 0 else 10.0
-    # 设置y轴上限，留10%的边距
-    y_max = max(y_max_data * 1.1, 5.0)
+    
+    if use_quantile:
+        # 使用99分位数来设置y轴范围，这样可以更好地显示中位数附近的数据，
+        # 让小提琴图的形状和分布细节更清晰可见
+        y_max_99 = data['force_kN'].quantile(0.99) if len(data) > 0 else 10.0
+        y_max = max(y_max_99 * 1.1, 5.0)
+        method_str = "99分位数"
+    else:
+        # 使用实际的最大值，确保显示所有数据
+        y_max = max(y_max_data * 1.1, 5.0)
+        method_str = "实际最大值"
+        y_max_99 = None
+    
     print(f"[步骤 6/7] 设置y轴范围...")
     print(f"  数据范围: [{y_min_data:.3f}, {y_max_data:.3f}] kN")
-    print(f"  y轴范围: [0, {y_max:.3f}] kN")
+    if use_quantile and y_max_99 is not None:
+        print(f"  99分位数: {y_max_99:.3f} kN")
+    print(f"  y轴范围: [0, {y_max:.3f}] kN (基于{method_str})")
+    if y_max_data > y_max and len(data) > 0:
+        num_outliers = len(data[data['force_kN'] > y_max])
+        pct_outliers = num_outliers / len(data) * 100
+        print(f"  警告: 有 {num_outliers} 个数据点 ({pct_outliers:.2f}%) 超出y轴范围")
     
     # 根据数据范围自动设置y轴刻度
     if y_max <= 5:
@@ -994,11 +1012,19 @@ if __name__ == "__main__":
     
     # 示例2: 绘制 force_normal 小提琴图（新功能）
     # 从 body2_name 和 force_normal 读取数据，对 body2_name 进行分类后绘制
+    
+    # ===== 配置参数 =====
+    # y轴范围设置方式：
+    # - True: 使用99分位数（更好地显示中位数附近的数据，小提琴图细节更清晰）
+    # - False: 使用实际最大值（显示所有数据，但可能有极值压缩）
+    USE_QUANTILE = True  # 改为 False 使用实际最大值
+    
     csv_path = "/home/wang22/engineai/engineai_ros2_workspace/logs/test_slip_100/merged_contact_data_forward-00.0N-0.5s-20251024_205709_20251026_020001.csv"
     plot_force_normal_violin(
         csv_path=csv_path,
         figsize=(13.5, 3.85),
         dpi=300,
         output_path=None,  # 自动生成文件名：{csv文件名}_force_normal_violin.png
-        force_max=None  # 可选：过滤超过此值的 force_normal，例如 force_max=10000
+        force_max=None,  # 可选：过滤超过此值的 force_normal，例如 force_max=10000
+        use_quantile=USE_QUANTILE  # y轴范围设置方式
     )
