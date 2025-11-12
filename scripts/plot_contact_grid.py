@@ -9,7 +9,7 @@ y轴: robot_frame_z
 import pandas as pd
 import matplotlib.pyplot as plt
 import matplotlib.colors as mcolors
-from matplotlib.colors import LinearSegmentedColormap
+from matplotlib.colors import LinearSegmentedColormap, BoundaryNorm, ListedColormap
 import numpy as np
 import argparse
 import os
@@ -55,11 +55,27 @@ def create_white_to_red_cmap():
 
 
 def create_orange_cmap():
-    """创建从浅橙到深橙的颜色映射"""
-    # 定义橙色渐变：从浅橙(255, 200, 150)到深橙(255, 140, 0)
-    colors = [(1.0, 0.78, 0.59), (1.0, 0.55, 0.0)]  # 浅橙到深橙
+    """创建从白色到深橙的颜色映射（0是白色，24是最橙色）"""
+    # 定义颜色渐变：从白色(1.0, 1.0, 1.0)到深橙(255, 140, 0)
+    colors = [(1.0, 1.0, 1.0), (1.0, 0.55, 0.0)]  # 白色到深橙
     n_bins = 256
     cmap = LinearSegmentedColormap.from_list('orange', colors, N=n_bins)
+    return cmap
+
+
+def create_discrete_orange_cmap():
+    """创建离散的橙色颜色映射，用于5个标准厚度值（0, 6, 12, 18, 24）"""
+    # 定义5种颜色：从白色到深橙色
+    # 0: 白色, 6: 浅橙, 12: 中浅橙, 18: 中橙, 24: 深橙
+    colors = [
+        (1.0, 1.0, 1.0),      # 0 - 白色
+        (1.0, 0.9, 0.7),      # 6 - 浅橙
+        (1.0, 0.8, 0.5),      # 12 - 中浅橙
+        (1.0, 0.65, 0.25),    # 18 - 中橙
+        (1.0, 0.55, 0.0)      # 24 - 深橙
+    ]
+    # 使用 ListedColormap 创建真正的离散颜色映射
+    cmap = ListedColormap(colors, name='discrete_orange')
     return cmap
 
 
@@ -254,9 +270,42 @@ def calculate_surface_area_for_grid_cells(grid_centers, stl_path, search_radius=
     return surface_areas
 
 
+def round_thickness_to_standard(thicknesses):
+    """
+    将厚度值四舍五入到最接近的标准值：0, 6, 12, 18, 24
+    
+    参数:
+        thicknesses: 厚度数组（单位：mm），可能包含nan
+    
+    返回:
+        rounded_thicknesses: 四舍五入后的厚度数组
+    """
+    # 标准厚度值
+    standard_values = np.array([0, 6, 12, 18, 24])
+    
+    # 创建结果数组，保持原始数据类型
+    rounded = np.full_like(thicknesses, np.nan, dtype=float)
+    
+    # 处理nan值
+    valid_mask = ~np.isnan(thicknesses)
+    
+    if np.any(valid_mask):
+        # 使用向量化操作找到最接近的标准值
+        valid_thicknesses = thicknesses[valid_mask]
+        # 对于每个有效值，计算到所有标准值的距离
+        # 使用广播：valid_thicknesses[:, None] 与 standard_values[None, :] 比较
+        distances = np.abs(valid_thicknesses[:, None] - standard_values[None, :])
+        # 找到每个值最接近的标准值索引
+        nearest_indices = np.argmin(distances, axis=1)
+        # 赋值
+        rounded[valid_mask] = standard_values[nearest_indices]
+    
+    return rounded
+
+
 def calculate_thicknesses(force_magnitudes, density=0.4, target_force=3.0):
     """
-    计算每个接触点的保护层厚度
+    计算每个接触点的保护层厚度，并四舍五入到标准值（0, 6, 12, 18, 24）
     
     参数:
         force_magnitudes: 力的大小数组（单位：N）
@@ -264,7 +313,7 @@ def calculate_thicknesses(force_magnitudes, density=0.4, target_force=3.0):
         target_force: 目标衰减后的力（kN，默认3.0）
     
     返回:
-        thicknesses: 厚度数组（单位：mm），如果无法满足要求则为nan
+        thicknesses: 厚度数组（单位：mm），已四舍五入到标准值，如果无法满足要求则为nan
     """
     if select_thickness_simple is None:
         raise ImportError("无法导入select_thickness_simple函数，请检查ThicknessCalculate模块")
@@ -288,7 +337,12 @@ def calculate_thicknesses(force_magnitudes, density=0.4, target_force=3.0):
             else:
                 thicknesses.append(float(thickness_mm))
         
-        return np.array(thicknesses)
+        thicknesses = np.array(thicknesses)
+        
+        # 将厚度值四舍五入到标准值
+        thicknesses = round_thickness_to_standard(thicknesses)
+        
+        return thicknesses
     
     finally:
         # 恢复原始工作目录
@@ -414,6 +468,8 @@ def calculate_part_statistics(df, density=0.4, target_force=1.0, force_column='f
                     thicknesses.append(np.nan)
                 else:
                     thicknesses.append(float(thickness_mm))
+            # 将厚度值四舍五入到标准值
+            thicknesses = round_thickness_to_standard(np.array(thicknesses))
             part_stats['max_thickness_mm'] = thicknesses
         finally:
             os.chdir(original_cwd)
@@ -626,7 +682,7 @@ def plot_contact_grid(csv_path, output_path=None, bins=50, cmap=None, figsize=(1
     ax.set_ylim(0, 1.4)
     
     # 添加网格
-    ax.grid(True, alpha=0.3)
+    # ax.grid(True, alpha=0.3)
     
     # 确保边距设置正确
     plt.subplots_adjust(left=left, bottom=bottom, right=right, top=top)
@@ -660,16 +716,16 @@ def plot_thickness_grid(csv_path, output_path=None, bins=50, cmap=None, figsize=
         margin_top: 上边距（百分比，默认5.0）
         margin_bottom: 下边距（百分比，默认5.0）
     """
-    # 如果没有指定颜色映射，使用橙色的默认映射
+    # 如果没有指定颜色映射，使用离散的橙色默认映射
     if cmap is None:
-        cmap = create_orange_cmap()
+        cmap = create_discrete_orange_cmap()
     elif isinstance(cmap, str):
         # 如果是指定的字符串，尝试使用matplotlib内置的colormap
         try:
             cmap = plt.get_cmap(cmap)
         except ValueError:
-            print(f"警告: 无法找到颜色映射 '{cmap}'，使用默认的橙色映射")
-            cmap = create_orange_cmap()
+            print(f"警告: 无法找到颜色映射 '{cmap}'，使用默认的离散橙色映射")
+            cmap = create_discrete_orange_cmap()
     
     # 读取CSV文件
     print(f"正在读取CSV文件: {csv_path}")
@@ -742,20 +798,37 @@ def plot_thickness_grid(csv_path, output_path=None, bins=50, cmap=None, figsize=
     # 先设置边距
     plt.subplots_adjust(left=left, bottom=bottom, right=right, top=top)
     
+    # 创建离散颜色映射
+    # 标准厚度值：0, 6, 12, 18, 24
+    # 定义边界值来分隔5个区间
+    # 边界值应该正好在标准值之间：0-3, 3-9, 9-15, 15-21, 21-24
+    boundaries = [0, 3, 9, 15, 21, 24]  # 6个边界值定义5个区间
+    # 创建离散归一化器，使用cmap的颜色数量
+    norm = BoundaryNorm(boundaries, ncolors=cmap.N, clip=True)
+    
     # 使用hexbin创建网格颜色图
     # x轴: robot_frame_y, y轴: robot_frame_z
     # 使用np.max以显示每个网格单元内的最大厚度（与力图保持一致）
-    # 设置颜色范围以匹配标准厚度值 6, 12, 18, 24mm
+    # 使用离散颜色映射
     hb = ax.hexbin(y, z, C=thicknesses, gridsize=bins, cmap=cmap, reduce_C_function=np.max,
-                   vmin=0.0, vmax=24.0)
+                   norm=norm)
     
     # 添加颜色条，使用shrink参数控制大小
-    cb = plt.colorbar(hb, ax=ax, shrink=0.8, aspect=20, pad=0.02)
+    # 使用离散颜色条，显示为块状
+    # spacing='uniform' 确保每个色块大小相同
+    cb = plt.colorbar(hb, ax=ax, shrink=0.8, aspect=20, pad=0.02, 
+                      ticks=[0, 6, 12, 18, 24], boundaries=boundaries, 
+                      format='%g', spacing='uniform', extend='neither', 
+                      drawedges=True)
     cb.set_label('Protector Thickness (mm)', fontsize=12)
     
     # 设置颜色条刻度标签为 0, 6, 12, 18, 24mm
-    cb.set_ticks([0, 6, 12, 18, 24])
     cb.set_ticklabels(['0', '6', '12', '18', '24'])
+    
+    # 设置颜色条边缘线颜色，使离散块更明显
+    cb.outline.set_edgecolor('black')
+    cb.dividers.set_color('black')
+    cb.dividers.set_linewidth(1.5)
     
     # 设置标签和标题
     ax.set_xlabel('robot_frame_y (m)', fontsize=12)
@@ -767,7 +840,7 @@ def plot_thickness_grid(csv_path, output_path=None, bins=50, cmap=None, figsize=
     ax.set_ylim(0, 1.4)
     
     # 添加网格
-    ax.grid(True, alpha=0.3)
+    # ax.grid(True, alpha=0.3)
     
     # 确保边距设置正确
     plt.subplots_adjust(left=left, bottom=bottom, right=right, top=top)

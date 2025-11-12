@@ -2,10 +2,27 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 from matplotlib.patches import PathPatch
+import matplotlib.font_manager as fm
 import seaborn as sns
 from pathlib import Path
 import re
 import os
+
+# 检查并设置可用字体
+def get_available_font(font_names):
+    """检查字体是否可用，返回第一个可用的字体名称"""
+    available_fonts = [f.name for f in fm.fontManager.ttflist]
+    for font_name in font_names:
+        if font_name in available_fonts:
+            return font_name
+    # 如果都不可用，返回默认字体
+    return 'DejaVu Sans'
+
+# 设置字体
+TIMES_FONT = get_available_font(['Times New Roman', 'TimesNewRoman', 'Nimbus Roman', 'DejaVu Serif'])
+MYRIAD_FONT = get_available_font(['Myriad Pro', 'MyriadPro', 'DejaVu Sans'])
+
+print(f"字体设置: Times字体={TIMES_FONT}, Myriad字体={MYRIAD_FONT}")
 
 # Try to import tqdm for progress bar
 try:
@@ -37,7 +54,7 @@ def plot_violin_with_median(csv_path,
     )
 
     # 画图
-    sns.set_theme(style="darkgrid", font="Times New Roman", font_scale=3)
+    sns.set_theme(style="darkgrid", font=TIMES_FONT, font_scale=3)
 
     fig, ax = plt.subplots(figsize=figsize)
     sns.violinplot(
@@ -293,7 +310,7 @@ def plot_force_normal_violin(csv_path, figsize=(11.5, 5), dpi=300, output_path=N
     # 画图
     print(f"[步骤 3/7] 正在绘制小提琴图...")
     print(f"  图片尺寸: {figsize[0]:.2f}cm x {figsize[1]:.2f}cm ({figsize_inches[0]:.2f}in x {figsize_inches[1]:.2f}in)")
-    sns.set_theme(style="whitegrid", font="Myriad Pro", font_scale=1)
+    sns.set_theme(style="whitegrid", font=MYRIAD_FONT, font_scale=1)
     
     fig = plt.figure(figsize=figsize_inches)
     # 设置背景透明
@@ -402,21 +419,21 @@ def plot_force_normal_violin(csv_path, figsize=(11.5, 5), dpi=300, output_path=N
     
     # 设置横纵坐标标签
     ax.set_xlabel('')  # 不显示 x 轴标签
-    ax.set_ylabel('Force (kN)', fontsize=label_fontsize, fontfamily='Myriad Pro')
-    ax.set_title('Force Distribution by Body Part', fontsize=label_fontsize, fontfamily='Myriad Pro')
+    ax.set_ylabel('Force (kN)', fontsize=label_fontsize, fontfamily=MYRIAD_FONT)
+    # ax.set_title('Force Distribution by Body Part', fontsize=label_fontsize, fontfamily=MYRIAD_FONT)
     
     # 设置刻度标签
     ax.tick_params(axis='both', which='major', labelsize=tick_fontsize)
     ax.tick_params(axis='both', which='minor', labelsize=tick_fontsize)
-    # 确保 y 轴刻度标签使用 Times New Roman 字体
+    # 确保 y 轴刻度标签使用 Times 字体
     for label in ax.get_yticklabels():
-        label.set_fontfamily('Times New Roman')
+        label.set_fontfamily(TIMES_FONT)
     
     # 设置横坐标标签（使用 group_labels，确保与 group_positions 对应）
     ax.set_xticks(group_positions)
     # 将每个标签的首字母大写
     capitalized_labels = [label.capitalize() for label in group_labels]
-    ax.set_xticklabels(capitalized_labels, rotation=0, ha='center', fontfamily='Myriad Pro')
+    ax.set_xticklabels(capitalized_labels, rotation=0, ha='center', fontfamily=MYRIAD_FONT)
     ax.tick_params(axis='x', pad=0)
     
     # 设置坐标轴线的宽度为1pt，颜色为黑色
@@ -577,7 +594,7 @@ def plot_pixel_pressures_violin(csv_path, figsize=(11.5, 5), dpi=300, group_by='
     # 画图
     print("[步骤 3/6] 正在绘制小提琴图...")
     print(f"  图片尺寸: {figsize[0]:.2f}cm x {figsize[1]:.2f}cm ({figsize_inches[0]:.2f}in x {figsize_inches[1]:.2f}in)")
-    sns.set_theme(style="whitegrid", font="Myriad Pro", font_scale=1)
+    sns.set_theme(style="whitegrid", font=MYRIAD_FONT, font_scale=1)
     
     fig = plt.figure(figsize=figsize_inches)
     # 设置背景透明
@@ -751,9 +768,9 @@ def plot_pixel_pressures_violin(csv_path, figsize=(11.5, 5), dpi=300, group_by='
             )
         legend = ax.legend(handles=legend_elements, loc='upper left', framealpha=0.5, title='')
         legend.get_frame().set_alpha(0.5)
-        # 设置图例文字字体为 Myriad Pro
+        # 设置图例文字字体
         for text in legend.get_texts():
-            text.set_fontfamily('Myriad Pro')
+            text.set_fontfamily(MYRIAD_FONT)
     
     # 统一设置所有小提琴图轮廓线的宽度，确保只有一种线宽
     # matplotlib的violinplot创建的路径集合
@@ -773,13 +790,13 @@ def plot_pixel_pressures_violin(csv_path, figsize=(11.5, 5), dpi=300, group_by='
         legend.get_frame().set_alpha(0.5)  # 设置透明度，0.0为完全透明，1.0为完全不透明
         legend.set_loc('upper left')  # 设置图例位置为右上角
         legend.set_title('')  # 去掉图例标题（去掉"status"字样）
-        # 修改图例标签：w -> w/, wo -> w/o，并设置字体为 Myriad Pro
+        # 修改图例标签：w -> w/, wo -> w/o，并设置字体
         label_mapping = {'w': 'w/', 'wo': 'w/o', 'w/o': 'w/o'}
         for text in legend.get_texts():
             original_text = text.get_text()
             new_text = label_mapping.get(original_text, original_text)
             text.set_text(new_text)
-            text.set_fontfamily('Myriad Pro')
+            text.set_fontfamily(MYRIAD_FONT)
     
     # 计算每个 body_part 和 status 组合的中位数
     print("[步骤 4/6] 正在计算中位数...")
@@ -962,19 +979,19 @@ def plot_pixel_pressures_violin(csv_path, figsize=(11.5, 5), dpi=300, group_by='
                     marked_count += 1
     print(f"  已标记 {marked_count} 个中位数点")
     
-    # 设置横纵坐标标签和图题字体大小为 12pt，使用 Myriad Pro 字体
+    # 设置横纵坐标标签和图题字体大小为 12pt
     ax.set_xlabel('')  # 不显示 x 轴标签
-    ax.set_ylabel('Force (kN)', fontsize=label_fontsize, fontfamily='Myriad Pro')
-    ax.set_title('Force Distribution of Whole Body Sampling', fontsize=label_fontsize, fontfamily='Myriad Pro')
+    ax.set_ylabel('Force (kN)', fontsize=label_fontsize, fontfamily=MYRIAD_FONT)
+    ax.set_title('Force Distribution of Whole Body Sampling', fontsize=label_fontsize, fontfamily=MYRIAD_FONT)
     
-    # 设置刻度标签（数字）字体大小为 10pt，使用 Times New Roman 字体
+    # 设置刻度标签（数字）字体大小为 10pt
     ax.tick_params(axis='both', which='major', labelsize=tick_fontsize)
     ax.tick_params(axis='both', which='minor', labelsize=tick_fontsize)
-    # 确保 y 轴刻度标签（数字）使用 Times New Roman 字体
+    # 确保 y 轴刻度标签（数字）使用 Times 字体
     for label in ax.get_yticklabels():
-        label.set_fontfamily('Times New Roman')
+        label.set_fontfamily(TIMES_FONT)
     
-    # 横坐标part名称水平不用倾斜，并将首字母大写，使用 Myriad Pro 字体
+    # 横坐标part名称水平不用倾斜，并将首字母大写
     # 先获取当前的刻度位置
     x_ticks = ax.get_xticks()
     # 获取当前的横轴标签
@@ -983,7 +1000,7 @@ def plot_pixel_pressures_violin(csv_path, figsize=(11.5, 5), dpi=300, group_by='
     capitalized_labels = [label.capitalize() for label in current_labels]
     # 先设置刻度位置，再设置标签
     ax.set_xticks(x_ticks)
-    ax.set_xticklabels(capitalized_labels, rotation=0, ha='center', fontfamily='Myriad Pro')
+    ax.set_xticklabels(capitalized_labels, rotation=0, ha='center', fontfamily=MYRIAD_FONT)
     # 设置横轴和横坐标标签之间的间距为2pt
     ax.tick_params(axis='x', pad=0)
     
