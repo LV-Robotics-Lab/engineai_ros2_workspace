@@ -321,10 +321,11 @@ def plot_force_normal_violin(csv_path, figsize=(11.5, 5), dpi=300, output_path=N
             group_positions.append(i)
             group_labels.append(group)
     
-    # 输出各小提琴图的值范围统计
+    # 输出各小提琴图的值范围统计和计算宽度
     print(f"[步骤 3.5/7] 各小提琴图数据范围统计（单位：kN）...")
     all_min = []
     all_max = []
+    group_counts = {}  # 存储每个分组的数据量
     for i, (pos, group) in enumerate(zip(group_positions, group_labels)):
         group_data = data[data['group_name'] == group]['force_kN'].values
         if len(group_data) > 0:
@@ -335,6 +336,7 @@ def plot_force_normal_violin(csv_path, figsize=(11.5, 5), dpi=300, output_path=N
             q75 = np.percentile(group_data, 75)
             all_min.append(min_val)
             all_max.append(max_val)
+            group_counts[group] = len(group_data)
             print(f"  {group:12s}: 最小值={min_val:8.3f} kN, 最大值={max_val:8.3f} kN, "
                   f"中位数={median_val:8.3f} kN, Q25={q25:8.3f} kN, Q75={q75:8.3f} kN, "
                   f"数据量={len(group_data):,}")
@@ -342,6 +344,25 @@ def plot_force_normal_violin(csv_path, figsize=(11.5, 5), dpi=300, output_path=N
         global_min = min(all_min)
         global_max = max(all_max)
         print(f"  全局范围: 最小值={global_min:.3f} kN, 最大值={global_max:.3f} kN")
+    
+    # 计算每个小提琴图的宽度（根据数据量归一化）
+    print(f"[步骤 3.6/7] 计算小提琴图宽度（根据数据量）...")
+    if len(group_counts) > 0:
+        max_count = max(group_counts.values())
+        base_width = 0.6  # 基础宽度
+        violin_widths = []
+        for group in group_labels:
+            count = group_counts.get(group, 0)
+            if max_count > 0:
+                width_ratio = count / max_count  # 相对于最大数据量的比例
+                width = base_width * width_ratio
+            else:
+                width = base_width
+            violin_widths.append(width)
+            print(f"  {group:12s}: 数据量={count:8,}, 宽度比例={width_ratio:.4f}, 宽度={width:.4f}")
+        print(f"  最大数据量: {max_count:,}, 基础宽度: {base_width:.4f}")
+    else:
+        violin_widths = [0.6] * len(group_positions)
     
     # 使用 matplotlib 的 violinplot 绘制（不使用 hue，每个部位一个小提琴）
     print(f"[步骤 4/7] 绘制小提琴图...")
@@ -351,7 +372,7 @@ def plot_force_normal_violin(csv_path, figsize=(11.5, 5), dpi=300, output_path=N
         showmeans=False,
         showmedians=False,
         showextrema=False,
-        widths=0.6
+        widths=violin_widths  # 使用根据数据量计算的宽度
     )
     
     # 设置小提琴图样式（使用单一颜色，参考 fig5_violin.py 的 w 颜色）
