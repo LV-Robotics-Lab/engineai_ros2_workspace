@@ -232,7 +232,7 @@ def read_contact_data(csv_path):
     return df
 
 
-def plot_force_normal_violin(csv_path, figsize=(11.5, 5), dpi=300, output_path=None, force_max=None, use_quantile=True):
+def plot_force_normal_violin(csv_path, figsize=(11.5, 5), dpi=300, output_path=None, force_max=None, force_min_kN=0.0, use_quantile=True):
     """
     从接触数据 CSV 文件读入数据（body2_name 和 force_normal），
     对 body2_name 进行分类后绘制小提琴图。
@@ -243,7 +243,8 @@ def plot_force_normal_violin(csv_path, figsize=(11.5, 5), dpi=300, output_path=N
         figsize: 图片尺寸（厘米），默认 (11.5, 5) cm
         dpi: 图片分辨率，默认 300
         output_path: 输出 PNG 文件路径，如果为 None 则自动生成
-        force_max: force_normal 的最大值，超过此值的数据将被过滤（如果为 None 则不过滤）
+        force_max: force_normal 的最大值，超过此值的数据将被过滤（如果为 None 则不过滤，单位：N）
+        force_min_kN: force_kN 的最小值，小于此值的数据将被过滤（默认 0.0，单位：kN）
         use_quantile: 如果为 True，使用99分位数设置y轴范围（更好地显示中位数附近的数据）；
                       如果为 False，使用实际最大值（显示所有数据，但可能有极值压缩）
     """
@@ -258,6 +259,14 @@ def plot_force_normal_violin(csv_path, figsize=(11.5, 5), dpi=300, output_path=N
     print(f"[步骤 2/7] 准备绘图数据...")
     data['force_kN'] = data['force_normal'] / 1000.0  # 将 N 转换为 kN
     print("  已将力从N转换为kN（除以1000）")
+    
+    # 过滤小于 force_min_kN 的数据
+    if force_min_kN > 0:
+        before_filter_min = len(data)
+        data = data[data['force_kN'] >= force_min_kN].copy()
+        print(f"  过滤 force_kN < {force_min_kN}kN: {before_filter_min - len(data)} 行")
+        print(f"  剩余有效数据: {len(data)} 行")
+    
     # 如果 force_max 指定，过滤数据（force_max单位是N，需要转换为kN进行比较）
     if force_max is not None:
         before_filter = len(data)
@@ -399,18 +408,20 @@ def plot_force_normal_violin(csv_path, figsize=(11.5, 5), dpi=300, output_path=N
     ax.spines['right'].set_visible(False)
     
     # 设置 y 轴范围和刻度（单位：kN）
-    y_min_data = data['force_kN'].min() if len(data) > 0 else 0.0
+    # y轴最小值从过滤值开始
+    y_min = force_min_kN
+    y_min_data = data['force_kN'].min() if len(data) > 0 else force_min_kN
     y_max_data = data['force_kN'].max() if len(data) > 0 else 10.0
     
     if use_quantile:
         # 使用99分位数来设置y轴范围，这样可以更好地显示中位数附近的数据，
         # 让小提琴图的形状和分布细节更清晰可见
         y_max_99 = data['force_kN'].quantile(0.99) if len(data) > 0 else 10.0
-        y_max = max(y_max_99 * 1.1, 5.0)
+        y_max = max(y_max_99 * 1.1, y_min + 5.0)
         method_str = "99分位数"
     else:
         # 使用实际的最大值，确保显示所有数据
-        y_max = max(y_max_data * 1.1, 5.0)
+        y_max = max(y_max_data * 1.1, y_min + 5.0)
         method_str = "实际最大值"
         y_max_99 = None
     
@@ -418,29 +429,36 @@ def plot_force_normal_violin(csv_path, figsize=(11.5, 5), dpi=300, output_path=N
     print(f"  数据范围: [{y_min_data:.3f}, {y_max_data:.3f}] kN")
     if use_quantile and y_max_99 is not None:
         print(f"  99分位数: {y_max_99:.3f} kN")
-    print(f"  y轴范围: [0, {y_max:.3f}] kN (基于{method_str})")
+    print(f"  y轴范围: [{y_min:.3f}, {y_max:.3f}] kN (基于{method_str})")
     if y_max_data > y_max and len(data) > 0:
         num_outliers = len(data[data['force_kN'] > y_max])
         pct_outliers = num_outliers / len(data) * 100
         print(f"  警告: 有 {num_outliers} 个数据点 ({pct_outliers:.2f}%) 超出y轴范围")
     
-    # 根据数据范围自动设置y轴刻度
-    if y_max <= 5:
-        y_ticks = np.linspace(0, y_max, 5)
-    elif y_max <= 10:
-        y_ticks = [0, 2, 4, 6, 8, 10]
-    elif y_max <= 20:
-        y_ticks = [0, 5, 10, 15, 20]
-    elif y_max <= 50:
-        y_ticks = [0, 10, 20, 30, 40, 50]
+    # 根据数据范围自动设置y轴刻度（从y_min开始）
+    y_range = y_max - y_min
+    if y_range <= 5:
+        y_ticks = np.linspace(y_min, y_max, 5)
+    elif y_range <= 10:
+        # 从y_min开始，步长为2
+        step = 2.0
+        y_ticks = np.arange(y_min, y_max + step, step)
+    elif y_range <= 20:
+        # 从y_min开始，步长为5
+        step = 5.0
+        y_ticks = np.arange(y_min, y_max + step, step)
+    elif y_range <= 50:
+        # 从y_min开始，步长为10
+        step = 10.0
+        y_ticks = np.arange(y_min, y_max + step, step)
     else:
         # 对于更大的范围，使用更灵活的刻度
-        y_ticks = np.linspace(0, y_max, 5)
+        y_ticks = np.linspace(y_min, y_max, 5)
     y_ticks = [int(t) if t == int(t) else round(t, 1) for t in y_ticks]
     print(f"  y轴刻度: {y_ticks}")
     ax.set_yticks(y_ticks)
     ax.set_yticklabels(y_ticks)
-    ax.set_ylim(0, y_max)
+    ax.set_ylim(y_min, y_max)
     ax.tick_params(axis='y', which='major', length=2, width=1, 
                    color='black', direction='out', left=True, labelleft=True)
     
@@ -1014,10 +1032,13 @@ if __name__ == "__main__":
     # 从 body2_name 和 force_normal 读取数据，对 body2_name 进行分类后绘制
     
     # ===== 配置参数 =====
+    # 过滤小于此值的力数据（单位：kN），y轴最小值将从该值开始
+    FORCE_MIN_KN = 5.0  # 过滤小于2kN的数据
+    
     # y轴范围设置方式：
     # - True: 使用99分位数（更好地显示中位数附近的数据，小提琴图细节更清晰）
     # - False: 使用实际最大值（显示所有数据，但可能有极值压缩）
-    USE_QUANTILE = True  # 改为 False 使用实际最大值
+    USE_QUANTILE = False  # 改为 False 使用实际最大值
     
     csv_path = "/home/wang22/engineai/engineai_ros2_workspace/logs/test_slip_100/merged_contact_data_forward-00.0N-0.5s-20251024_205709_20251026_020001.csv"
     plot_force_normal_violin(
@@ -1025,6 +1046,7 @@ if __name__ == "__main__":
         figsize=(13.5, 3.85),
         dpi=300,
         output_path=None,  # 自动生成文件名：{csv文件名}_force_normal_violin.png
-        force_max=None,  # 可选：过滤超过此值的 force_normal，例如 force_max=10000
+        force_max=None,  # 可选：过滤超过此值的 force_normal，例如 force_max=10000（单位：N）
+        force_min_kN=FORCE_MIN_KN,  # 过滤小于此值的力数据（单位：kN）
         use_quantile=USE_QUANTILE  # y轴范围设置方式
     )
