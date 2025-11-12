@@ -10,11 +10,28 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import matplotlib.colors as mcolors
 from matplotlib.colors import LinearSegmentedColormap, BoundaryNorm, ListedColormap
+import matplotlib.font_manager as fm
 import numpy as np
 import argparse
 import os
 import sys
 from pathlib import Path
+
+# 检查并设置可用字体
+def get_available_font(font_names):
+    """检查字体是否可用，返回第一个可用的字体名称"""
+    available_fonts = [f.name for f in fm.fontManager.ttflist]
+    for font_name in font_names:
+        if font_name in available_fonts:
+            return font_name
+    # 如果都不可用，返回默认字体
+    return 'DejaVu Sans'
+
+# 设置字体
+TIMES_FONT = get_available_font(['Times New Roman', 'TimesNewRoman', 'Nimbus Roman', 'DejaVu Serif'])
+MYRIAD_FONT = get_available_font(['Myriad Pro', 'MyriadPro', 'DejaVu Sans'])
+
+print(f"字体设置: Times字体={TIMES_FONT}, Myriad字体={MYRIAD_FONT}")
 
 # 尝试导入STL处理库
 try:
@@ -444,13 +461,33 @@ def calculate_part_statistics(df, density=0.4, target_force=1.0, force_column='f
     df = df.copy()
     df['body_part'] = df.apply(get_body_part, axis=1)
     
-    # 按身体部分分组，计算最大力
+    # 按身体部分分组，计算最大力，并找到最大力对应的索引
+    def get_max_force_idx(group):
+        """返回最大力对应的索引"""
+        return group[force_column].idxmax()
+    
+    # 按身体部分分组，计算统计信息
     part_stats = df.groupby('body_part').agg({
         force_column: ['max', 'mean', 'count']
     }).reset_index()
     
     # 扁平化列名
     part_stats.columns = ['body_part', 'max_force_n', 'mean_force_n', 'count']
+    
+    # 找到每个部分最大力对应的索引
+    max_indices = df.groupby('body_part').apply(get_max_force_idx).reset_index()
+    max_indices.columns = ['body_part', 'max_idx']
+    
+    # 合并统计信息和索引
+    part_stats = part_stats.merge(max_indices, on='body_part')
+    
+    # 获取最大力对应的xyz坐标
+    part_stats['max_x'] = part_stats['max_idx'].apply(lambda idx: df.loc[idx, 'robot_frame_x'] if 'robot_frame_x' in df.columns else 0.0)
+    part_stats['max_y'] = part_stats['max_idx'].apply(lambda idx: df.loc[idx, 'robot_frame_y'] if 'robot_frame_y' in df.columns else 0.0)
+    part_stats['max_z'] = part_stats['max_idx'].apply(lambda idx: df.loc[idx, 'robot_frame_z'] if 'robot_frame_z' in df.columns else 0.0)
+    
+    # 删除临时列
+    part_stats = part_stats.drop('max_idx', axis=1)
     
     # 将最大力从N转换为kN
     part_stats['max_force_kn'] = part_stats['max_force_n'] / 1000.0
@@ -498,6 +535,53 @@ def calculate_part_statistics(df, density=0.4, target_force=1.0, force_column='f
     part_stats = part_stats.sort_values('sort_key').drop('sort_key', axis=1)
     
     return part_stats
+
+
+def filter_elbow_forces(df, force_column='force_normal'):
+    """
+    过滤掉z坐标在0.6-0.85m之间的elbow部位大于10kN的力
+    
+    参数:
+        df: DataFrame，包含body2_name, robot_frame_z, force_normal或force_magnitude列
+        force_column: 使用的力列名，'force_normal'或'force_magnitude'（默认'force_normal'）
+    
+    返回:
+        df_filtered: 过滤后的DataFrame
+    """
+    if 'body2_name' not in df.columns or 'robot_frame_z' not in df.columns:
+        return df
+    
+    before_filter = len(df)
+    
+    # 添加身体部分列
+    df = df.copy()
+    df['body_part'] = df.apply(get_body_part, axis=1)
+    
+    # 识别elbow部位
+    elbow_mask = df['body_part'].isin(['Left_Elbow', 'Right_Elbow'])
+    
+    # 检查z坐标是否在0.6-0.85m之间
+    z_mask = (df['robot_frame_z'] >= 0.6) & (df['robot_frame_z'] <= 0.85)
+    
+    # 检查力是否大于10kN（10000N）
+    force_mask = df[force_column] > 10000
+    
+    # 组合条件：elbow部位 AND z坐标在0.6-0.85m之间 AND 力大于10kN
+    filter_mask = elbow_mask & z_mask & force_mask
+    
+    # 过滤掉满足条件的数据
+    df = df[~filter_mask]
+    after_filter = len(df)
+    
+    if before_filter > after_filter:
+        filtered_count = before_filter - after_filter
+        print(f"过滤掉z坐标在0.6-0.85m之间的elbow部位大于10kN的力: {filtered_count} 行")
+        print(f"过滤后的数据: {after_filter} 行")
+    
+    # 删除临时添加的body_part列
+    df = df.drop('body_part', axis=1)
+    
+    return df
 
 
 def find_max_force_per_position(df, force_column='force_normal'):
@@ -553,6 +637,9 @@ def find_max_force_per_position(df, force_column='force_normal'):
             print("未找到需要过滤的头部和踝关节链接")
     else:
         print("警告: 未找到body2_name列，无法过滤头部和踝关节链接")
+    
+    # 过滤掉z坐标在0.6-0.85m之间的elbow部位大于10kN的力
+    df = filter_elbow_forces(df, force_column=force_column)
     
     # 按位置分组，找到每个位置的最大力
     # 使用round来避免浮点数精度问题导致的位置重复
@@ -625,7 +712,9 @@ def plot_contact_grid(csv_path, output_path=None, bins=50, cmap=None, figsize=(1
         # 原始CSV：按位置分组，找到每个位置的最大力
         df = find_max_force_per_position(df, force_column=force_column)
     else:
-        print("检测到聚类后的CSV文件，直接使用数据")
+        print("检测到聚类后的CSV文件，应用过滤...")
+        # 对于聚类后的CSV，也需要应用elbow过滤
+        df = filter_elbow_forces(df, force_column=force_column)
     
     # 提取数据
     z = df['robot_frame_z'].values
@@ -673,8 +762,8 @@ def plot_contact_grid(csv_path, output_path=None, bins=50, cmap=None, figsize=(1
     cb.set_label('Force Magnitude (kN)', fontsize=12)
     
     # 设置标签和标题
-    ax.set_xlabel('robot_frame_y (m)', fontsize=12)
-    ax.set_ylabel('robot_frame_z (m)', fontsize=12)
+    ax.set_xlabel('y (m)', fontsize=12)
+    ax.set_ylabel('z (m)', fontsize=12)
     ax.set_title('Collision Force Distribution', fontsize=12)
     
     # 设置坐标轴范围
@@ -752,7 +841,9 @@ def plot_thickness_grid(csv_path, output_path=None, bins=50, cmap=None, figsize=
         # 原始CSV：按位置分组，找到每个位置的最大力
         df = find_max_force_per_position(df, force_column=force_column)
     else:
-        print("检测到聚类后的CSV文件，直接使用数据")
+        print("检测到聚类后的CSV文件，应用过滤...")
+        # 对于聚类后的CSV，也需要应用elbow过滤
+        df = filter_elbow_forces(df, force_column=force_column)
     
     # 提取数据
     z = df['robot_frame_z'].values
@@ -820,24 +911,46 @@ def plot_thickness_grid(csv_path, output_path=None, bins=50, cmap=None, figsize=
                       ticks=[0, 6, 12, 18, 24], boundaries=boundaries, 
                       format='%g', spacing='uniform', extend='neither', 
                       drawedges=True)
-    cb.set_label('Protector Thickness (mm)', fontsize=12)
+    cb.set_label('Protector Thickness (mm)', fontsize=12, fontfamily=MYRIAD_FONT)
     
     # 设置颜色条刻度标签为 0, 6, 12, 18, 24mm
     cb.set_ticklabels(['0', '6', '12', '18', '24'])
+    # 设置颜色条刻度数字字体为 Times New Roman, 10pt
+    for label in cb.ax.get_yticklabels():
+        label.set_fontfamily(TIMES_FONT)
+        label.set_fontsize(10)
     
     # 设置颜色条边缘线颜色，使离散块更明显
     cb.outline.set_edgecolor('black')
     cb.dividers.set_color('black')
     cb.dividers.set_linewidth(1.5)
     
-    # 设置标签和标题
-    ax.set_xlabel('robot_frame_y (m)', fontsize=12)
-    ax.set_ylabel('robot_frame_z (m)', fontsize=12)
-    ax.set_title('Protector Thickness Distribution', fontsize=12)
+    # 设置标签和标题（Myriad Pro, 12pt）
+    ax.set_xlabel('y (m)', fontsize=12, fontfamily=MYRIAD_FONT)
+    ax.set_ylabel('z (m)', fontsize=12, fontfamily=MYRIAD_FONT)
+    ax.set_title('Protector Thickness Distribution', fontsize=12, fontfamily=MYRIAD_FONT)
     
     # 设置坐标轴范围
     ax.set_xlim(-0.4, 0.4)
     ax.set_ylim(0, 1.4)
+    
+    # 设置x轴刻度标签为 -0.4, -0.2, 0, 0.2, 0.4
+    ax.set_xticks([-0.4, -0.2, 0, 0.2, 0.4])
+    
+    # 设置坐标轴刻度数字字体为 Times New Roman, 10pt
+    # 需要在设置坐标轴范围之后设置，以确保刻度标签已生成
+    for label in ax.get_xticklabels():
+        label.set_fontfamily(TIMES_FONT)
+        label.set_fontsize(10)
+    for label in ax.get_yticklabels():
+        label.set_fontfamily(TIMES_FONT)
+        label.set_fontsize(10)
+    
+    # 只显示左轴和下轴，粗1pt
+    ax.spines['top'].set_visible(False)
+    ax.spines['right'].set_visible(False)
+    ax.spines['bottom'].set_linewidth(1.0)
+    ax.spines['left'].set_linewidth(1.0)
     
     # 添加网格
     # ax.grid(True, alpha=0.3)
@@ -913,7 +1026,9 @@ def plot_surface_area_grid(csv_path, stl_path, output_path=None, bins=50, cmap=N
         # 原始CSV：按位置分组，找到每个位置的最大力
         df = find_max_force_per_position(df, force_column=force_column)
     else:
-        print("检测到聚类后的CSV文件，直接使用数据")
+        print("检测到聚类后的CSV文件，应用过滤...")
+        # 对于聚类后的CSV，也需要应用elbow过滤
+        df = filter_elbow_forces(df, force_column=force_column)
     
     # 提取数据
     z = df['robot_frame_z'].values
@@ -1015,8 +1130,8 @@ def plot_surface_area_grid(csv_path, stl_path, output_path=None, bins=50, cmap=N
     cb.set_label('Surface Area (m²)', fontsize=12)
     
     # 设置标签和标题
-    ax.set_xlabel('robot_frame_y (m)', fontsize=12)
-    ax.set_ylabel('robot_frame_z (m)', fontsize=12)
+    ax.set_xlabel('y (m)', fontsize=12)
+    ax.set_ylabel('z (m)', fontsize=12)
     ax.set_title('Surface Area Distribution', fontsize=12)
     
     # 设置坐标轴范围
@@ -1101,7 +1216,9 @@ def plot_pressure_grid(csv_path, stl_path, output_path=None, bins=50, cmap=None,
         # 原始CSV：按位置分组，找到每个位置的最大力
         df = find_max_force_per_position(df, force_column=force_column)
     else:
-        print("检测到聚类后的CSV文件，直接使用数据")
+        print("检测到聚类后的CSV文件，应用过滤...")
+        # 对于聚类后的CSV，也需要应用elbow过滤
+        df = filter_elbow_forces(df, force_column=force_column)
     
     # 提取数据
     z = df['robot_frame_z'].values
@@ -1217,8 +1334,8 @@ def plot_pressure_grid(csv_path, stl_path, output_path=None, bins=50, cmap=None,
     cb.set_label('Pressure (MPa)', fontsize=12)
     
     # 设置标签和标题
-    ax.set_xlabel('robot_frame_y (m)', fontsize=12)
-    ax.set_ylabel('robot_frame_z (m)', fontsize=12)
+    ax.set_xlabel('y (m)', fontsize=12)
+    ax.set_ylabel('z (m)', fontsize=12)
     ax.set_title('Surface Pressure Distribution', fontsize=12)
     
     # 设置坐标轴范围
@@ -1334,24 +1451,31 @@ def main():
                     df_stats = df_stats[~df_stats['body2_name'].isin(excluded_links)]
                     print(f"过滤头部和踝关节: {before_filter} -> {len(df_stats)} 行")
             
+            # 对于所有CSV（原始和聚类后的），都应用elbow过滤
+            df_stats = filter_elbow_forces(df_stats, force_column=force_col)
+            
             # 计算统计信息
             part_stats = calculate_part_statistics(df_stats, density=args.density, target_force=args.target_force, force_column=force_col)
             
             if part_stats is not None and len(part_stats) > 0:
                 print("\n各身体部分的最大力和厚度统计:")
-                print("-" * 80)
-                print(f"{'身体部分':<20} {'最大力(N)':<15} {'最大力(kN)':<15} {'最大厚度(mm)':<15} {'数据点数':<10}")
-                print("-" * 80)
+                print("-" * 120)
+                print(f"{'身体部分':<20} {'最大力(N)':<15} {'最大力(kN)':<15} {'最大厚度(mm)':<15} {'数据点数':<10} {'最大力位置(x,y,z)':<30}")
+                print("-" * 120)
                 for _, row in part_stats.iterrows():
                     body_part = row['body_part']
                     max_force_n = row['max_force_n']
                     max_force_kn = row['max_force_kn']
                     max_thickness = row['max_thickness_mm']
                     count = int(row['count'])
+                    max_x = row.get('max_x', 0.0)
+                    max_y = row.get('max_y', 0.0)
+                    max_z = row.get('max_z', 0.0)
                     
                     thickness_str = f"{max_thickness:.2f}" if pd.notna(max_thickness) else "N/A"
-                    print(f"{body_part:<20} {max_force_n:<15.2f} {max_force_kn:<15.3f} {thickness_str:<15} {count:<10}")
-                print("-" * 80)
+                    position_str = f"({max_x:.3f},{max_y:.3f},{max_z:.3f})"
+                    print(f"{body_part:<20} {max_force_n:<15.2f} {max_force_kn:<15.3f} {thickness_str:<15} {count:<10} {position_str:<30}")
+                print("-" * 120)
             else:
                 print("警告: 无法计算身体部分统计信息")
     except Exception as e:

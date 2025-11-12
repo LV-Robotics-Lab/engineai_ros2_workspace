@@ -310,7 +310,7 @@ def plot_force_normal_violin(csv_path, figsize=(11.5, 5), dpi=300, output_path=N
     # 画图
     print(f"[步骤 3/7] 正在绘制小提琴图...")
     print(f"  图片尺寸: {figsize[0]:.2f}cm x {figsize[1]:.2f}cm ({figsize_inches[0]:.2f}in x {figsize_inches[1]:.2f}in)")
-    sns.set_theme(style="whitegrid", font=MYRIAD_FONT, font_scale=1)
+    sns.set_theme(style="white", font=MYRIAD_FONT, font_scale=1)  # 使用white主题，无网格背景
     
     fig = plt.figure(figsize=figsize_inches)
     # 设置背景透明
@@ -322,6 +322,7 @@ def plot_force_normal_violin(csv_path, figsize=(11.5, 5), dpi=300, output_path=N
     # 设置 axes 背景透明
     ax.patch.set_facecolor('none')
     ax.patch.set_alpha(0)
+    ax.set_axisbelow(False)  # 确保网格线在图形下方
     
     # 设置字体大小
     label_fontsize = 12  # 12pt
@@ -594,7 +595,7 @@ def plot_pixel_pressures_violin(csv_path, figsize=(11.5, 5), dpi=300, group_by='
     # 画图
     print("[步骤 3/6] 正在绘制小提琴图...")
     print(f"  图片尺寸: {figsize[0]:.2f}cm x {figsize[1]:.2f}cm ({figsize_inches[0]:.2f}in x {figsize_inches[1]:.2f}in)")
-    sns.set_theme(style="whitegrid", font=MYRIAD_FONT, font_scale=1)
+    sns.set_theme(style="white", font=MYRIAD_FONT, font_scale=1)  # 使用white主题，无网格背景
     
     fig = plt.figure(figsize=figsize_inches)
     # 设置背景透明
@@ -612,6 +613,7 @@ def plot_pixel_pressures_violin(csv_path, figsize=(11.5, 5), dpi=300, group_by='
     # 设置 axes 背景透明
     ax.patch.set_facecolor('none')
     ax.patch.set_alpha(0)
+    ax.set_axisbelow(False)  # 确保网格线在图形下方
     
     # 设置字体大小（单位：pt）
     # 横纵坐标标签和图题：12pt
@@ -1078,7 +1080,7 @@ if __name__ == "__main__":
     # - False: 使用实际最大值（显示所有数据，但可能有极值压缩）
     USE_QUANTILE = False  # 改为 False 使用实际最大值
     
-    csv_path = "/home/wang22/engineai/engineai_ros2_workspace/logs/test_slip_100/merged_contact_data_forward-00.0N-0.5s-20251024_205709_20251026_020001.csv"
+    csv_path = "/home/wang22/engineai/engineai_ros2_workspace/logs/4in1/merged_contact_data_4in1_20251026_194302.csv"
     plot_force_normal_violin(
         csv_path=csv_path,
         figsize=(13.5, 3.85),
