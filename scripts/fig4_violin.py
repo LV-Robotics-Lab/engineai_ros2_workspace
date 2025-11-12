@@ -252,16 +252,16 @@ def plot_force_normal_violin(csv_path, figsize=(11.5, 5), dpi=300, output_path=N
     print(f"[步骤 1/7] 读取接触数据...")
     data = read_contact_data(csv_path)
     
-    # 将 force_normal 转换为 pressure_MPa（假设单位是 N，需要转换为 MPa）
-    # 这里我们直接使用 force_normal 作为 y 轴，单位保持为 N
-    # 如果需要转换为压力，需要知道接触面积，这里暂时使用 force_normal
+    # 将 force_normal 从 N 转换为 kN（除以1000）
     print(f"[步骤 2/7] 准备绘图数据...")
-    data['pressure_MPa'] = data['force_normal'] / 1000.0  # 将 N 转换为 kN，或者保持原值
-    # 如果 force_max 指定，过滤数据
+    data['force_kN'] = data['force_normal'] / 1000.0  # 将 N 转换为 kN
+    print("  已将力从N转换为kN（除以1000）")
+    # 如果 force_max 指定，过滤数据（force_max单位是N，需要转换为kN进行比较）
     if force_max is not None:
         before_filter = len(data)
-        data = data[data['force_normal'] <= force_max].copy()
-        print(f"  过滤 force_normal > {force_max}: {before_filter - len(data)} 行")
+        force_max_kN = force_max / 1000.0  # 将force_max从N转换为kN
+        data = data[data['force_kN'] <= force_max_kN].copy()
+        print(f"  过滤 force_kN > {force_max_kN}kN (即 force_normal > {force_max}N): {before_filter - len(data)} 行")
         print(f"  剩余有效数据: {len(data)} 行")
     
     # 定义分组排序顺序（不区分左右）
@@ -304,11 +304,33 @@ def plot_force_normal_violin(csv_path, figsize=(11.5, 5), dpi=300, output_path=N
     group_positions = []
     group_labels = []  # 保存对应的分组名称
     for i, group in enumerate(all_groups, 1):
-        group_data = data[data['group_name'] == group]['force_normal'].values
+        group_data = data[data['group_name'] == group]['force_kN'].values
         if len(group_data) > 0:
             datasets.append(group_data)
             group_positions.append(i)
             group_labels.append(group)
+    
+    # 输出各小提琴图的值范围统计
+    print(f"[步骤 3.5/7] 各小提琴图数据范围统计（单位：kN）...")
+    all_min = []
+    all_max = []
+    for i, (pos, group) in enumerate(zip(group_positions, group_labels)):
+        group_data = data[data['group_name'] == group]['force_kN'].values
+        if len(group_data) > 0:
+            min_val = group_data.min()
+            max_val = group_data.max()
+            median_val = np.median(group_data)
+            q25 = np.percentile(group_data, 25)
+            q75 = np.percentile(group_data, 75)
+            all_min.append(min_val)
+            all_max.append(max_val)
+            print(f"  {group:12s}: 最小值={min_val:8.3f} kN, 最大值={max_val:8.3f} kN, "
+                  f"中位数={median_val:8.3f} kN, Q25={q25:8.3f} kN, Q75={q75:8.3f} kN, "
+                  f"数据量={len(group_data):,}")
+    if len(all_min) > 0:
+        global_min = min(all_min)
+        global_max = max(all_max)
+        print(f"  全局范围: 最小值={global_min:.3f} kN, 最大值={global_max:.3f} kN")
     
     # 使用 matplotlib 的 violinplot 绘制（不使用 hue，每个部位一个小提琴）
     print(f"[步骤 4/7] 绘制小提琴图...")
@@ -333,7 +355,7 @@ def plot_force_normal_violin(csv_path, figsize=(11.5, 5), dpi=300, output_path=N
     # 绘制四分位数线
     print(f"[步骤 5/7] 绘制四分位数线和中位数点...")
     for i, (pos, group) in enumerate(zip(group_positions, group_labels)):
-        group_data = data[data['group_name'] == group]['force_normal'].values
+        group_data = data[data['group_name'] == group]['force_kN'].values
         if len(group_data) > 0:
             quartiles = np.percentile(group_data, [25, 50, 75])
             # 绘制四分位数线
@@ -348,8 +370,8 @@ def plot_force_normal_violin(csv_path, figsize=(11.5, 5), dpi=300, output_path=N
     
     # 设置横纵坐标标签
     ax.set_xlabel('')  # 不显示 x 轴标签
-    ax.set_ylabel('Force Normal (N)', fontsize=label_fontsize, fontfamily='Myriad Pro')
-    ax.set_title('Force Normal Distribution by Body Part', fontsize=label_fontsize, fontfamily='Myriad Pro')
+    ax.set_ylabel('Force (kN)', fontsize=label_fontsize, fontfamily='Myriad Pro')
+    ax.set_title('Force Distribution by Body Part', fontsize=label_fontsize, fontfamily='Myriad Pro')
     
     # 设置刻度标签
     ax.tick_params(axis='both', which='major', labelsize=tick_fontsize)
@@ -374,18 +396,38 @@ def plot_force_normal_violin(csv_path, figsize=(11.5, 5), dpi=300, output_path=N
     ax.spines['top'].set_visible(False)
     ax.spines['right'].set_visible(False)
     
-    # 设置 y 轴范围和刻度
-    y_max = data['force_normal'].quantile(0.99) if len(data) > 0 else 1000
-    y_ticks = np.linspace(0, y_max, 5)
-    y_ticks = [int(t) for t in y_ticks]
+    # 设置 y 轴范围和刻度（单位：kN）
+    # 使用实际的最大值，而不是分位数，确保显示所有数据
+    y_min_data = data['force_kN'].min() if len(data) > 0 else 0.0
+    y_max_data = data['force_kN'].max() if len(data) > 0 else 10.0
+    # 设置y轴上限，留10%的边距
+    y_max = max(y_max_data * 1.1, 5.0)
+    print(f"[步骤 6/7] 设置y轴范围...")
+    print(f"  数据范围: [{y_min_data:.3f}, {y_max_data:.3f}] kN")
+    print(f"  y轴范围: [0, {y_max:.3f}] kN")
+    
+    # 根据数据范围自动设置y轴刻度
+    if y_max <= 5:
+        y_ticks = np.linspace(0, y_max, 5)
+    elif y_max <= 10:
+        y_ticks = [0, 2, 4, 6, 8, 10]
+    elif y_max <= 20:
+        y_ticks = [0, 5, 10, 15, 20]
+    elif y_max <= 50:
+        y_ticks = [0, 10, 20, 30, 40, 50]
+    else:
+        # 对于更大的范围，使用更灵活的刻度
+        y_ticks = np.linspace(0, y_max, 5)
+    y_ticks = [int(t) if t == int(t) else round(t, 1) for t in y_ticks]
+    print(f"  y轴刻度: {y_ticks}")
     ax.set_yticks(y_ticks)
     ax.set_yticklabels(y_ticks)
-    ax.set_ylim(0, y_max * 1.1)
+    ax.set_ylim(0, y_max)
     ax.tick_params(axis='y', which='major', length=2, width=1, 
                    color='black', direction='out', left=True, labelleft=True)
     
     # 自动生成输出文件名（如果未指定）
-    print(f"[步骤 6/7] 正在保存图片...")
+    print(f"[步骤 7/7] 正在保存图片...")
     import os
     if output_path is None:
         # 获取 CSV 文件所在目录
@@ -492,7 +534,7 @@ def plot_pixel_pressures_violin(csv_path, figsize=(11.5, 5), dpi=300, group_by='
     # - 下边距：15% (bottom = 0.15)
     # - 上边距：10% (top = 1 - bottom - height = 1 - 0.15 - 0.75 = 0.10)
     # left=0.12, bottom=0.15, width=0.87, height=0.75
-    ax = fig.add_axes([0.20, 0.15, 0.80, 0.75])
+    ax = fig.add_axes([0.30, 0.15, 0.70, 0.75])
     # 设置 axes 背景透明
     ax.patch.set_facecolor('none')
     ax.patch.set_alpha(0)
@@ -955,7 +997,7 @@ if __name__ == "__main__":
     csv_path = "/home/wang22/engineai/engineai_ros2_workspace/logs/test_slip_100/merged_contact_data_forward-00.0N-0.5s-20251024_205709_20251026_020001.csv"
     plot_force_normal_violin(
         csv_path=csv_path,
-        figsize=(11.5, 5),
+        figsize=(13.5, 3.85),
         dpi=300,
         output_path=None,  # 自动生成文件名：{csv文件名}_force_normal_violin.png
         force_max=None  # 可选：过滤超过此值的 force_normal，例如 force_max=10000
