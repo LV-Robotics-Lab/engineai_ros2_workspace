@@ -142,6 +142,8 @@ def read_contact_data(csv_path):
     
     # Determine which columns to read
     columns_to_read = set()
+    if "body1_name" in all_csv_columns:
+        columns_to_read.add("body1_name")
     columns_to_read.add("body2_name")
     if "force_normal" in all_csv_columns:
         columns_to_read.add("force_normal")
@@ -207,6 +209,8 @@ def read_contact_data(csv_path):
     # Clean data
     print(f"[步骤 3/6] 清理数据...")
     cols_to_keep = ["body2_name", "force_normal"]
+    if "body1_name" in data.columns:
+        cols_to_keep.append("body1_name")
     if "robot_frame_x" in data.columns:
         cols_to_keep.append("robot_frame_x")
     if "robot_frame_y" in data.columns:
@@ -217,6 +221,8 @@ def read_contact_data(csv_path):
     df = data[cols_to_keep].copy()
     df["force_normal"] = pd.to_numeric(df["force_normal"], errors="coerce")
     df["body2_name"] = df["body2_name"].astype(str)
+    if "body1_name" in df.columns:
+        df["body1_name"] = df["body1_name"].astype(str)
     if "robot_frame_x" in df.columns:
         df["robot_frame_x"] = pd.to_numeric(df["robot_frame_x"], errors="coerce")
     if "robot_frame_y" in df.columns:
@@ -363,8 +369,34 @@ def plot_force_normal_violin(csv_path, figsize=(11.5, 5), dpi=300, output_path=N
         global_max = max(all_max)
         print(f"  全局范围: 最小值={global_min:.3f} kN, 最大值={global_max:.3f} kN")
     
+    # 输出每个部位前10个最大力的详细信息
+    print(f"[步骤 3.6/7] 各部位前10个最大力详细信息...")
+    for group in group_labels:
+        group_df = data[data['group_name'] == group].copy()
+        if len(group_df) > 0:
+            # 按force_kN降序排序，取前10个
+            top10 = group_df.nlargest(10, 'force_kN')
+            print(f"\n  {group} 部位前10个最大力:")
+            print(f"    {'排名':<4} {'body1_name':<30} {'body2_name':<30} {'力值(kN)':<12} {'robot_frame_x':<15} {'robot_frame_y':<15} {'robot_frame_z':<15}")
+            print(f"    {'-'*4} {'-'*30} {'-'*30} {'-'*12} {'-'*15} {'-'*15} {'-'*15}")
+            for idx, (_, row) in enumerate(top10.iterrows(), 1):
+                body1 = row.get('body1_name', 'N/A') if 'body1_name' in row else 'N/A'
+                body2 = row.get('body2_name', 'N/A')
+                force = row.get('force_kN', 0.0)
+                x = row.get('robot_frame_x', 'N/A') if 'robot_frame_x' in row else 'N/A'
+                y = row.get('robot_frame_y', 'N/A') if 'robot_frame_y' in row else 'N/A'
+                z = row.get('robot_frame_z', 'N/A') if 'robot_frame_z' in row else 'N/A'
+                
+                # 格式化数值
+                force_str = f"{force:.3f}" if isinstance(force, (int, float)) else str(force)
+                x_str = f"{x:.3f}" if isinstance(x, (int, float)) and pd.notna(x) else str(x)
+                y_str = f"{y:.3f}" if isinstance(y, (int, float)) and pd.notna(y) else str(y)
+                z_str = f"{z:.3f}" if isinstance(z, (int, float)) and pd.notna(z) else str(z)
+                
+                print(f"    {idx:<4} {str(body1):<30} {str(body2):<30} {force_str:<12} {x_str:<15} {y_str:<15} {z_str:<15}")
+    
     # 计算每个小提琴图的宽度（根据数据量归一化）
-    print(f"[步骤 3.6/7] 计算小提琴图宽度（根据数据量）...")
+    print(f"[步骤 3.7/7] 计算小提琴图宽度（根据数据量）...")
     if len(group_counts) > 0:
         max_count = max(group_counts.values())
         base_width = 0.6  # 基础宽度

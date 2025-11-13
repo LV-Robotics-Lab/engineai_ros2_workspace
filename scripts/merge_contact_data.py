@@ -9,31 +9,231 @@ import pandas as pd
 import glob
 from datetime import datetime
 import time
+import re
 
-def merge_contact_csv_files(log_dir, output_file=None):
+def parse_fall_type_info(csv_file_path, log_dir):
     """
-    合并指定目录下的所有contact_data_*.csv文件
+    从文件路径和目录名中解析摔倒类型、方向和csv时间编号
+    
+    Args:
+        csv_file_path: CSV文件的完整路径
+        log_dir: 日志目录路径
+        
+    Returns:
+        格式化的字符串: "摔倒类型-方向-csv时间编号"，如果无法解析则返回None
+    """
+    try:
+        # 获取文件名（不含扩展名）
+        file_basename = os.path.basename(csv_file_path)
+        file_name = os.path.splitext(file_basename)[0]  # 去掉.csv扩展名
+        
+        # 从文件名中提取时间戳（格式：YYYYMMDD_HHMMSS）
+        # 对于CSV时间编号，通常取第一个时间戳（例如：contact_data_backward-00.0N-0.5s-20251021_213710_20251025_235705.csv）
+        # 第一个时间戳是CSV时间编号，第二个可能是合并时间戳
+        time_pattern = r'(\d{8}_\d{6})'
+        time_matches = re.findall(time_pattern, file_name)
+        # 如果只有一个时间戳，使用它；如果有多个，优先使用第一个（CSV时间编号）
+        csv_time = time_matches[0] if time_matches else None
+        
+        if not csv_time:
+            return None
+        
+        # 获取相对于log_dir的文件路径
+        abs_csv_path = os.path.abspath(csv_file_path)
+        abs_log_dir = os.path.abspath(log_dir)
+        
+        # 获取目录名（log_dir的basename）
+        folder_name = os.path.basename(abs_log_dir)
+        
+        # 从目录名中提取摔倒类型
+        # 例如: test_poweroff_100 -> poweroff
+        # 例如: test_slip_100 -> slip
+        # 例如: test_stumble_100 -> stumble
+        fall_type = None
+        if 'poweroff' in folder_name.lower():
+            fall_type = 'poweroff'
+        elif 'slip' in folder_name.lower():
+            fall_type = 'slip'
+        elif 'stumble' in folder_name.lower():
+            fall_type = 'stumble'
+        elif 'push' in folder_name.lower():
+            fall_type = 'push'
+        else:
+            # 尝试从目录名中提取（去除test_和_100等后缀）
+            fall_type_match = re.search(r'(?:test_)?([a-z]+)(?:_\d+)?', folder_name.lower())
+            if fall_type_match:
+                fall_type = fall_type_match.group(1)
+        
+        # 从文件路径中提取方向
+        # 检查路径中是否包含方向信息（backward, forward, left, right等）
+        direction = None
+        path_parts = abs_csv_path.split(os.sep)
+        for part in path_parts:
+            part_lower = part.lower()
+            if 'backward' in part_lower:
+                direction = 'backward'
+                break
+            elif 'forward' in part_lower:
+                direction = 'forward'
+                break
+            elif 'left' in part_lower:
+                direction = 'left'
+                break
+            elif 'right' in part_lower:
+                direction = 'right'
+                break
+        
+        # 如果路径中没有找到方向，尝试从文件名中提取
+        if not direction:
+            file_lower = file_name.lower()
+            if 'backward' in file_lower:
+                direction = 'backward'
+            elif 'forward' in file_lower:
+                direction = 'forward'
+            elif 'left' in file_lower:
+                direction = 'left'
+            elif 'right' in file_lower:
+                direction = 'right'
+        
+        # 如果仍然没有找到方向，使用默认值或从文件名中提取
+        if not direction:
+            # 尝试从文件名中提取（例如：contact_data_backward-00.0N-0.5s-...）
+            direction_match = re.search(r'(backward|forward|left|right)', file_name.lower())
+            if direction_match:
+                direction = direction_match.group(1)
+            else:
+                direction = 'unknown'
+        
+        if fall_type and direction and csv_time:
+            return f"{fall_type}-{direction}-{csv_time}"
+        else:
+            return None
+            
+    except Exception as e:
+        print(f"  警告: 解析摔倒类型信息时出错: {e}")
+        return None
+
+def merge_contact_csv_files(log_dir, output_file=None, add_fall_type_column=False, file_pattern="contact_data_*.csv"):
+    """
+    合并指定目录下的所有CSV文件
     
     Args:
         log_dir: 包含CSV文件的目录
         output_file: 输出文件名，如果为None则自动生成
+        add_fall_type_column: 是否添加"摔倒类型-方向-csv时间编号"列
+        file_pattern: 要合并的文件模式，默认为"contact_data_*.csv"
     """
     print(f"正在合并目录: {log_dir}")
+    print(f"文件模式: {file_pattern}")
     
-    # 查找所有contact_data_*.csv文件
-    pattern = os.path.join(log_dir, "contact_data_*.csv")
+    # 查找所有匹配模式的CSV文件
+    # 首先尝试在当前目录查找
+    pattern = os.path.join(log_dir, file_pattern)
     csv_files = glob.glob(pattern)
+    is_recursive = False
+    
+    # 如果当前目录没有找到，递归查找子目录
+    if not csv_files:
+        pattern_recursive = os.path.join(log_dir, "**", file_pattern)
+        csv_files = glob.glob(pattern_recursive, recursive=True)
+        if csv_files:
+            print(f"在当前目录未找到匹配的文件，递归查找子目录...")
+            is_recursive = True
     
     if not csv_files:
-        print(f"在目录 {log_dir} 中没有找到contact_data_*.csv文件")
+        print(f"在目录 {log_dir} 及其子目录中没有找到匹配 {file_pattern} 的文件")
         return None
     
-    # 按文件名排序
+    # 如果是递归查找，且使用的是默认模式（contact_data_*.csv），按子目录分组
+    # 如果使用自定义模式（如merged_contact_data_*.csv），直接合并所有文件，不分组
+    if is_recursive and file_pattern == "contact_data_*.csv":
+        # 按子目录分组CSV文件
+        from collections import defaultdict
+        csv_by_dir = defaultdict(list)
+        abs_log_dir = os.path.abspath(log_dir)
+        
+        for csv_file in csv_files:
+            abs_csv_file = os.path.abspath(csv_file)
+            # 获取相对于log_dir的目录路径
+            rel_path = os.path.relpath(abs_csv_file, abs_log_dir)
+            # 获取文件所在的子目录（相对于log_dir）
+            sub_dir = os.path.dirname(rel_path)
+            if not sub_dir:  # 如果文件就在log_dir下
+                sub_dir = "."
+            csv_by_dir[sub_dir].append(abs_csv_file)
+        
+        # 对每个子目录的CSV文件进行排序
+        for sub_dir in csv_by_dir:
+            csv_by_dir[sub_dir].sort()
+        
+        print(f"找到 {len(csv_files)} 个CSV文件，分布在 {len(csv_by_dir)} 个子目录中:")
+        for sub_dir, files in sorted(csv_by_dir.items()):
+            print(f"  📁 {sub_dir}: {len(files)} 个文件")
+        
+        # 对每个子目录分别合并
+        output_files = []
+        for sub_dir, sub_csv_files in sorted(csv_by_dir.items()):
+            print(f"\n{'='*60}")
+            print(f"🔄 处理子目录: {sub_dir}")
+            print(f"{'='*60}")
+            
+            # 使用子目录路径作为新的log_dir来合并
+            if sub_dir == ".":
+                sub_log_dir = log_dir
+            else:
+                sub_log_dir = os.path.join(log_dir, sub_dir)
+            
+            # 生成子目录的输出文件名
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            folder_name = os.path.basename(os.path.abspath(log_dir))
+            sub_dir_name = os.path.basename(sub_dir) if sub_dir != "." else folder_name
+            
+            if output_file is None:
+                # 自动生成文件名：merged_contact_data_{子目录名}_{时间戳}.csv
+                sub_output_file = os.path.join(log_dir, f"merged_contact_data_{sub_dir_name}_{timestamp}.csv")
+            else:
+                # 如果指定了输出文件名，为每个子目录生成不同的文件名
+                base_name = os.path.splitext(os.path.basename(output_file))[0]
+                ext = os.path.splitext(output_file)[1] or ".csv"
+                # 使用子目录名称作为后缀，确保每个子目录的文件名不同
+                sub_output_file = os.path.join(log_dir, f"{base_name}_{sub_dir_name}{ext}")
+            
+            # 调用合并函数处理当前子目录的文件
+            merged_file = _merge_csv_files_from_list(sub_csv_files, sub_log_dir, sub_output_file, add_fall_type_column)
+            if merged_file:
+                output_files.append(merged_file)
+        
+        if output_files:
+            print(f"\n{'='*60}")
+            print(f"✅ 所有子目录合并完成! 共生成 {len(output_files)} 个文件:")
+            for f in output_files:
+                print(f"  📄 {f}")
+            return output_files[0] if len(output_files) == 1 else output_files
+        else:
+            return None
+    
+    # 如果不是递归查找，按原来的方式处理（当前目录下的所有文件合并成一个）
     csv_files.sort()
     print(f"找到 {len(csv_files)} 个CSV文件:")
     for i, file in enumerate(csv_files, 1):
         print(f"  {i}. {os.path.basename(file)}")
     
+    # 调用合并函数处理文件列表
+    return _merge_csv_files_from_list(csv_files, log_dir, output_file, add_fall_type_column)
+
+def _merge_csv_files_from_list(csv_files, log_dir, output_file=None, add_fall_type_column=False):
+    """
+    从文件列表合并CSV文件的内部函数
+    
+    Args:
+        csv_files: CSV文件路径列表
+        log_dir: 日志目录路径（用于解析摔倒类型信息）
+        output_file: 输出文件名，如果为None则自动生成
+        add_fall_type_column: 是否添加"摔倒类型-方向-csv时间编号"列
+        
+    Returns:
+        输出文件路径
+    """
     # 读取并合并所有CSV文件
     all_dataframes = []
     total_rows = 0
@@ -64,6 +264,16 @@ def merge_contact_csv_files(log_dir, output_file=None):
             # 添加源文件信息 - 使用文件名（不含扩展名）作为标识
             source_name = os.path.splitext(os.path.basename(csv_file))[0]  # 去掉.csv扩展名
             df['source_file'] = source_name
+            
+            # 如果需要，添加摔倒类型列
+            if add_fall_type_column:
+                fall_type_info = parse_fall_type_info(csv_file, log_dir)
+                if fall_type_info:
+                    df['fall_type_info'] = fall_type_info
+                else:
+                    # 如果无法解析，使用默认值
+                    df['fall_type_info'] = 'unknown-unknown-unknown'
+                    print(f"  ⚠️  警告: 无法解析文件 {os.path.basename(csv_file)} 的摔倒类型信息，使用默认值")
             
             all_dataframes.append(df)
             total_rows += len(df)
@@ -212,25 +422,68 @@ def merge_contact_csv_files(log_dir, output_file=None):
     print(f"📊 包含 {len(source_stats)} 个不同的源文件")
     print(f"🔍 源文件列示例值: {list(source_stats.index[:3])}")  # 显示前3个源文件名
     
+    # 如果添加了摔倒类型列，显示统计信息
+    if add_fall_type_column and 'fall_type_info' in merged_df.columns:
+        print(f"\n{'='*60}")
+        print(f"🏷️  摔倒类型列信息")
+        print(f"{'='*60}")
+        fall_type_stats = merged_df.groupby('fall_type_info').size().sort_values(ascending=False)
+        print(f"✅ 摔倒类型列已添加到数据中，列名: 'fall_type_info'")
+        print(f"📊 包含 {len(fall_type_stats)} 个不同的摔倒类型组合")
+        for fall_type, count in fall_type_stats.items():
+            percentage = (count / len(merged_df)) * 100
+            print(f"  🏷️  {fall_type}: {count} 行 ({percentage:.1f}%)")
+    
     return output_file
 
 def main():
     """主函数"""
-    if len(sys.argv) < 2:
-        print("用法: python3 merge_contact_data.py <log_directory> [output_file]")
-        print("示例: python3 merge_contact_data.py logs/forward-200.0N-20251005_162754")
-        print("示例: python3 merge_contact_data.py logs/forward-200.0N-20251005_162754 merged_contact.csv")
-        sys.exit(1)
+    import argparse
     
-    log_dir = sys.argv[1]
-    output_file = sys.argv[2] if len(sys.argv) > 2 else None
+    parser = argparse.ArgumentParser(
+        description='合并多个contact CSV文件',
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog='''
+使用示例:
+  # 合并指定目录下的CSV文件（如方向子目录）
+  python3 merge_contact_data.py logs/test_poweroff_100/backward-00.0N-0.5s-20251021_213710
+  
+  # 合并父目录下的所有CSV文件（会递归查找子目录）
+  python3 merge_contact_data.py logs/test_poweroff_100
+  
+  # 添加摔倒类型列
+  python3 merge_contact_data.py logs/test_poweroff_100/backward-00.0N-0.5s-20251021_213710 --add-fall-type
+  
+  # 指定输出文件名
+  python3 merge_contact_data.py logs/test_poweroff_100 merged_output.csv --add-fall-type
+  
+  # 合并已经合并过的CSV文件（二次合并）
+  python3 merge_contact_data.py logs/test_poweroff_100 --pattern "merged_contact_data_*.csv"
+        '''
+    )
+    parser.add_argument('log_directory', help='包含CSV文件的目录（可以是方向子目录或父目录）')
+    parser.add_argument('output_file', nargs='?', default=None, help='输出文件名（可选）')
+    parser.add_argument('--add-fall-type', action='store_true', 
+                       help='添加"摔倒类型-方向-csv时间编号"列（格式：poweroff-backward-20251021_213713）')
+    parser.add_argument('--pattern', default='contact_data_*.csv',
+                       help='要合并的文件模式（默认：contact_data_*.csv）。例如：merged_contact_data_*.csv 用于合并已合并的文件')
+    
+    args = parser.parse_args()
+    
+    log_dir = args.log_directory
+    output_file = args.output_file
+    add_fall_type_column = args.add_fall_type
+    file_pattern = args.pattern
     
     if not os.path.exists(log_dir):
         print(f"错误: 目录 {log_dir} 不存在")
         sys.exit(1)
     
+    if add_fall_type_column:
+        print("✅ 已启用: 将添加'摔倒类型-方向-csv时间编号'列")
+    
     # 合并CSV文件
-    merged_file = merge_contact_csv_files(log_dir, output_file)
+    merged_file = merge_contact_csv_files(log_dir, output_file, add_fall_type_column, file_pattern)
     
     if merged_file:
         print(f"\n✅ 合并成功! 输出文件: {merged_file}")

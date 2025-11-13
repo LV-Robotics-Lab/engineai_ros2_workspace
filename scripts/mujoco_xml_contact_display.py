@@ -394,8 +394,13 @@ def create_contact_force_visualization(df, x_col, y_col, z_col, max_spheres_over
     print("Grouping contact points by body2_name and position...")
     body_groups = {}
     
+    # Check if fall-type column exists
+    has_fall_type = 'fall-type' in df_valid.columns
+    
     for _, row in df_valid.iterrows():
         body2_name = row['body2_name']
+        body1_name = row.get('body1_name', '') if 'body1_name' in row else ''
+        fall_type = row.get('fall-type', '') if has_fall_type else ''
         pos = (row[x_col], row[y_col], row[z_col])
         
         # Use normal force as primary, with fallbacks
@@ -414,24 +419,39 @@ def create_contact_force_visualization(df, x_col, y_col, z_col, max_spheres_over
         if pos in body_groups[body2_name]:
             body_groups[body2_name][pos]['forces'].append(force_mag)
             body_groups[body2_name][pos]['count'] += 1
+            # Update body1_name and fall-type if current force is larger
+            if force_mag > body_groups[body2_name][pos].get('max_force', 0):
+                body_groups[body2_name][pos]['body1_name'] = body1_name
+                if has_fall_type:
+                    body_groups[body2_name][pos]['fall-type'] = fall_type
+                body_groups[body2_name][pos]['max_force'] = force_mag
         else:
             body_groups[body2_name][pos] = {
                 'position': pos,
                 'forces': [force_mag],
-                'count': 1
+                'count': 1,
+                'body1_name': body1_name,
+                'max_force': force_mag
             }
+            if has_fall_type:
+                body_groups[body2_name][pos]['fall-type'] = fall_type
     
     # Convert to contact forces list for clustering
     all_contact_forces = []
     for body_name, position_groups in body_groups.items():
         for pos, data in position_groups.items():
-            max_force = max(data['forces'])
-            all_contact_forces.append({
+            # Use saved max_force if available, otherwise calculate from forces list
+            max_force = data.get('max_force', max(data['forces']))
+            contact_force = {
                 'body2_name': body_name,
                 'position': data['position'],
                 'max_force': max_force,
-                'count': data['count']
-            })
+                'count': data['count'],
+                'body1_name': data.get('body1_name', '')
+            }
+            if has_fall_type:
+                contact_force['fall-type'] = data.get('fall-type', '')
+            all_contact_forces.append(contact_force)
     
     print(f"Found {len(all_contact_forces)} unique contact positions")
     
@@ -624,15 +644,22 @@ def save_clustered_contacts_to_csv(clustered_contact_forces, csv_file, coord_typ
     print(f"\n=== 保存聚类结果到CSV ===")
     print(f"聚类后接触点数量: {len(clustered_contact_forces)}")
     
+    # Check if fall-type exists in any contact force
+    has_fall_type = any('fall-type' in cf for cf in clustered_contact_forces)
+    
     # Prepare data for CSV
     data_rows = []
     for cf in clustered_contact_forces:
         pos = cf['position']
-        row = {
-            'body2_name': cf.get('body2_name', ''),
-            'force_magnitude': cf.get('max_force', 0.0),
-            'contact_count': cf.get('count', 1)
-        }
+        row = {}
+        
+        # First column: body1_name
+        row['body1_name'] = cf.get('body1_name', '')
+        
+        # Other columns
+        row['body2_name'] = cf.get('body2_name', '')
+        row['force_magnitude'] = cf.get('max_force', 0.0)
+        row['contact_count'] = cf.get('count', 1)
         
         # Add coordinate columns based on coordinate type
         if coord_type == "robot_frame":
@@ -644,10 +671,23 @@ def save_clustered_contacts_to_csv(clustered_contact_forces, csv_file, coord_typ
             row['pos_y'] = pos[1]
             row['pos_z'] = pos[2]
         
+        # Last column: fall-type (if exists)
+        if has_fall_type:
+            row['fall-type'] = cf.get('fall-type', '')
+        
         data_rows.append(row)
     
     # Create DataFrame
     df_clustered = pd.DataFrame(data_rows)
+    
+    # Reorder columns: body1_name first, fall-type last (if exists)
+    column_order = ['body1_name']
+    other_columns = [col for col in df_clustered.columns if col not in ['body1_name', 'fall-type']]
+    column_order.extend(other_columns)
+    if has_fall_type and 'fall-type' in df_clustered.columns:
+        column_order.append('fall-type')
+    
+    df_clustered = df_clustered[column_order]
     
     # Generate output filename
     base_name = os.path.splitext(os.path.basename(csv_file))[0]

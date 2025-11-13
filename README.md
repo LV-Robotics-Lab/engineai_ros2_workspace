@@ -176,7 +176,17 @@ python3 scripts/analyze_contact_forces.py logs/forward-200.0N-20251005_162754/me
 # 先升级mujoco
 pip install mujoco==3.3.6
 # 合并多次采样的contact point
-python3 scripts/merge_contact_data.py logs/forward-00.0N-0.5s-20251021_193237
+# 合并特定方向的数据（生成1个文件）
+python3 scripts/merge_contact_data.py logs/test_poweroff_100/backward-00.0N-0.5s-20251021_213710 --add-fall-type
+
+## 第一步：分别合并4个方向的数据（每个方向生成1个文件）
+python3 scripts/merge_contact_data.py logs/test_poweroff_100 --add-fall-type
+
+## 第二步：把4个方向的合并文件再合并成一个大文件（这些文件已经包含fall_type_info列）
+python3 scripts/merge_contact_data.py logs/test_poweroff_100 --pattern "merged_contact_data_*.csv" -o all_directions_merged.csv
+
+
+
 # 对合并后的csv进行碰撞点显示
 # 使用机器人坐标系（默认）， 后面的参数 1000 是显示点数量，1、2是 过滤掉足部的点
 # python3 mujoco_xml_contact_display.py <csv_file> <xml_file> [world|robot_frame] [max_spheres] [joint_filter] [enable_clustering] [uniform_distribution]
