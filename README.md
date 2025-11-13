@@ -235,7 +235,7 @@ python3 scripts/fig4_violin.py
 
 # grid map of force
 ## 基本用法（会自动生成输出文件名） 只绘制force图： --force-only
-python3 scripts/plot_contact_grid.py logs/4in1/merged_contact_data_4in1_20251026_194302_clustered_20251111_012128.csv --target-force 3.0
+python3 scripts/plot_contact_grid.py logs/4in1/merged_4in1.csv --target-force 3.0
 
 ## 指定输出路径
 python3 scripts/plot_contact_grid.py logs/4in1/merged_contact_data_4in1_20251026_194302_clustered_20251111_012128.csv -o output.png

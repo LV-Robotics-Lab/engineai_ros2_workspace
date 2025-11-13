@@ -245,7 +245,12 @@ def read_contact_data(csv_path):
     
     # Group links using classify_body_part module
     print(f"[步骤 5/6] 根据规则对 link 进行分组（使用 classify_body_part 模块）...")
-    df["group_name"] = df.apply(get_group_name, axis=1)
+    if HAS_TQDM:
+        print(f"  正在分类身体部分（{len(df)} 行数据）...")
+        tqdm.pandas(desc="  分类进度", ncols=80)
+        df["group_name"] = df.progress_apply(get_group_name, axis=1)
+    else:
+        df["group_name"] = df.apply(get_group_name, axis=1)
     print(f"  分组完成，共 {df['group_name'].nunique()} 个不同的组")
     
     # Show group statistics

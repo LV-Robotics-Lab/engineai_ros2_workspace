@@ -532,7 +532,12 @@ def filter_elbow_forces(df, force_column='force_normal'):
     
     # 添加身体部分列
     df = df.copy()
-    df['body_part'] = df.apply(get_body_part, axis=1)
+    if HAS_TQDM:
+        print(f"      正在分类身体部分（{len(df)} 行数据）...")
+        tqdm.pandas(desc="      分类进度", ncols=80)
+        df['body_part'] = df.progress_apply(get_body_part, axis=1)
+    else:
+        df['body_part'] = df.apply(get_body_part, axis=1)
     
     # 识别elbow部位
     elbow_mask = df['body_part'].isin(['Left_Elbow', 'Right_Elbow'])
