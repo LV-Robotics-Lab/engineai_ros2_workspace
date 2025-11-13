@@ -31,6 +31,15 @@ try:
 except ImportError:
     HAS_TQDM = False
 
+# Import body part classification module
+try:
+    from classify_body_part import get_body_part
+except ImportError:
+    print("警告: 无法导入classify_body_part模块，将使用默认分类方法")
+    # 如果导入失败，提供一个默认函数
+    def get_body_part(row):
+        return "Unknown"
+
 
 def plot_violin_with_median(csv_path,
                             x_col='class',
@@ -78,38 +87,24 @@ def plot_violin_with_median(csv_path,
 
 
 def get_group_name(row):
-    """根据规则将 link 分组，不区分左右"""
-    link_name = str(row["body2_name"]).lower()
-    robot_z = row.get("robot_frame_z", 0) if pd.notna(row.get("robot_frame_z")) else 0
+    """
+    根据规则将 link 分组，不区分左右
+    使用 classify_body_part 模块，然后去掉左右侧前缀
+    """
+    # 使用 classify_body_part 模块获取带左右侧的身体部分名称
+    body_part_with_side = get_body_part(row)
     
-    # 1. Shoulder: shoulder_pitch, shoulder_roll
-    if "shoulder_pitch" in link_name or "shoulder_roll" in link_name:
-        return "Shoulder"
-    
-    # 2. Elbow: shoulder_yaw, elbow_yaw, elbow_pitch
-    if "shoulder_yaw" in link_name or "elbow_yaw" in link_name or "elbow_pitch" in link_name:
-        return "Elbow"
-    
-    # 3. Torso: torso, 不分左右
-    if "torso" in link_name:
+    # 去掉左右侧前缀，只保留身体部分名称
+    if body_part_with_side == "Unknown":
+        return "Unknown"
+    elif body_part_with_side == "Torso":
         return "Torso"
-    
-    # 4. Hip: base, hip_pitch, hip_roll, hip_yaw (robot_frame_z > 0.55m)
-    if "base" in link_name:
-        return "Hip"
-    if "hip_pitch" in link_name or "hip_roll" in link_name:
-        return "Hip"
-    if "hip_yaw" in link_name and robot_z > 0.55:
-        return "Hip"
-    
-    # 5. Knee: hip_yaw (robot_frame_z < 0.55m), knee_pitch
-    if "hip_yaw" in link_name and robot_z < 0.55:
-        return "Knee"
-    if "knee_pitch" in link_name:
-        return "Knee"
-    
-    # Default: return original link name
-    return row['body2_name']
+    elif body_part_with_side.startswith("Left_") or body_part_with_side.startswith("Right_"):
+        # 去掉 "Left_" 或 "Right_" 前缀
+        return body_part_with_side.split("_", 1)[1]
+    else:
+        # 如果格式不符合预期，返回原值
+        return body_part_with_side
 
 
 def read_contact_data(csv_path):
@@ -155,6 +150,8 @@ def read_contact_data(csv_path):
         columns_to_read.add("robot_frame_y")
     if "robot_frame_z" in all_csv_columns:
         columns_to_read.add("robot_frame_z")
+    if "fall_type_info" in all_csv_columns:
+        columns_to_read.add("fall_type_info")
     
     print(f"  将读取以下列: {sorted(columns_to_read)}")
     use = lambda c: c in columns_to_read
@@ -217,12 +214,17 @@ def read_contact_data(csv_path):
         cols_to_keep.append("robot_frame_y")
     if "robot_frame_z" in data.columns:
         cols_to_keep.append("robot_frame_z")
+    if "fall_type_info" in data.columns:
+        cols_to_keep.append("fall_type_info")
     
     df = data[cols_to_keep].copy()
     df["force_normal"] = pd.to_numeric(df["force_normal"], errors="coerce")
     df["body2_name"] = df["body2_name"].astype(str)
     if "body1_name" in df.columns:
         df["body1_name"] = df["body1_name"].astype(str)
+    else:
+        # 如果没有body1_name列，添加默认值
+        df["body1_name"] = "world"
     if "robot_frame_x" in df.columns:
         df["robot_frame_x"] = pd.to_numeric(df["robot_frame_x"], errors="coerce")
     if "robot_frame_y" in df.columns:
@@ -241,8 +243,8 @@ def read_contact_data(csv_path):
     df = df.loc[mask_keep].copy()
     print(f"  过滤前: {df_before_filter} 行, 过滤后: {len(df)} 行")
     
-    # Group links
-    print(f"[步骤 5/6] 根据规则对 link 进行分组...")
+    # Group links using classify_body_part module
+    print(f"[步骤 5/6] 根据规则对 link 进行分组（使用 classify_body_part 模块）...")
     df["group_name"] = df.apply(get_group_name, axis=1)
     print(f"  分组完成，共 {df['group_name'].nunique()} 个不同的组")
     
@@ -377,8 +379,8 @@ def plot_force_normal_violin(csv_path, figsize=(11.5, 5), dpi=300, output_path=N
             # 按force_kN降序排序，取前10个
             top10 = group_df.nlargest(10, 'force_kN')
             print(f"\n  {group} 部位前10个最大力:")
-            print(f"    {'排名':<4} {'body1_name':<30} {'body2_name':<30} {'力值(kN)':<12} {'robot_frame_x':<15} {'robot_frame_y':<15} {'robot_frame_z':<15}")
-            print(f"    {'-'*4} {'-'*30} {'-'*30} {'-'*12} {'-'*15} {'-'*15} {'-'*15}")
+            print(f"    {'排名':<4} {'body1_name':<30} {'body2_name':<30} {'力值(kN)':<12} {'robot_frame_x':<15} {'robot_frame_y':<15} {'robot_frame_z':<15} {'fall-type':<30}")
+            print(f"    {'-'*4} {'-'*30} {'-'*30} {'-'*12} {'-'*15} {'-'*15} {'-'*15} {'-'*30}")
             for idx, (_, row) in enumerate(top10.iterrows(), 1):
                 body1 = row.get('body1_name', 'N/A') if 'body1_name' in row else 'N/A'
                 body2 = row.get('body2_name', 'N/A')
@@ -386,14 +388,16 @@ def plot_force_normal_violin(csv_path, figsize=(11.5, 5), dpi=300, output_path=N
                 x = row.get('robot_frame_x', 'N/A') if 'robot_frame_x' in row else 'N/A'
                 y = row.get('robot_frame_y', 'N/A') if 'robot_frame_y' in row else 'N/A'
                 z = row.get('robot_frame_z', 'N/A') if 'robot_frame_z' in row else 'N/A'
+                fall_type = row.get('fall_type_info', 'N/A') if 'fall_type_info' in row else 'N/A'
                 
                 # 格式化数值
                 force_str = f"{force:.3f}" if isinstance(force, (int, float)) else str(force)
                 x_str = f"{x:.3f}" if isinstance(x, (int, float)) and pd.notna(x) else str(x)
                 y_str = f"{y:.3f}" if isinstance(y, (int, float)) and pd.notna(y) else str(y)
                 z_str = f"{z:.3f}" if isinstance(z, (int, float)) and pd.notna(z) else str(z)
+                fall_type_str = str(fall_type) if pd.notna(fall_type) else 'N/A'
                 
-                print(f"    {idx:<4} {str(body1):<30} {str(body2):<30} {force_str:<12} {x_str:<15} {y_str:<15} {z_str:<15}")
+                print(f"    {idx:<4} {str(body1):<30} {str(body2):<30} {force_str:<12} {x_str:<15} {y_str:<15} {z_str:<15} {fall_type_str:<30}")
     
     # 计算每个小提琴图的宽度（根据数据量归一化）
     print(f"[步骤 3.7/7] 计算小提琴图宽度（根据数据量）...")
@@ -425,9 +429,9 @@ def plot_force_normal_violin(csv_path, figsize=(11.5, 5), dpi=300, output_path=N
         widths=violin_widths  # 使用根据数据量计算的宽度
     )
     
-    # 设置小提琴图样式（使用单一颜色，参考 fig5_violin.py 的 w 颜色）
-    color = '#F1B584'  # w 的颜色
-    edge_color = '#E46C0A'  # w 的轮廓颜色
+    # 设置小提琴图样式（使用w/o的灰色，因为数据都是w/o的）
+    color = '#D1D3D4'  # w/o 的填充颜色（浅灰）
+    edge_color = '#666666'  # w/o 的轮廓颜色（深灰）
     for pc in parts['bodies']:
         pc.set_facecolor(color)
         pc.set_alpha(0.7)
@@ -1112,7 +1116,7 @@ if __name__ == "__main__":
     # - False: 使用实际最大值（显示所有数据，但可能有极值压缩）
     USE_QUANTILE = False  # 改为 False 使用实际最大值
     
-    csv_path = "/home/wang22/engineai/engineai_ros2_workspace/logs/4in1/merged_contact_data_4in1_20251026_194302.csv"
+    csv_path = "/home/wang22/engineai/engineai_ros2_workspace/logs/4in1/merged_4in1.csv"
     plot_force_normal_violin(
         csv_path=csv_path,
         figsize=(13.5, 3.85),

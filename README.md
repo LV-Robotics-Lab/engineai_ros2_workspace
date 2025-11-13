@@ -225,6 +225,7 @@ python3 scripts/mujoco_xml_contact_display.py logs/test_push_100/merged_contact_
 
 # 各部位碰撞力风琴图
 python3 scripts/violin_link_force.py
+python3 scripts/fig4_violin.py
 1. Shoulder: shoulder_pitch, shoulder_roll;
 2. Elbow: shoulder_yaw, elbow_yaw, elbow_pitch;
 3. Torso: torso, 不分左右;

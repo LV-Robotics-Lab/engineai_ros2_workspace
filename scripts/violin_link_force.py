@@ -13,10 +13,19 @@ except ImportError:
     HAS_TQDM = False
     print("      提示: 安装 tqdm 可以显示更好的进度条 (pip install tqdm)")
 
+# Import body part classification module
+try:
+    from classify_body_part import get_body_part
+except ImportError:
+    print("警告: 无法导入classify_body_part模块，将使用默认分类方法")
+    # 如果导入失败，提供一个默认函数
+    def get_body_part(row):
+        return "Unknown"
+
 # -------------------------------
 # Config
 # -------------------------------
-file_path = "/home/wang22/engineai/engineai_ros2_workspace/logs/4in1/merged_contact_data_4in1_20251026_194302.csv"
+file_path = "/home/wang22/engineai/engineai_ros2_workspace/logs/4in1/merged_4in1.csv"
 # Save image to the same directory as the CSV file
 file_dir = Path(file_path).parent
 out_path = file_dir / "force_normal_violin_single.png"
@@ -51,6 +60,8 @@ print(f"      CSV 文件中的所有列: {all_csv_columns}")
 # Determine which columns to read
 columns_to_read = set()
 columns_to_read.add("body2_name")
+if "body1_name" in all_csv_columns:
+    columns_to_read.add("body1_name")
 if "force_normal" in all_csv_columns:
     columns_to_read.add("force_normal")
 if "normal_force" in all_csv_columns:
@@ -135,6 +146,8 @@ else:
 print(f"[3/7] 清理数据...")
 # Keep needed columns; clean
 cols_to_keep = ["body2_name", "force_normal"]
+if "body1_name" in data.columns:
+    cols_to_keep.append("body1_name")
 if "force_magnitude" in data.columns:
     cols_to_keep.append("force_magnitude")
 if "robot_frame_x" in data.columns:
@@ -147,6 +160,11 @@ if "robot_frame_z" in data.columns:
 df = data[cols_to_keep].copy()
 df["force_normal"] = pd.to_numeric(df["force_normal"], errors="coerce")
 df["body2_name"]   = df["body2_name"].astype(str)
+if "body1_name" in df.columns:
+    df["body1_name"] = df["body1_name"].astype(str)
+else:
+    # 如果没有body1_name列，添加默认值
+    df["body1_name"] = "world"
 if "force_magnitude" in df.columns:
     df["force_magnitude"] = pd.to_numeric(df["force_magnitude"], errors="coerce")
 if "robot_frame_x" in df.columns:
@@ -181,76 +199,12 @@ if df.empty:
     raise ValueError("No rows remain after filtering out ankle/shoulder and cleaning.")
 
 # -------------------------------
-# Group links according to rules
+# Group links according to rules using classify_body_part module
 # -------------------------------
-print(f"[6/7] 根据规则对 link 进行分组...")
+print(f"[6/7] 根据规则对 link 进行分组（使用 classify_body_part 模块）...")
 
-def get_group_name(row):
-    """根据规则将 link 分组，并区分左右"""
-    link_name = str(row["body2_name"]).lower()
-    robot_y = row.get("robot_frame_y", 0) if pd.notna(row.get("robot_frame_y")) else 0
-    robot_z = row.get("robot_frame_z", 0) if pd.notna(row.get("robot_frame_z")) else 0
-    
-    # Determine left/right side
-    # For base: y+ is left, y- is right
-    # For others: check link name for left/right indicators
-    is_left = False
-    
-    # Check link name for explicit left/right indicators
-    if any(x in link_name for x in ["left", "l_", "_l", "l_shoulder", "l_elbow", "l_hip", "l_knee"]):
-        is_left = True
-    elif any(x in link_name for x in ["right", "r_", "_r", "r_shoulder", "r_elbow", "r_hip", "r_knee"]):
-        is_left = False
-    elif "base" in link_name:
-        # For base: y+ is left, y- is right
-        is_left = robot_y > 0 if pd.notna(robot_y) else False
-    else:
-        # Default: try to infer from y coordinate
-        # y+ is left, y- is right
-        if pd.notna(robot_y):
-            is_left = robot_y > 0
-        else:
-            # If no y coordinate, try to infer from link name pattern
-            # Common patterns: left_*, left*_*, *_left_*, etc.
-            is_left = "left" in link_name or link_name.startswith("l_")
-    
-    side = "Left" if is_left else "Right"
-    
-    # 1. Shoulder: shoulder_pitch, shoulder_roll
-    if "shoulder_pitch" in link_name or "shoulder_roll" in link_name:
-        return f"{side}_Shoulder"
-    
-    # 2. Elbow: shoulder_yaw, elbow_yaw, elbow_pitch
-    if "shoulder_yaw" in link_name or "elbow_yaw" in link_name or "elbow_pitch" in link_name:
-        return f"{side}_Elbow"
-    
-    # 3. Torso: torso (no left/right)
-    if "torso" in link_name:
-        return "Torso"
-    
-    # 4. Hip: base (根据robot_frame_y区分), hip_pitch, hip_roll, hip_yaw (robot_frame_z > -0.25m)
-    if "base" in link_name:
-        return f"{side}_Hip"
-    if "hip_pitch" in link_name or "hip_roll" in link_name:
-        return f"{side}_Hip"
-    if "hip_yaw" in link_name and robot_z > 0.55:
-        return f"{side}_Hip"
-    
-    # 5. Knee: hip_yaw (robot_frame_z < -0.25m), knee_pitch (robot_frame_z >= -0.5m)
-    if "hip_yaw" in link_name and robot_z < 0.55:
-        return f"{side}_Knee"
-    if "knee_pitch" in link_name and robot_z >= 0.23:
-        return f"{side}_Knee"
-    
-    # 6. Crus: knee_pitch (robot_frame_z < -0.5m)
-    if "knee_pitch" in link_name and robot_z < 0.23:
-        return f"{side}_Crus"
-    
-    # Default: return original link name with side
-    return f"{side}_{row['body2_name']}"
-
-# Apply grouping
-df["group_name"] = df.apply(get_group_name, axis=1)
+# Apply grouping using classify_body_part module
+df["group_name"] = df.apply(get_body_part, axis=1)
 print(f"      分组完成，共 {df['group_name'].nunique()} 个不同的组")
 
 # Debug: Show robot_frame_z distribution for knee_pitch links
@@ -374,19 +328,17 @@ def group_sort_key(group_name):
         "Right_Hip": 7,
         "Left_Knee": 8,
         "Right_Knee": 9,
-        "Left_Crus": 10,
-        "Right_Crus": 11,
     }
     return order.get(group_name, 99)
 
 # All possible groups (always show all, even if empty)
+# Note: classify_body_part doesn't include Crus, so removed it
 all_possible_groups = [
     "Left_Shoulder", "Right_Shoulder",
     "Left_Elbow", "Right_Elbow",
     "Torso",
     "Left_Hip", "Right_Hip",
-    "Left_Knee", "Right_Knee",
-    "Left_Crus", "Right_Crus"
+    "Left_Knee", "Right_Knee"
 ]
 
 # Show statistics for all groups
