@@ -42,8 +42,19 @@ def parse_fall_type_info(csv_file_path, log_dir):
         abs_csv_path = os.path.abspath(csv_file_path)
         abs_log_dir = os.path.abspath(log_dir)
         
-        # 获取目录名（log_dir的basename）
-        folder_name = os.path.basename(abs_log_dir)
+        # 从文件路径中向上查找父目录，找到包含test_前缀的目录（如test_poweroff_100）
+        # 这样可以正确处理子目录中的文件
+        path_parts = abs_csv_path.split(os.sep)
+        folder_name = None
+        for i in range(len(path_parts) - 1, -1, -1):
+            part = path_parts[i]
+            if part.startswith('test_') or 'poweroff' in part.lower() or 'slip' in part.lower() or 'stumble' in part.lower() or 'push' in part.lower():
+                folder_name = part
+                break
+        
+        # 如果没找到，使用log_dir的basename作为备选
+        if not folder_name:
+            folder_name = os.path.basename(abs_log_dir)
         
         # 从目录名中提取摔倒类型
         # 例如: test_poweroff_100 -> poweroff
@@ -190,13 +201,15 @@ def merge_contact_csv_files(log_dir, output_file=None, add_fall_type_column=Fals
             
             if output_file is None:
                 # 自动生成文件名：merged_contact_data_{子目录名}_{时间戳}.csv
-                sub_output_file = os.path.join(log_dir, f"merged_contact_data_{sub_dir_name}_{timestamp}.csv")
+                # 使用绝对路径，避免在_merge_csv_files_from_list中重复拼接
+                sub_output_file = os.path.abspath(os.path.join(log_dir, f"merged_contact_data_{sub_dir_name}_{timestamp}.csv"))
             else:
                 # 如果指定了输出文件名，为每个子目录生成不同的文件名
                 base_name = os.path.splitext(os.path.basename(output_file))[0]
                 ext = os.path.splitext(output_file)[1] or ".csv"
                 # 使用子目录名称作为后缀，确保每个子目录的文件名不同
-                sub_output_file = os.path.join(log_dir, f"{base_name}_{sub_dir_name}{ext}")
+                # 使用绝对路径，避免在_merge_csv_files_from_list中重复拼接
+                sub_output_file = os.path.abspath(os.path.join(log_dir, f"{base_name}_{sub_dir_name}{ext}"))
             
             # 调用合并函数处理当前子目录的文件
             merged_file = _merge_csv_files_from_list(sub_csv_files, sub_log_dir, sub_output_file, add_fall_type_column)
@@ -318,8 +331,16 @@ def _merge_csv_files_from_list(csv_files, log_dir, output_file=None, add_fall_ty
         folder_name = os.path.basename(os.path.abspath(log_dir))
         output_file = os.path.join(log_dir, f"merged_contact_data_{folder_name}_{timestamp}.csv")
     elif not os.path.isabs(output_file):
-        # 如果输出文件不是绝对路径，则保存到log_dir目录中
-        output_file = os.path.join(log_dir, output_file)
+        # 如果输出文件不是绝对路径，检查是否已经是完整路径（包含log_dir）
+        # 如果output_file已经包含log_dir的路径，直接使用；否则拼接
+        abs_log_dir = os.path.abspath(log_dir)
+        abs_output_file = os.path.abspath(output_file)
+        if not abs_output_file.startswith(abs_log_dir):
+            # 如果输出文件路径不在log_dir下，则保存到log_dir目录中
+            output_file = os.path.join(log_dir, output_file)
+        else:
+            # 如果已经在log_dir下，直接使用（可能是从子目录合并时传入的完整路径）
+            output_file = abs_output_file
     
     # 保存合并后的文件
     print(f"\n{'='*60}")
@@ -488,7 +509,7 @@ def main():
     if merged_file:
         print(f"\n✅ 合并成功! 输出文件: {merged_file}")
         print(f"\n现在可以使用以下命令来可视化合并后的数据:")
-        print(f"python3 scripts/mujoco_xml_contact_display.py {merged_file} src/simulation/mujoco/assets/resource/pm_v2_mesh.xml robot_frame 1500 true 1,2")
+        print(f"python3 scripts/mujoco_xml_contact_display.py {merged_file} src/simulation/mujoco/assets/resource/pm_v2_mesh.xml robot_frame 1500  "" true true")
     else:
         print("❌ 合并失败")
         sys.exit(1)

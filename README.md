@@ -176,14 +176,15 @@ python3 scripts/analyze_contact_forces.py logs/forward-200.0N-20251005_162754/me
 # 先升级mujoco
 pip install mujoco==3.3.6
 # 合并多次采样的contact point
-# 合并特定方向的数据（生成1个文件）
-python3 scripts/merge_contact_data.py logs/test_poweroff_100/backward-00.0N-0.5s-20251021_213710 --add-fall-type
+# 合并特定方向的数据（生成1个文件）指定输出文件名
+python3 scripts/merge_contact_data.py logs/4in1 merged_4in1.csv --pattern "all_directions_merged_*.csv"
 
 ## 第一步：分别合并4个方向的数据（每个方向生成1个文件）
 python3 scripts/merge_contact_data.py logs/test_poweroff_100 --add-fall-type
+# 注意：第一步会为每个方向生成一个文件，所以不能指定单个输出文件名
 
 ## 第二步：把4个方向的合并文件再合并成一个大文件（这些文件已经包含fall_type_info列）
-python3 scripts/merge_contact_data.py logs/test_poweroff_100 --pattern "merged_contact_data_*.csv" -o all_directions_merged.csv
+python3 scripts/merge_contact_data.py logs/test_poweroff_100 all_directions_merged.csv --pattern "merged_contact_data_*.csv"
 
 
 
@@ -234,7 +235,7 @@ python3 scripts/violin_link_force.py
 # grid map of force
 # 基本用法（会自动生成输出文件名）
 python3 scripts/plot_contact_grid.py logs/4in1/merged_contact_data_4in1_20251026_194302_clustered_20251111_012128.csv
-
+ --force-only
 # 指定输出路径
 python3 scripts/plot_contact_grid.py logs/4in1/merged_contact_data_4in1_20251026_194302_clustered_20251111_012128.csv -o output.png
 

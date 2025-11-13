@@ -1,0 +1,7 @@
+Name,torso,elbow,shoulder,hip,knee,world
+torso,torso,torso,torso,torso,torso,torso
+elbow,torso,elbow,shoulder,hip,knee,elbow
+shoulder,torso,shoulder,shoulder,hip,knee,shoulder
+hip,torso,hip,hip,hip,knee,hip
+knee,torso,knee,knee,knee,knee,knee
+world,torso,elbow,shoulder,hip,knee,world

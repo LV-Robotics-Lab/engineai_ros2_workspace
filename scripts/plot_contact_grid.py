@@ -33,6 +33,14 @@ MYRIAD_FONT = get_available_font(['Myriad Pro', 'MyriadPro', 'DejaVu Sans'])
 
 print(f"字体设置: Times字体={TIMES_FONT}, Myriad字体={MYRIAD_FONT}")
 
+# 尝试导入进度条库
+try:
+    from tqdm import tqdm
+    HAS_TQDM = True
+except ImportError:
+    HAS_TQDM = False
+    print("提示: 安装tqdm可以显示进度条 (pip install tqdm)")
+
 # 尝试导入STL处理库
 try:
     import trimesh
@@ -47,6 +55,15 @@ except ImportError:
         HAS_TRIMESH = False
         print("警告: 未找到trimesh或numpy-stl库，表面积计算功能将不可用")
         print("      请安装: pip install trimesh 或 pip install numpy-stl")
+
+# 导入分类模块
+try:
+    from classify_body_part import get_body_part
+except ImportError:
+    print("警告: 无法导入classify_body_part模块，将使用默认分类方法")
+    # 如果导入失败，提供一个默认函数
+    def get_body_part(row):
+        return "Unknown"
 
 # 添加ThicknessCalculate目录到路径，以便导入thickness_selection
 script_dir = Path(__file__).parent
@@ -366,66 +383,6 @@ def calculate_thicknesses(force_magnitudes, density=0.4, target_force=3.0):
         os.chdir(original_cwd)
 
 
-def get_body_part(row):
-    """
-    根据body2_name和坐标识别身体部分
-    
-    参数:
-        row: DataFrame的一行，包含body2_name, robot_frame_y, robot_frame_z
-    
-    返回:
-        body_part: 身体部分名称，如 "Left_Shoulder", "Right_Elbow", "Torso" 等
-    """
-    link_name = str(row.get('body2_name', '')).lower()
-    robot_y = row.get('robot_frame_y', 0) if pd.notna(row.get('robot_frame_y')) else 0
-    robot_z = row.get('robot_frame_z', 0) if pd.notna(row.get('robot_frame_z')) else 0
-    
-    # 确定左右侧
-    is_left = False
-    if any(x in link_name for x in ["left", "l_", "_l", "l_shoulder", "l_elbow", "l_hip", "l_knee"]):
-        is_left = True
-    elif any(x in link_name for x in ["right", "r_", "_r", "r_shoulder", "r_elbow", "r_hip", "r_knee"]):
-        is_left = False
-    elif "base" in link_name:
-        # For base: y+ is left, y- is right
-        is_left = robot_y > 0 if pd.notna(robot_y) else False
-    else:
-        # Default: y+ is left, y- is right
-        if pd.notna(robot_y):
-            is_left = robot_y > 0
-    
-    side = "Left" if is_left else "Right"
-    
-    # 1. Shoulder: shoulder_pitch, shoulder_roll
-    if "shoulder_pitch" in link_name or "shoulder_roll" in link_name:
-        return f"{side}_Shoulder"
-    
-    # 2. Elbow: shoulder_yaw, elbow_yaw, elbow_pitch
-    if "shoulder_yaw" in link_name or "elbow_yaw" in link_name or "elbow_pitch" in link_name:
-        return f"{side}_Elbow"
-    
-    # 3. Torso: torso, 不分左右
-    if "torso" in link_name:
-        return "Torso"
-    
-    # 4. Hip: base（根据robot_frame_y区分，y+是左，y-是右）, hip_pitch, hip_roll, hip_yaw（robot_frame_z > 0.55m)
-    if "base" in link_name:
-        return f"{side}_Hip"
-    if "hip_pitch" in link_name or "hip_roll" in link_name:
-        return f"{side}_Hip"
-    if "hip_yaw" in link_name and robot_z > 0.55:
-        return f"{side}_Hip"
-    
-    # 5. Knee: hip_yaw(robot_frame_z < 0.55m), knee_pitch
-    if "hip_yaw" in link_name and robot_z < 0.55:
-        return f"{side}_Knee"
-    if "knee_pitch" in link_name:
-        return f"{side}_Knee"
-    
-    # 默认：返回未知
-    return "Unknown"
-
-
 def calculate_part_statistics(df, density=0.4, target_force=1.0, force_column='force_normal'):
     """
     计算每个身体部分的最大力和厚度
@@ -438,11 +395,12 @@ def calculate_part_statistics(df, density=0.4, target_force=1.0, force_column='f
     
     返回:
         stats: DataFrame，包含每个身体部分的统计信息
+        unsatisfied_points: DataFrame，包含无法满足目标要求的接触点信息
     """
     # 检查必要的列
     if 'body2_name' not in df.columns:
         print("警告: 未找到body2_name列，无法按身体部分分组")
-        return None
+        return None, pd.DataFrame()
     
     # 检查力列是否存在
     if force_column not in df.columns:
@@ -455,7 +413,7 @@ def calculate_part_statistics(df, density=0.4, target_force=1.0, force_column='f
             force_column = 'force_normal'
         else:
             print(f"错误: 未找到力列 {force_column}，也无法找到替代列")
-            return None
+            return None, pd.DataFrame()
     
     # 添加身体部分列
     df = df.copy()
@@ -475,7 +433,7 @@ def calculate_part_statistics(df, density=0.4, target_force=1.0, force_column='f
     part_stats.columns = ['body_part', 'max_force_n', 'mean_force_n', 'count']
     
     # 找到每个部分最大力对应的索引
-    max_indices = df.groupby('body_part').apply(get_max_force_idx).reset_index()
+    max_indices = df.groupby('body_part', group_keys=False).apply(get_max_force_idx, include_groups=False).reset_index()
     max_indices.columns = ['body_part', 'max_idx']
     
     # 合并统计信息和索引
@@ -486,6 +444,18 @@ def calculate_part_statistics(df, density=0.4, target_force=1.0, force_column='f
     part_stats['max_y'] = part_stats['max_idx'].apply(lambda idx: df.loc[idx, 'robot_frame_y'] if 'robot_frame_y' in df.columns else 0.0)
     part_stats['max_z'] = part_stats['max_idx'].apply(lambda idx: df.loc[idx, 'robot_frame_z'] if 'robot_frame_z' in df.columns else 0.0)
     
+    # 获取最大力对应的body1和body2名称
+    part_stats['max_body1_name'] = part_stats['max_idx'].apply(lambda idx: str(df.loc[idx, 'body1_name']) if 'body1_name' in df.columns and idx in df.index else 'N/A')
+    part_stats['max_body2_name'] = part_stats['max_idx'].apply(lambda idx: str(df.loc[idx, 'body2_name']) if 'body2_name' in df.columns and idx in df.index else 'N/A')
+    
+    # 获取最大力对应的fail-type（使用fall_type_info列）
+    if 'fall_type_info' in df.columns:
+        part_stats['max_fail_type'] = part_stats['max_idx'].apply(
+            lambda idx: str(df.loc[idx, 'fall_type_info']) if idx in df.index and pd.notna(df.loc[idx, 'fall_type_info']) else 'N/A'
+        )
+    else:
+        part_stats['max_fail_type'] = 'N/A'
+    
     # 删除临时列
     part_stats = part_stats.drop('max_idx', axis=1)
     
@@ -494,12 +464,14 @@ def calculate_part_statistics(df, density=0.4, target_force=1.0, force_column='f
     part_stats['mean_force_kn'] = part_stats['mean_force_n'] / 1000.0
     
     # 计算每个部分的最大力对应的厚度
+    unsatisfied_points = pd.DataFrame()  # 存储无法满足要求的点
     if select_thickness_simple is not None:
         original_cwd = os.getcwd()
         try:
             os.chdir(str(thickness_dir))
             thicknesses = []
-            for force_kn in part_stats['max_force_kn']:
+            iterator = tqdm(part_stats['max_force_kn'], desc="计算厚度", disable=not HAS_TQDM) if HAS_TQDM else part_stats['max_force_kn']
+            for force_kn in iterator:
                 thickness_mm = select_thickness_simple(force_kn, density=density, target_force=target_force)
                 if thickness_mm is None:
                     thicknesses.append(np.nan)
@@ -508,6 +480,11 @@ def calculate_part_statistics(df, density=0.4, target_force=1.0, force_column='f
             # 将厚度值四舍五入到标准值
             thicknesses = round_thickness_to_standard(np.array(thicknesses))
             part_stats['max_thickness_mm'] = thicknesses
+            
+            # 找出无法满足要求的点（厚度为nan的点）
+            unsatisfied_mask = pd.isna(part_stats['max_thickness_mm'])
+            if unsatisfied_mask.any():
+                unsatisfied_points = part_stats[unsatisfied_mask].copy()
         finally:
             os.chdir(original_cwd)
     else:
@@ -534,7 +511,7 @@ def calculate_part_statistics(df, density=0.4, target_force=1.0, force_column='f
     part_stats['sort_key'] = part_stats.apply(sort_key, axis=1)
     part_stats = part_stats.sort_values('sort_key').drop('sort_key', axis=1)
     
-    return part_stats
+    return part_stats, unsatisfied_points
 
 
 def filter_elbow_forces(df, force_column='force_normal'):
@@ -595,7 +572,8 @@ def find_max_force_per_position(df, force_column='force_normal'):
     返回:
         df_max: DataFrame，每个唯一位置的最大力（已过滤头部和踝关节）
     """
-    print("检测到原始CSV文件，正在按位置分组并找到每个位置的最大力...")
+    if not HAS_TQDM:
+        print("检测到原始CSV文件，正在按位置分组并找到每个位置的最大力...")
     
     # 检查力列是否存在
     if force_column not in df.columns:
@@ -650,12 +628,20 @@ def find_max_force_per_position(df, force_column='force_normal'):
         position_cols = ['robot_frame_y', 'robot_frame_z']
         print("注意: 未找到robot_frame_x列，仅使用robot_frame_y和robot_frame_z进行分组")
     
-    # 按位置分组，找到每个位置的最大力
-    df_max = df.groupby(position_cols, as_index=False)[force_column].max()
+    # 按位置分组，找到每个位置的最大力，并保留最大力对应的行的所有信息
+    # 使用更高效的方法：先找到每个组的最大力索引，然后直接选择这些行
+    if HAS_TQDM:
+        print(f"      正在按位置分组（{len(df)} 行数据）...")
+        idx_max = df.groupby(position_cols, group_keys=False)[force_column].idxmax()
+        print(f"      正在选择最大力对应的行...")
+        df_max = df.loc[idx_max].reset_index(drop=True)
+    else:
+        idx_max = df.groupby(position_cols, group_keys=False)[force_column].idxmax()
+        df_max = df.loc[idx_max].reset_index(drop=True)
     
-    print(f"原始数据: {len(df)} 行")
-    print(f"唯一位置: {len(df_max)} 个")
-    print(f"数据压缩率: {len(df_max)/len(df)*100:.1f}%")
+    print(f"      原始数据: {len(df)} 行")
+    print(f"      唯一位置: {len(df_max)} 个")
+    print(f"      数据压缩率: {len(df_max)/len(df)*100:.1f}%")
     
     return df_max
 
@@ -689,7 +675,13 @@ def plot_contact_grid(csv_path, output_path=None, bins=50, cmap=None, figsize=(1
     
     # 读取CSV文件
     print(f"正在读取CSV文件: {csv_path}")
-    df = pd.read_csv(csv_path)
+    if HAS_TQDM:
+        file_size = os.path.getsize(csv_path)
+        with tqdm(total=file_size, unit='B', unit_scale=True, desc="读取CSV") as pbar:
+            df = pd.read_csv(csv_path)
+            pbar.update(file_size)
+    else:
+        df = pd.read_csv(csv_path)
     
     # 确定使用的力列（优先使用force_normal，与统计部分保持一致）
     force_column = 'force_normal' if 'force_normal' in df.columns else 'force_magnitude'
@@ -818,7 +810,13 @@ def plot_thickness_grid(csv_path, output_path=None, bins=50, cmap=None, figsize=
     
     # 读取CSV文件
     print(f"正在读取CSV文件: {csv_path}")
-    df = pd.read_csv(csv_path)
+    if HAS_TQDM:
+        file_size = os.path.getsize(csv_path)
+        with tqdm(total=file_size, unit='B', unit_scale=True, desc="读取CSV") as pbar:
+            df = pd.read_csv(csv_path)
+            pbar.update(file_size)
+    else:
+        df = pd.read_csv(csv_path)
     
     # 确定使用的力列（优先使用force_normal，与统计部分保持一致）
     force_column = 'force_normal' if 'force_normal' in df.columns else 'force_magnitude'
@@ -867,6 +865,43 @@ def plot_thickness_grid(csv_path, output_path=None, bins=50, cmap=None, figsize=
     invalid_count = np.sum(invalid_mask)
     if invalid_count > 0:
         print(f"警告: {invalid_count} 个接触点无法满足目标要求（即使使用最大厚度）")
+        
+        # 收集无法满足要求的点的详细信息
+        invalid_df = df[invalid_mask].copy()
+        invalid_df['force_kn'] = invalid_df[force_column] / 1000.0
+        invalid_df['thickness_mm'] = np.nan
+        
+        # 添加身体部分列
+        invalid_df['body_part'] = invalid_df.apply(get_body_part, axis=1)
+        
+        # 打印无法满足要求的点
+        print(f"\n无法满足目标要求（目标力={target_force}kN，最大厚度24mm仍无法满足）的接触点:")
+        print("-" * 200)
+        print(f"{'身体部分':<20} {'力(N)':<15} {'力(kN)':<15} {'厚度(mm)':<15} {'位置(x,y,z)':<30} {'body1':<25} {'body2':<25} {'fail-type':<30}")
+        print("-" * 200)
+        
+        # 按身体部分分组，显示每个身体部分的最大力点
+        for body_part in invalid_df['body_part'].unique():
+            part_df = invalid_df[invalid_df['body_part'] == body_part]
+            # 找到该身体部分的最大力点
+            max_idx = part_df[force_column].idxmax()
+            row = part_df.loc[max_idx]
+            
+            force_n = row[force_column]
+            force_kn = row['force_kn']
+            x = row.get('robot_frame_x', 0.0) if 'robot_frame_x' in row.index else 0.0
+            y = row.get('robot_frame_y', 0.0) if 'robot_frame_y' in row.index else 0.0
+            z = row.get('robot_frame_z', 0.0) if 'robot_frame_z' in row.index else 0.0
+            body1_name = str(row.get('body1_name', 'N/A')) if 'body1_name' in row.index and pd.notna(row.get('body1_name')) else 'N/A'
+            body2_name = str(row.get('body2_name', 'N/A')) if 'body2_name' in row.index and pd.notna(row.get('body2_name')) else 'N/A'
+            fail_type = str(row.get('fall_type_info', 'N/A')) if 'fall_type_info' in row.index and pd.notna(row.get('fall_type_info')) else 'N/A'
+            
+            position_str = f"({x:.3f},{y:.3f},{z:.3f})"
+            print(f"{body_part:<20} {force_n:<15.2f} {force_kn:<15.3f} {'N/A':<15} {position_str:<30} {body1_name:<25} {body2_name:<25} {fail_type:<30}")
+        
+        print("-" * 200)
+        print(f"（共 {invalid_count} 个点，上表显示每个身体部分的最大力点）\n")
+        
         # 将None/nan替换为最大厚度值，以便绘图
         max_thickness = 24  # 最大可选厚度
         thicknesses = np.where(invalid_mask, max_thickness, thicknesses)
@@ -1003,7 +1038,13 @@ def plot_surface_area_grid(csv_path, stl_path, output_path=None, bins=50, cmap=N
     
     # 读取CSV文件
     print(f"正在读取CSV文件: {csv_path}")
-    df = pd.read_csv(csv_path)
+    if HAS_TQDM:
+        file_size = os.path.getsize(csv_path)
+        with tqdm(total=file_size, unit='B', unit_scale=True, desc="读取CSV") as pbar:
+            df = pd.read_csv(csv_path)
+            pbar.update(file_size)
+    else:
+        df = pd.read_csv(csv_path)
     
     # 确定使用的力列（优先使用force_normal，与统计部分保持一致）
     force_column = 'force_normal' if 'force_normal' in df.columns else 'force_magnitude'
@@ -1193,7 +1234,13 @@ def plot_pressure_grid(csv_path, stl_path, output_path=None, bins=50, cmap=None,
     
     # 读取CSV文件
     print(f"正在读取CSV文件: {csv_path}")
-    df = pd.read_csv(csv_path)
+    if HAS_TQDM:
+        file_size = os.path.getsize(csv_path)
+        with tqdm(total=file_size, unit='B', unit_scale=True, desc="读取CSV") as pbar:
+            df = pd.read_csv(csv_path)
+            pbar.update(file_size)
+    else:
+        df = pd.read_csv(csv_path)
     
     # 确定使用的力列（优先使用force_normal，与统计部分保持一致）
     force_column = 'force_normal' if 'force_normal' in df.columns else 'force_magnitude'
@@ -1424,8 +1471,16 @@ def main():
     print("="*60)
     try:
         # 读取CSV文件
-        print(f"正在读取CSV文件: {args.csv_path}")
-        df_stats = pd.read_csv(args.csv_path)
+        print(f"[1/6] 正在读取CSV文件: {args.csv_path}")
+        if HAS_TQDM:
+            # 使用tqdm显示读取进度（需要先获取文件大小）
+            file_size = os.path.getsize(args.csv_path)
+            with tqdm(total=file_size, unit='B', unit_scale=True, desc="读取CSV") as pbar:
+                df_stats = pd.read_csv(args.csv_path)
+                pbar.update(file_size)
+        else:
+            df_stats = pd.read_csv(args.csv_path)
+        print(f"      已读取 {len(df_stats)} 行数据")
         
         # 检查必要的列，优先使用force_normal（与violin_link_force.py保持一致）
         force_col = 'force_normal' if 'force_normal' in df_stats.columns else 'force_magnitude'
@@ -1434,34 +1489,30 @@ def main():
         if missing_cols:
             print(f"警告: CSV文件缺少必要的列: {missing_cols}，无法计算身体部分统计")
         else:
-            print(f"使用力列: {force_col}")
+            print(f"[2/6] 使用力列: {force_col}")
             # 检查是否是原始CSV（需要过滤头部和踝关节）
             csv_file = Path(args.csv_path)
             is_clustered = 'clustered' in csv_file.stem.lower() or 'contact_count' in df_stats.columns
             
-            if not is_clustered:
-                # 原始CSV：先过滤头部和踝关节
-                excluded_links = [
-                    'LINK_HEAD_YAW',
-                    'LINK_ANKLE_ROLL_L', 'LINK_ANKLE_ROLL_R',
-                    'LINK_ANKLE_PITCH_L', 'LINK_ANKLE_PITCH_R'
-                ]
-                if 'body2_name' in df_stats.columns:
-                    before_filter = len(df_stats)
-                    df_stats = df_stats[~df_stats['body2_name'].isin(excluded_links)]
-                    print(f"过滤头部和踝关节: {before_filter} -> {len(df_stats)} 行")
-            
             # 对于所有CSV（原始和聚类后的），都应用elbow过滤
+            print(f"[3/6] 过滤elbow部位数据...")
             df_stats = filter_elbow_forces(df_stats, force_column=force_col)
             
+            # 如果是原始CSV，需要按位置分组找到最大力（保留所有列包括fail_type_info）
+            # find_max_force_per_position 内部会处理头部和踝关节的过滤
+            if not is_clustered:
+                print(f"[4/6] 按位置分组并找到最大力（包含过滤头部和踝关节）...")
+                df_stats = find_max_force_per_position(df_stats, force_column=force_col)
+            
             # 计算统计信息
-            part_stats = calculate_part_statistics(df_stats, density=args.density, target_force=args.target_force, force_column=force_col)
+            print(f"[6/6] 计算各身体部分的统计信息...")
+            part_stats, unsatisfied_points = calculate_part_statistics(df_stats, density=args.density, target_force=args.target_force, force_column=force_col)
             
             if part_stats is not None and len(part_stats) > 0:
                 print("\n各身体部分的最大力和厚度统计:")
-                print("-" * 120)
-                print(f"{'身体部分':<20} {'最大力(N)':<15} {'最大力(kN)':<15} {'最大厚度(mm)':<15} {'数据点数':<10} {'最大力位置(x,y,z)':<30}")
-                print("-" * 120)
+                print("-" * 200)
+                print(f"{'身体部分':<20} {'最大力(N)':<15} {'最大力(kN)':<15} {'最大厚度(mm)':<15} {'数据点数':<10} {'最大力位置(x,y,z)':<30} {'body1':<25} {'body2':<25} {'fail-type':<30}")
+                print("-" * 200)
                 for _, row in part_stats.iterrows():
                     body_part = row['body_part']
                     max_force_n = row['max_force_n']
@@ -1471,11 +1522,44 @@ def main():
                     max_x = row.get('max_x', 0.0)
                     max_y = row.get('max_y', 0.0)
                     max_z = row.get('max_z', 0.0)
+                    max_body1_name = row.get('max_body1_name', 'N/A')
+                    max_body2_name = row.get('max_body2_name', 'N/A')
+                    max_fail_type = row.get('max_fail_type', 'N/A')
                     
                     thickness_str = f"{max_thickness:.2f}" if pd.notna(max_thickness) else "N/A"
                     position_str = f"({max_x:.3f},{max_y:.3f},{max_z:.3f})"
-                    print(f"{body_part:<20} {max_force_n:<15.2f} {max_force_kn:<15.3f} {thickness_str:<15} {count:<10} {position_str:<30}")
-                print("-" * 120)
+                    body1_str = str(max_body1_name) if pd.notna(max_body1_name) else "N/A"
+                    body2_str = str(max_body2_name) if pd.notna(max_body2_name) else "N/A"
+                    fail_type_str = str(max_fail_type) if pd.notna(max_fail_type) else "N/A"
+                    print(f"{body_part:<20} {max_force_n:<15.2f} {max_force_kn:<15.3f} {thickness_str:<15} {count:<10} {position_str:<30} {body1_str:<25} {body2_str:<25} {fail_type_str:<30}")
+                print("-" * 200)
+                
+                # 打印无法满足目标要求的点
+                if unsatisfied_points is not None and len(unsatisfied_points) > 0:
+                    print(f"\n无法满足目标要求（目标力={args.target_force}kN，最大厚度24mm仍无法满足）的接触点:")
+                    print("-" * 200)
+                    print(f"{'身体部分':<20} {'最大力(N)':<15} {'最大力(kN)':<15} {'最大厚度(mm)':<15} {'数据点数':<10} {'最大力位置(x,y,z)':<30} {'body1':<25} {'body2':<25} {'fail-type':<30}")
+                    print("-" * 200)
+                    for _, row in unsatisfied_points.iterrows():
+                        body_part = row['body_part']
+                        max_force_n = row['max_force_n']
+                        max_force_kn = row['max_force_kn']
+                        max_thickness = row['max_thickness_mm']
+                        count = int(row['count'])
+                        max_x = row.get('max_x', 0.0)
+                        max_y = row.get('max_y', 0.0)
+                        max_z = row.get('max_z', 0.0)
+                        max_body1_name = row.get('max_body1_name', 'N/A')
+                        max_body2_name = row.get('max_body2_name', 'N/A')
+                        max_fail_type = row.get('max_fail_type', 'N/A')
+                        
+                        thickness_str = "N/A"
+                        position_str = f"({max_x:.3f},{max_y:.3f},{max_z:.3f})"
+                        body1_str = str(max_body1_name) if pd.notna(max_body1_name) else "N/A"
+                        body2_str = str(max_body2_name) if pd.notna(max_body2_name) else "N/A"
+                        fail_type_str = str(max_fail_type) if pd.notna(max_fail_type) else "N/A"
+                        print(f"{body_part:<20} {max_force_n:<15.2f} {max_force_kn:<15.3f} {thickness_str:<15} {count:<10} {position_str:<30} {body1_str:<25} {body2_str:<25} {fail_type_str:<30}")
+                    print("-" * 200)
             else:
                 print("警告: 无法计算身体部分统计信息")
     except Exception as e:
