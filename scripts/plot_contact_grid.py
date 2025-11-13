@@ -16,6 +16,42 @@ import argparse
 import os
 import sys
 from pathlib import Path
+from multiprocessing import Pool, cpu_count
+import gc
+
+# 尝试导入psutil用于内存监控
+try:
+    import psutil
+    HAS_PSUTIL = True
+except ImportError:
+    HAS_PSUTIL = False
+    print("提示: 安装psutil可以显示内存使用情况 (pip install psutil)")
+
+
+def get_memory_usage_mb():
+    """获取当前进程的内存使用量（MB）"""
+    if HAS_PSUTIL:
+        process = psutil.Process(os.getpid())
+        return process.memory_info().rss / (1024 * 1024)
+    else:
+        try:
+            import resource
+            return resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1024  # Linux上单位是KB
+        except:
+            return 0
+
+
+def print_memory_usage(stage=""):
+    """打印内存使用情况"""
+    if HAS_PSUTIL:
+        process = psutil.Process(os.getpid())
+        mem_mb = process.memory_info().rss / (1024 * 1024)
+        mem_percent = process.memory_percent()
+        print(f"      内存使用: {mem_mb:.1f} MB ({mem_percent:.1f}%) {stage}")
+    else:
+        mem_mb = get_memory_usage_mb()
+        if mem_mb > 0:
+            print(f"      内存使用: {mem_mb:.1f} MB {stage}")
 
 # 检查并设置可用字体
 def get_available_font(font_names):
@@ -415,9 +451,15 @@ def calculate_part_statistics(df, density=0.4, target_force=1.0, force_column='f
             print(f"错误: 未找到力列 {force_column}，也无法找到替代列")
             return None, pd.DataFrame()
     
-    # 添加身体部分列
+    # 添加身体部分列（使用多进程加速）
     df = df.copy()
-    df['body_part'] = df.apply(get_body_part, axis=1)
+    if len(df) > 10000:
+        n_jobs = max(1, cpu_count() - 2)
+        print(f"      正在分类身体部分（{len(df)} 行数据，使用 {n_jobs} 个进程）...")
+    else:
+        n_jobs = 1
+        print(f"      正在分类身体部分（{len(df)} 行数据）...")
+    df = apply_body_part_multiprocess(df, n_jobs=n_jobs)
     
     # 按身体部分分组，计算最大力，并找到最大力对应的索引
     def get_max_force_idx(group):
@@ -514,13 +556,276 @@ def calculate_part_statistics(df, density=0.4, target_force=1.0, force_column='f
     return part_stats, unsatisfied_points
 
 
-def filter_elbow_forces(df, force_column='force_normal'):
+def _apply_body_part_chunk(args):
+    """辅助函数：对数据块应用get_body_part（用于多进程）"""
+    chunk_df, original_indices = args
+    results = []
+    # chunk_df 的索引已经被重置为 0, 1, 2, ...
+    # original_indices 是原始索引的列表
+    for i, (idx, row) in enumerate(chunk_df.iterrows()):
+        original_idx = original_indices[i] if i < len(original_indices) else idx
+        results.append((original_idx, get_body_part(row)))
+    return results
+
+
+
+
+def read_csv_with_progress(csv_path, usecols=None, encoding='utf-8'):
+    """
+    读取CSV文件，支持分块读取和进度条显示（单进程）
+    
+    参数:
+        csv_path: CSV文件路径
+        usecols: 要读取的列（可选）
+        encoding: 编码方式，默认'utf-8'
+    
+    返回:
+        df: DataFrame
+    """
+    file_size = os.path.getsize(csv_path)
+    file_size_mb = file_size / (1024 * 1024)
+    
+    if HAS_TQDM and file_size_mb > 100:  # 大于100MB时使用分块读取
+        # 根据文件大小调整块大小：大文件使用更大的块
+        if file_size_mb > 10000:  # 大于10GB
+            chunk_size = 200000  # 每次读取20万行
+        elif file_size_mb > 1000:  # 大于1GB
+            chunk_size = 100000  # 每次读取10万行
+        else:
+            chunk_size = 50000  # 每次读取5万行
+        
+        chunks = []
+        
+        # 计算总行数（快速估算）
+        try:
+            with open(csv_path, 'rb') as f:
+                # 读取前几行来估算平均行长度
+                sample_lines = []
+                for _ in range(100):
+                    line = f.readline()
+                    if not line:
+                        break
+                    sample_lines.append(len(line))
+                if sample_lines:
+                    avg_line_len = sum(sample_lines) / len(sample_lines)
+                    total_lines = int(file_size / avg_line_len) - 1
+                else:
+                    # 回退到逐行计数
+                    with open(csv_path, 'r', encoding=encoding, errors='ignore') as f2:
+                        total_lines = sum(1 for _ in f2) - 1
+        except:
+            # 回退到逐行计数
+            try:
+                with open(csv_path, 'r', encoding=encoding, errors='ignore') as f:
+                    total_lines = sum(1 for _ in f) - 1
+            except:
+                alt_encoding = 'latin-1' if encoding == 'utf-8' else 'utf-8'
+                with open(csv_path, 'r', encoding=alt_encoding, errors='ignore') as f:
+                    total_lines = sum(1 for _ in f) - 1
+                encoding = alt_encoding
+        
+        total_chunks = (total_lines // chunk_size) + 1
+        
+        # 单进程读取（使用C引擎，更快）
+        print(f"      使用单进程分块读取 {total_chunks} 个块（每块约 {chunk_size:,} 行）...")
+        try:
+            reader = pd.read_csv(csv_path, usecols=usecols, chunksize=chunk_size, 
+                               engine='c', encoding=encoding, low_memory=False, memory_map=True)
+            chunk_count = 0
+            for chunk in tqdm(reader, total=total_chunks, desc="      读取进度", unit="块", ncols=80):
+                chunks.append(chunk)
+                chunk_count += 1
+                if chunk_count % 10 == 0:
+                    print_memory_usage(f"(已读取 {chunk_count} 块)")
+            
+            print_memory_usage("(读取完成，开始合并)")
+            
+            # 分批合并chunks以减少内存峰值
+            if len(chunks) > 10:
+                print(f"      分批合并 {len(chunks)} 个块以减少内存使用...")
+                # 每次合并10个块
+                batch_size = 10
+                merged_chunks = []
+                for i in range(0, len(chunks), batch_size):
+                    batch = chunks[i:i+batch_size]
+                    merged = pd.concat(batch, ignore_index=True)
+                    merged_chunks.append(merged)
+                    # 释放原始chunks
+                    del batch
+                    gc.collect()
+                    
+                    if (i // batch_size + 1) % 5 == 0:  # 每5批打印一次
+                        print_memory_usage(f"(已合并 {i+batch_size}/{len(chunks)} 块)")
+                
+                # 最终合并
+                if len(merged_chunks) > 1:
+                    print(f"      最终合并 {len(merged_chunks)} 个批次...")
+                    df = pd.concat(merged_chunks, ignore_index=True)
+                    del merged_chunks
+                else:
+                    df = merged_chunks[0]
+                gc.collect()
+            else:
+                df = pd.concat(chunks, ignore_index=True)
+            
+            # 释放chunks内存
+            del chunks
+            gc.collect()
+            print_memory_usage("(合并完成)")
+        except (UnicodeDecodeError, UnicodeError, ValueError):
+            # 如果C引擎失败，尝试Python引擎
+            print("      C引擎读取失败，尝试Python引擎...")
+            try:
+                reader = pd.read_csv(csv_path, usecols=usecols, chunksize=chunk_size, 
+                                   engine='python', encoding=encoding)
+                chunks = []
+                chunk_count = 0
+                for chunk in tqdm(reader, total=total_chunks, desc="      读取进度", unit="块", ncols=80):
+                    chunks.append(chunk)
+                    chunk_count += 1
+                    if chunk_count % 10 == 0:
+                        print_memory_usage(f"(已读取 {chunk_count} 块)")
+                
+                print_memory_usage("(读取完成，开始合并)")
+                
+                # 分批合并
+                if len(chunks) > 10:
+                    batch_size = 10
+                    merged_chunks = []
+                    for i in range(0, len(chunks), batch_size):
+                        batch = chunks[i:i+batch_size]
+                        merged = pd.concat(batch, ignore_index=True)
+                        merged_chunks.append(merged)
+                        del batch
+                        gc.collect()
+                        if (i // batch_size + 1) % 5 == 0:
+                            print_memory_usage(f"(已合并 {i+batch_size}/{len(chunks)} 块)")
+                    
+                    if len(merged_chunks) > 1:
+                        df = pd.concat(merged_chunks, ignore_index=True)
+                        del merged_chunks
+                    else:
+                        df = merged_chunks[0]
+                    gc.collect()
+                else:
+                    df = pd.concat(chunks, ignore_index=True)
+                
+                del chunks
+                gc.collect()
+                print_memory_usage("(合并完成)")
+            except (UnicodeDecodeError, UnicodeError):
+                # 如果编码失败，尝试另一种编码
+                alt_encoding = 'latin-1' if encoding == 'utf-8' else 'utf-8'
+                print(f"      尝试使用 {alt_encoding.upper()} 编码...")
+                reader = pd.read_csv(csv_path, usecols=usecols, chunksize=chunk_size, 
+                                   engine='python', encoding=alt_encoding)
+                chunks = []
+                chunk_count = 0
+                for chunk in tqdm(reader, total=total_chunks, desc="      读取进度", unit="块", ncols=80):
+                    chunks.append(chunk)
+                    chunk_count += 1
+                    if chunk_count % 10 == 0:
+                        print_memory_usage(f"(已读取 {chunk_count} 块)")
+                
+                print_memory_usage("(读取完成，开始合并)")
+                
+                # 分批合并
+                if len(chunks) > 10:
+                    batch_size = 10
+                    merged_chunks = []
+                    for i in range(0, len(chunks), batch_size):
+                        batch = chunks[i:i+batch_size]
+                        merged = pd.concat(batch, ignore_index=True)
+                        merged_chunks.append(merged)
+                        del batch
+                        gc.collect()
+                        if (i // batch_size + 1) % 5 == 0:
+                            print_memory_usage(f"(已合并 {i+batch_size}/{len(chunks)} 块)")
+                    
+                    if len(merged_chunks) > 1:
+                        df = pd.concat(merged_chunks, ignore_index=True)
+                        del merged_chunks
+                    else:
+                        df = merged_chunks[0]
+                    gc.collect()
+                else:
+                    df = pd.concat(chunks, ignore_index=True)
+                
+                del chunks
+                gc.collect()
+                print_memory_usage("(合并完成)")
+    else:
+        # 小文件直接读取（使用C引擎，更快）
+        try:
+            df = pd.read_csv(csv_path, usecols=usecols, engine='c', encoding=encoding, 
+                           low_memory=False, memory_map=True)
+        except (UnicodeDecodeError, UnicodeError, ValueError):
+            # 如果C引擎失败，尝试Python引擎
+            try:
+                df = pd.read_csv(csv_path, usecols=usecols, engine='python', encoding=encoding)
+            except (UnicodeDecodeError, UnicodeError):
+                alt_encoding = 'latin-1' if encoding == 'utf-8' else 'utf-8'
+                df = pd.read_csv(csv_path, usecols=usecols, engine='python', encoding=alt_encoding)
+    
+    return df
+
+
+def apply_body_part_multiprocess(df, n_jobs=None):
+    """
+    使用多进程对DataFrame应用get_body_part函数
+    
+    参数:
+        df: DataFrame
+        n_jobs: 并行处理的进程数，None表示自动选择
+    
+    返回:
+        df: 添加了body_part列的DataFrame
+    """
+    if n_jobs is None:
+        n_jobs = max(1, cpu_count() - 2) if len(df) > 10000 else 1
+    
+    if n_jobs > 1 and len(df) > 10000:  # 只有数据量大时才使用多进程
+        chunk_size = max(1000, len(df) // (n_jobs * 4))
+        chunks = []
+        
+        for i in range(0, len(df), chunk_size):
+            chunk = df.iloc[i:i+chunk_size].copy()
+            original_indices = chunk.index.tolist()
+            chunk = chunk.reset_index(drop=True)
+            chunks.append((chunk, original_indices))
+        
+        with Pool(processes=n_jobs) as pool:
+            if HAS_TQDM:
+                results_list = list(tqdm(pool.imap(_apply_body_part_chunk, chunks), 
+                                        total=len(chunks), desc="      分类进度", ncols=80))
+            else:
+                results_list = pool.map(_apply_body_part_chunk, chunks)
+        
+        body_part_dict = {}
+        for results in results_list:
+            for orig_idx, body_part in results:
+                body_part_dict[orig_idx] = body_part
+        
+        df['body_part'] = df.index.map(body_part_dict)
+    else:
+        # 单进程处理
+        if HAS_TQDM:
+            tqdm.pandas(desc="      分类进度", ncols=80)
+            df['body_part'] = df.progress_apply(get_body_part, axis=1)
+        else:
+            df['body_part'] = df.apply(get_body_part, axis=1)
+    
+    return df
+
+
+def filter_elbow_forces(df, force_column='force_normal', n_jobs=None):
     """
     过滤掉z坐标在0.6-0.85m之间的elbow部位大于10kN的力
     
     参数:
         df: DataFrame，包含body2_name, robot_frame_z, force_normal或force_magnitude列
         force_column: 使用的力列名，'force_normal'或'force_magnitude'（默认'force_normal'）
+        n_jobs: 并行处理的进程数，None表示使用所有CPU核心
     
     返回:
         df_filtered: 过滤后的DataFrame
@@ -530,14 +835,16 @@ def filter_elbow_forces(df, force_column='force_normal'):
     
     before_filter = len(df)
     
-    # 添加身体部分列
+    # 添加身体部分列（使用多进程加速）
     df = df.copy()
-    if HAS_TQDM:
-        print(f"      正在分类身体部分（{len(df)} 行数据）...")
-        tqdm.pandas(desc="      分类进度", ncols=80)
-        df['body_part'] = df.progress_apply(get_body_part, axis=1)
+    if n_jobs is None:
+        n_jobs = max(1, cpu_count() - 2) if len(df) > 10000 else 1
+    
+    if len(df) > 10000:
+        print(f"      正在分类身体部分（{len(df)} 行数据，使用 {n_jobs} 个进程）...")
     else:
-        df['body_part'] = df.apply(get_body_part, axis=1)
+        print(f"      正在分类身体部分（{len(df)} 行数据）...")
+    df = apply_body_part_multiprocess(df, n_jobs=n_jobs)
     
     # 识别elbow部位
     elbow_mask = df['body_part'].isin(['Left_Elbow', 'Right_Elbow'])
@@ -622,7 +929,7 @@ def find_max_force_per_position(df, force_column='force_normal'):
         print("警告: 未找到body2_name列，无法过滤头部和踝关节链接")
     
     # 过滤掉z坐标在0.6-0.85m之间的elbow部位大于10kN的力
-    df = filter_elbow_forces(df, force_column=force_column)
+    df = filter_elbow_forces(df, force_column=force_column, n_jobs=None)
     
     # 按位置分组，找到每个位置的最大力
     # 使用round来避免浮点数精度问题导致的位置重复
@@ -678,15 +985,9 @@ def plot_contact_grid(csv_path, output_path=None, bins=50, cmap=None, figsize=(1
             print(f"警告: 无法找到颜色映射 '{cmap}'，使用默认的白色到红色映射")
             cmap = create_white_to_red_cmap()
     
-    # 读取CSV文件
+    # 读取CSV文件（使用分块读取和进度条）
     print(f"正在读取CSV文件: {csv_path}")
-    if HAS_TQDM:
-        file_size = os.path.getsize(csv_path)
-        with tqdm(total=file_size, unit='B', unit_scale=True, desc="读取CSV") as pbar:
-            df = pd.read_csv(csv_path)
-            pbar.update(file_size)
-    else:
-        df = pd.read_csv(csv_path)
+    df = read_csv_with_progress(csv_path)
     
     # 确定使用的力列（优先使用force_normal，与统计部分保持一致）
     force_column = 'force_normal' if 'force_normal' in df.columns else 'force_magnitude'
@@ -813,15 +1114,9 @@ def plot_thickness_grid(csv_path, output_path=None, bins=50, cmap=None, figsize=
             print(f"警告: 无法找到颜色映射 '{cmap}'，使用默认的离散橙色映射")
             cmap = create_discrete_orange_cmap()
     
-    # 读取CSV文件
+    # 读取CSV文件（使用分块读取和进度条）
     print(f"正在读取CSV文件: {csv_path}")
-    if HAS_TQDM:
-        file_size = os.path.getsize(csv_path)
-        with tqdm(total=file_size, unit='B', unit_scale=True, desc="读取CSV") as pbar:
-            df = pd.read_csv(csv_path)
-            pbar.update(file_size)
-    else:
-        df = pd.read_csv(csv_path)
+    df = read_csv_with_progress(csv_path)
     
     # 确定使用的力列（优先使用force_normal，与统计部分保持一致）
     force_column = 'force_normal' if 'force_normal' in df.columns else 'force_magnitude'
@@ -876,8 +1171,13 @@ def plot_thickness_grid(csv_path, output_path=None, bins=50, cmap=None, figsize=
         invalid_df['force_kn'] = invalid_df[force_column] / 1000.0
         invalid_df['thickness_mm'] = np.nan
         
-        # 添加身体部分列
-        invalid_df['body_part'] = invalid_df.apply(get_body_part, axis=1)
+        # 添加身体部分列（使用多进程加速）
+        if len(invalid_df) > 1000:
+            n_jobs = max(1, cpu_count() - 2)
+            print(f"      正在分类无法满足要求的点（{len(invalid_df)} 行数据，使用 {n_jobs} 个进程）...")
+            invalid_df = apply_body_part_multiprocess(invalid_df, n_jobs=n_jobs)
+        else:
+            invalid_df['body_part'] = invalid_df.apply(get_body_part, axis=1)
         
         # 打印无法满足要求的点
         print(f"\n无法满足目标要求（目标力={target_force}kN，最大厚度24mm仍无法满足）的接触点:")
@@ -1038,15 +1338,9 @@ def plot_surface_area_grid(csv_path, stl_path, output_path=None, bins=50, cmap=N
             print(f"警告: 无法找到颜色映射 '{cmap}'，使用默认的蓝色映射")
             cmap = create_blue_cmap()
     
-    # 读取CSV文件
+    # 读取CSV文件（使用分块读取和进度条）
     print(f"正在读取CSV文件: {csv_path}")
-    if HAS_TQDM:
-        file_size = os.path.getsize(csv_path)
-        with tqdm(total=file_size, unit='B', unit_scale=True, desc="读取CSV") as pbar:
-            df = pd.read_csv(csv_path)
-            pbar.update(file_size)
-    else:
-        df = pd.read_csv(csv_path)
+    df = read_csv_with_progress(csv_path)
     
     # 确定使用的力列（优先使用force_normal，与统计部分保持一致）
     force_column = 'force_normal' if 'force_normal' in df.columns else 'force_magnitude'
@@ -1234,15 +1528,9 @@ def plot_pressure_grid(csv_path, stl_path, output_path=None, bins=50, cmap=None,
             n_bins = 256
             cmap = LinearSegmentedColormap.from_list('green_to_red', colors, N=n_bins)
     
-    # 读取CSV文件
+    # 读取CSV文件（使用分块读取和进度条）
     print(f"正在读取CSV文件: {csv_path}")
-    if HAS_TQDM:
-        file_size = os.path.getsize(csv_path)
-        with tqdm(total=file_size, unit='B', unit_scale=True, desc="读取CSV") as pbar:
-            df = pd.read_csv(csv_path)
-            pbar.update(file_size)
-    else:
-        df = pd.read_csv(csv_path)
+    df = read_csv_with_progress(csv_path)
     
     # 确定使用的力列（优先使用force_normal，与统计部分保持一致）
     force_column = 'force_normal' if 'force_normal' in df.columns else 'force_magnitude'
@@ -1476,16 +1764,12 @@ def main():
     print("计算各身体部分的最大力和厚度")
     print("="*60)
     try:
-        # 读取CSV文件
+        # 读取CSV文件（使用分块读取以显示进度）
         print(f"[1/6] 正在读取CSV文件: {args.csv_path}")
-        if HAS_TQDM:
-            # 使用tqdm显示读取进度（需要先获取文件大小）
-            file_size = os.path.getsize(args.csv_path)
-            with tqdm(total=file_size, unit='B', unit_scale=True, desc="读取CSV") as pbar:
-                df_stats = pd.read_csv(args.csv_path)
-                pbar.update(file_size)
-        else:
-            df_stats = pd.read_csv(args.csv_path)
+        file_size = os.path.getsize(args.csv_path)
+        file_size_mb = file_size / (1024 * 1024)
+        print(f"      文件大小: {file_size_mb:.2f} MB")
+        df_stats = read_csv_with_progress(args.csv_path)
         print(f"      已读取 {len(df_stats)} 行数据")
         
         # 检查必要的列，优先使用force_normal（与violin_link_force.py保持一致）

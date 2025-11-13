@@ -7,6 +7,7 @@ import seaborn as sns
 from pathlib import Path
 import re
 import os
+from multiprocessing import Pool, cpu_count
 
 # 检查并设置可用字体
 def get_available_font(font_names):
@@ -107,9 +108,69 @@ def get_group_name(row):
         return body_part_with_side
 
 
+def _apply_group_name_chunk(args):
+    """辅助函数：对数据块应用get_group_name（用于多进程）"""
+    chunk_df, original_indices = args
+    results = []
+    for i, (idx, row) in enumerate(chunk_df.iterrows()):
+        original_idx = original_indices[i] if i < len(original_indices) else idx
+        results.append((original_idx, get_group_name(row)))
+    return results
+
+
+def apply_group_name_multiprocess(df, n_jobs=None):
+    """
+    使用多进程对DataFrame应用get_group_name函数
+    
+    参数:
+        df: DataFrame
+        n_jobs: 并行处理的进程数，None表示自动选择
+    
+    返回:
+        df: 添加了group_name列的DataFrame
+    """
+    if n_jobs is None:
+        n_jobs = max(1, cpu_count() - 2) if len(df) > 10000 else 1
+    
+    if n_jobs > 1 and len(df) > 10000:  # 只有数据量大时才使用多进程
+        chunk_size = max(1000, len(df) // (n_jobs * 4))
+        chunks = []
+        
+        for i in range(0, len(df), chunk_size):
+            chunk = df.iloc[i:i+chunk_size].copy()
+            original_indices = chunk.index.tolist()
+            chunk = chunk.reset_index(drop=True)
+            chunks.append((chunk, original_indices))
+        
+        with Pool(processes=n_jobs) as pool:
+            if HAS_TQDM:
+                results_list = list(tqdm(pool.imap(_apply_group_name_chunk, chunks), 
+                                        total=len(chunks), desc="  分类进度", ncols=80))
+            else:
+                results_list = pool.map(_apply_group_name_chunk, chunks)
+        
+        group_name_dict = {}
+        for results in results_list:
+            for orig_idx, group_name in results:
+                group_name_dict[orig_idx] = group_name
+        
+        df['group_name'] = df.index.map(group_name_dict)
+    else:
+        # 单进程处理
+        if HAS_TQDM:
+            tqdm.pandas(desc="  分类进度", ncols=80)
+            df['group_name'] = df.progress_apply(get_group_name, axis=1)
+        else:
+            df['group_name'] = df.apply(get_group_name, axis=1)
+    
+    return df
+
+
+
+
 def read_contact_data(csv_path):
     """
-    读取接触数据 CSV 文件，参考 violin_link_force.py 的读取方式
+    读取接触数据 CSV 文件，支持分块读取和进度条显示（单进程）
     返回包含 body2_name, force_normal, group_name 的 DataFrame
     """
     print(f"[步骤 1/6] 检查文件是否存在...")
@@ -160,6 +221,7 @@ def read_contact_data(csv_path):
     if HAS_TQDM:
         chunk_size = 50000
         chunks = []
+        encoding = 'utf-8'
         
         print(f"  正在计算文件总行数...")
         try:
@@ -168,24 +230,36 @@ def read_contact_data(csv_path):
         except:
             with open(csv_path, 'r', encoding='latin-1', errors='ignore') as f:
                 total_lines = sum(1 for _ in f) - 1
+            encoding = 'latin-1'
         
-        print(f"  总行数: {total_lines:,}, 开始读取...")
+        total_chunks = (total_lines // chunk_size) + 1
+        print(f"  总行数: {total_lines:,}, 共 {total_chunks} 个块，开始读取...")
         
+        # 单进程分块读取
         try:
-            reader = pd.read_csv(csv_path, usecols=use, engine='python', encoding='utf-8', chunksize=chunk_size)
-            total_chunks = (total_lines // chunk_size) + 1
+            reader = pd.read_csv(csv_path, usecols=use, engine='c', encoding=encoding, 
+                               chunksize=chunk_size, low_memory=False, memory_map=True)
             for chunk in tqdm(reader, total=total_chunks, desc="  读取进度", unit="块", ncols=80):
                 chunks.append(chunk)
             data = pd.concat(chunks, ignore_index=True)
-            print(f"  ✓ 使用 UTF-8 编码成功读取")
-        except (UnicodeDecodeError, UnicodeError):
-            reader = pd.read_csv(csv_path, usecols=use, engine='python', encoding='latin-1', chunksize=chunk_size)
-            chunks = []
-            total_chunks = (total_lines // chunk_size) + 1
-            for chunk in tqdm(reader, total=total_chunks, desc="  读取进度", unit="块", ncols=80):
-                chunks.append(chunk)
-            data = pd.concat(chunks, ignore_index=True)
-            print(f"  ✓ 使用 latin-1 编码成功读取")
+            print(f"  ✓ 使用 {encoding.upper()} 编码成功读取")
+        except (UnicodeDecodeError, UnicodeError, ValueError):
+            # 如果C引擎失败，尝试Python引擎
+            try:
+                reader = pd.read_csv(csv_path, usecols=use, engine='python', encoding=encoding, chunksize=chunk_size)
+                chunks = []
+                for chunk in tqdm(reader, total=total_chunks, desc="  读取进度", unit="块", ncols=80):
+                    chunks.append(chunk)
+                data = pd.concat(chunks, ignore_index=True)
+                print(f"  ✓ 使用 {encoding.upper()} 编码成功读取")
+            except (UnicodeDecodeError, UnicodeError):
+                alt_encoding = 'latin-1' if encoding == 'utf-8' else 'utf-8'
+                reader = pd.read_csv(csv_path, usecols=use, engine='python', encoding=alt_encoding, chunksize=chunk_size)
+                chunks = []
+                for chunk in tqdm(reader, total=total_chunks, desc="  读取进度", unit="块", ncols=80):
+                    chunks.append(chunk)
+                data = pd.concat(chunks, ignore_index=True)
+                print(f"  ✓ 使用 {alt_encoding.upper()} 编码成功读取")
     else:
         print(f"  正在读取文件（这可能需要一些时间，建议安装 tqdm: pip install tqdm）...")
         try:
@@ -245,12 +319,12 @@ def read_contact_data(csv_path):
     
     # Group links using classify_body_part module
     print(f"[步骤 5/6] 根据规则对 link 进行分组（使用 classify_body_part 模块）...")
-    if HAS_TQDM:
-        print(f"  正在分类身体部分（{len(df)} 行数据）...")
-        tqdm.pandas(desc="  分类进度", ncols=80)
-        df["group_name"] = df.progress_apply(get_group_name, axis=1)
+    n_jobs = max(1, cpu_count() - 2) if len(df) > 10000 else 1
+    if n_jobs > 1:
+        print(f"  正在分类身体部分（{len(df)} 行数据，使用 {n_jobs} 个进程）...")
     else:
-        df["group_name"] = df.apply(get_group_name, axis=1)
+        print(f"  正在分类身体部分（{len(df)} 行数据）...")
+    df = apply_group_name_multiprocess(df, n_jobs=n_jobs)
     print(f"  分组完成，共 {df['group_name'].nunique()} 个不同的组")
     
     # Show group statistics

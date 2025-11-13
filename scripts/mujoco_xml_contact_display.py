@@ -13,6 +13,7 @@ import tempfile
 import xml.etree.ElementTree as ET
 import mediapy as media
 from datetime import datetime
+from multiprocessing import Pool, cpu_count
 
 # Set MuJoCo memory limits to avoid stack overflow - MUST be set before importing mujoco
 # os.environ['MUJOCO_GL'] = 'egl'  # Use EGL for better memory management
@@ -21,6 +22,88 @@ os.environ['MUJOCO_ARENA_SIZE'] = '8589934592'  # 8GB arena size for constraints
 
 # Import mujoco AFTER setting environment variables
 import mujoco as mj
+
+# Try to import tqdm for progress bar
+try:
+    from tqdm import tqdm
+    HAS_TQDM = True
+except ImportError:
+    HAS_TQDM = False
+    print("提示: 安装tqdm可以显示进度条 (pip install tqdm)")
+
+
+
+def read_csv_with_progress_mujoco(csv_path, encoding='utf-8'):
+    """
+    读取CSV文件，支持分块读取和进度条显示（单进程）
+    
+    参数:
+        csv_path: CSV文件路径
+        encoding: 编码方式，默认'utf-8'
+    
+    返回:
+        df: DataFrame
+    """
+    file_size = os.path.getsize(csv_path)
+    file_size_mb = file_size / (1024 * 1024)
+    
+    if HAS_TQDM and file_size_mb > 100:  # 大于100MB时使用分块读取
+        chunk_size = 50000  # 每次读取5万行
+        chunks = []
+        
+        # 计算总行数
+        try:
+            with open(csv_path, 'r', encoding=encoding, errors='ignore') as f:
+                total_lines = sum(1 for _ in f) - 1
+        except:
+            # 如果指定编码失败，尝试另一种编码
+            alt_encoding = 'latin-1' if encoding == 'utf-8' else 'utf-8'
+            with open(csv_path, 'r', encoding=alt_encoding, errors='ignore') as f:
+                total_lines = sum(1 for _ in f) - 1
+            encoding = alt_encoding
+        
+        total_chunks = (total_lines // chunk_size) + 1
+        
+        # 单进程分块读取
+        print(f"使用单进程分块读取 {total_chunks} 个块...")
+        try:
+            reader = pd.read_csv(csv_path, chunksize=chunk_size, 
+                               engine='c', encoding=encoding, low_memory=False, memory_map=True)
+            chunks = []
+            for chunk in tqdm(reader, total=total_chunks, desc="读取进度", unit="块", ncols=80) if HAS_TQDM else reader:
+                chunks.append(chunk)
+            df = pd.concat(chunks, ignore_index=True)
+            print(f"✓ 使用 {encoding.upper()} 编码成功读取")
+        except (UnicodeDecodeError, UnicodeError, ValueError):
+            # 如果C引擎失败，尝试Python引擎
+            try:
+                reader = pd.read_csv(csv_path, chunksize=chunk_size, 
+                                   engine='python', encoding=encoding)
+                chunks = []
+                for chunk in tqdm(reader, total=total_chunks, desc="读取进度", unit="块", ncols=80) if HAS_TQDM else reader:
+                    chunks.append(chunk)
+                df = pd.concat(chunks, ignore_index=True)
+                print(f"✓ 使用 {encoding.upper()} 编码成功读取")
+            except (UnicodeDecodeError, UnicodeError):
+                # 如果编码失败，尝试另一种编码
+                alt_encoding = 'latin-1' if encoding == 'utf-8' else 'utf-8'
+                reader = pd.read_csv(csv_path, chunksize=chunk_size, 
+                                   engine='python', encoding=alt_encoding)
+                chunks = []
+                for chunk in tqdm(reader, total=total_chunks, desc="读取进度", unit="块", ncols=80) if HAS_TQDM else reader:
+                    chunks.append(chunk)
+                df = pd.concat(chunks, ignore_index=True)
+                print(f"✓ 使用 {alt_encoding.upper()} 编码成功读取")
+    else:
+        # 小文件直接读取
+        try:
+            df = pd.read_csv(csv_path, engine='python', encoding=encoding)
+        except (UnicodeDecodeError, UnicodeError):
+            alt_encoding = 'latin-1' if encoding == 'utf-8' else 'utf-8'
+            df = pd.read_csv(csv_path, engine='python', encoding=alt_encoding)
+    
+    return df
+
 
 def analyze_csv_data(df):
     """Analyze CSV data and print statistics"""
@@ -397,44 +480,173 @@ def create_contact_force_visualization(df, x_col, y_col, z_col, max_spheres_over
     # Check if fall-type column exists
     has_fall_type = 'fall-type' in df_valid.columns
     
-    for _, row in df_valid.iterrows():
-        body2_name = row['body2_name']
-        body1_name = row.get('body1_name', '') if 'body1_name' in row else ''
-        fall_type = row.get('fall-type', '') if has_fall_type else ''
-        pos = (row[x_col], row[y_col], row[z_col])
+    # 使用多进程处理大量数据
+    n_rows = len(df_valid)
+    n_jobs = max(1, cpu_count() - 2) if n_rows > 10000 else 1
+    
+    if n_jobs > 1 and n_rows > 10000:
+        print(f"使用 {n_jobs} 个进程处理 {n_rows} 行数据...")
         
-        # Use normal force as primary, with fallbacks
-        if 'force_normal' in row and pd.notna(row['force_normal']):
-            force_mag = abs(row['force_normal'])  # Use normal force as primary
-        elif 'force_magnitude' in row and pd.notna(row['force_magnitude']):
-            force_mag = row['force_magnitude']  # Fallback to total force magnitude
-        elif all(col in row for col in ['force_x', 'force_y', 'force_z']) and all(pd.notna(row[col]) for col in ['force_x', 'force_y', 'force_z']):
-            force_mag = np.sqrt(row['force_x']**2 + row['force_y']**2 + row['force_z']**2)
+        def process_chunk(chunk_df):
+            """处理一个数据块"""
+            chunk_body_groups = {}
+            for _, row in chunk_df.iterrows():
+                body2_name = row['body2_name']
+                body1_name = row.get('body1_name', '') if 'body1_name' in row else ''
+                fall_type = row.get('fall-type', '') if has_fall_type else ''
+                pos = (row[x_col], row[y_col], row[z_col])
+                
+                # Use normal force as primary, with fallbacks
+                if 'force_normal' in row and pd.notna(row['force_normal']):
+                    force_mag = abs(row['force_normal'])
+                elif 'force_magnitude' in row and pd.notna(row['force_magnitude']):
+                    force_mag = row['force_magnitude']
+                elif all(col in row for col in ['force_x', 'force_y', 'force_z']) and all(pd.notna(row[col]) for col in ['force_x', 'force_y', 'force_z']):
+                    force_mag = np.sqrt(row['force_x']**2 + row['force_y']**2 + row['force_z']**2)
+                else:
+                    force_mag = 1.0
+                
+                if body2_name not in chunk_body_groups:
+                    chunk_body_groups[body2_name] = {}
+                
+                if pos in chunk_body_groups[body2_name]:
+                    chunk_body_groups[body2_name][pos]['forces'].append(force_mag)
+                    chunk_body_groups[body2_name][pos]['count'] += 1
+                    if force_mag > chunk_body_groups[body2_name][pos].get('max_force', 0):
+                        chunk_body_groups[body2_name][pos]['body1_name'] = body1_name
+                        if has_fall_type:
+                            chunk_body_groups[body2_name][pos]['fall-type'] = fall_type
+                        chunk_body_groups[body2_name][pos]['max_force'] = force_mag
+                else:
+                    chunk_body_groups[body2_name][pos] = {
+                        'position': pos,
+                        'forces': [force_mag],
+                        'count': 1,
+                        'body1_name': body1_name,
+                        'max_force': force_mag
+                    }
+                    if has_fall_type:
+                        chunk_body_groups[body2_name][pos]['fall-type'] = fall_type
+            return chunk_body_groups
+        
+        # 将数据分成多个块
+        chunk_size = max(1000, n_rows // (n_jobs * 4))
+        chunks = []
+        for i in range(0, n_rows, chunk_size):
+            chunk = df_valid.iloc[i:i+chunk_size].copy()
+            chunks.append(chunk)
+        
+        # 使用多进程处理
+        with Pool(processes=n_jobs) as pool:
+            if HAS_TQDM:
+                chunk_results = list(tqdm(pool.imap(process_chunk, chunks), 
+                                         total=len(chunks), desc="处理进度", unit="块", ncols=80))
+            else:
+                chunk_results = pool.map(process_chunk, chunks)
+        
+        # 合并结果
+        for chunk_body_groups in chunk_results:
+            for body2_name, position_groups in chunk_body_groups.items():
+                if body2_name not in body_groups:
+                    body_groups[body2_name] = {}
+                for pos, data in position_groups.items():
+                    if pos in body_groups[body2_name]:
+                        # 合并相同位置的数据
+                        body_groups[body2_name][pos]['forces'].extend(data['forces'])
+                        body_groups[body2_name][pos]['count'] += data['count']
+                        if data['max_force'] > body_groups[body2_name][pos].get('max_force', 0):
+                            body_groups[body2_name][pos]['body1_name'] = data['body1_name']
+                            if has_fall_type:
+                                body_groups[body2_name][pos]['fall-type'] = data.get('fall-type', '')
+                            body_groups[body2_name][pos]['max_force'] = data['max_force']
+                    else:
+                        body_groups[body2_name][pos] = data
+    else:
+        # 单进程处理
+        if HAS_TQDM and n_rows > 1000:
+            tqdm.pandas(desc="处理进度", ncols=80)
+            # 使用apply代替iterrows以提高性能
+            def process_row(row):
+                body2_name = row['body2_name']
+                body1_name = row.get('body1_name', '') if 'body1_name' in row else ''
+                fall_type = row.get('fall-type', '') if has_fall_type else ''
+                pos = (row[x_col], row[y_col], row[z_col])
+                
+                if 'force_normal' in row and pd.notna(row['force_normal']):
+                    force_mag = abs(row['force_normal'])
+                elif 'force_magnitude' in row and pd.notna(row['force_magnitude']):
+                    force_mag = row['force_magnitude']
+                elif all(col in row for col in ['force_x', 'force_y', 'force_z']) and all(pd.notna(row[col]) for col in ['force_x', 'force_y', 'force_z']):
+                    force_mag = np.sqrt(row['force_x']**2 + row['force_y']**2 + row['force_z']**2)
+                else:
+                    force_mag = 1.0
+                
+                return (body2_name, pos, body1_name, fall_type, force_mag)
+            
+            results = df_valid.progress_apply(process_row, axis=1).tolist()
+            
+            for body2_name, pos, body1_name, fall_type, force_mag in results:
+                if body2_name not in body_groups:
+                    body_groups[body2_name] = {}
+                
+                if pos in body_groups[body2_name]:
+                    body_groups[body2_name][pos]['forces'].append(force_mag)
+                    body_groups[body2_name][pos]['count'] += 1
+                    if force_mag > body_groups[body2_name][pos].get('max_force', 0):
+                        body_groups[body2_name][pos]['body1_name'] = body1_name
+                        if has_fall_type:
+                            body_groups[body2_name][pos]['fall-type'] = fall_type
+                        body_groups[body2_name][pos]['max_force'] = force_mag
+                else:
+                    body_groups[body2_name][pos] = {
+                        'position': pos,
+                        'forces': [force_mag],
+                        'count': 1,
+                        'body1_name': body1_name,
+                        'max_force': force_mag
+                    }
+                    if has_fall_type:
+                        body_groups[body2_name][pos]['fall-type'] = fall_type
         else:
-            force_mag = 1.0  # Default force if not available
-        
-        if body2_name not in body_groups:
-            body_groups[body2_name] = {}
-        
-        if pos in body_groups[body2_name]:
-            body_groups[body2_name][pos]['forces'].append(force_mag)
-            body_groups[body2_name][pos]['count'] += 1
-            # Update body1_name and fall-type if current force is larger
-            if force_mag > body_groups[body2_name][pos].get('max_force', 0):
-                body_groups[body2_name][pos]['body1_name'] = body1_name
-                if has_fall_type:
-                    body_groups[body2_name][pos]['fall-type'] = fall_type
-                body_groups[body2_name][pos]['max_force'] = force_mag
-        else:
-            body_groups[body2_name][pos] = {
-                'position': pos,
-                'forces': [force_mag],
-                'count': 1,
-                'body1_name': body1_name,
-                'max_force': force_mag
-            }
-            if has_fall_type:
-                body_groups[body2_name][pos]['fall-type'] = fall_type
+            # 原始方法（小数据集）
+            for _, row in df_valid.iterrows():
+                body2_name = row['body2_name']
+                body1_name = row.get('body1_name', '') if 'body1_name' in row else ''
+                fall_type = row.get('fall-type', '') if has_fall_type else ''
+                pos = (row[x_col], row[y_col], row[z_col])
+                
+                # Use normal force as primary, with fallbacks
+                if 'force_normal' in row and pd.notna(row['force_normal']):
+                    force_mag = abs(row['force_normal'])  # Use normal force as primary
+                elif 'force_magnitude' in row and pd.notna(row['force_magnitude']):
+                    force_mag = row['force_magnitude']  # Fallback to total force magnitude
+                elif all(col in row for col in ['force_x', 'force_y', 'force_z']) and all(pd.notna(row[col]) for col in ['force_x', 'force_y', 'force_z']):
+                    force_mag = np.sqrt(row['force_x']**2 + row['force_y']**2 + row['force_z']**2)
+                else:
+                    force_mag = 1.0  # Default force if not available
+                
+                if body2_name not in body_groups:
+                    body_groups[body2_name] = {}
+                
+                if pos in body_groups[body2_name]:
+                    body_groups[body2_name][pos]['forces'].append(force_mag)
+                    body_groups[body2_name][pos]['count'] += 1
+                    # Update body1_name and fall-type if current force is larger
+                    if force_mag > body_groups[body2_name][pos].get('max_force', 0):
+                        body_groups[body2_name][pos]['body1_name'] = body1_name
+                        if has_fall_type:
+                            body_groups[body2_name][pos]['fall-type'] = fall_type
+                        body_groups[body2_name][pos]['max_force'] = force_mag
+                else:
+                    body_groups[body2_name][pos] = {
+                        'position': pos,
+                        'forces': [force_mag],
+                        'count': 1,
+                        'body1_name': body1_name,
+                        'max_force': force_mag
+                    }
+                    if has_fall_type:
+                        body_groups[body2_name][pos]['fall-type'] = fall_type
     
     # Convert to contact forces list for clustering
     all_contact_forces = []
@@ -1229,9 +1441,12 @@ def main():
         print(f"XML file not found: {xml_file}")
         return
     
-    # Load contact data
+    # Load contact data (使用多进程读取)
     print(f"Loading contact data: {csv_file}")
-    df = pd.read_csv(csv_file)
+    file_size = os.path.getsize(csv_file)
+    file_size_mb = file_size / (1024 * 1024)
+    print(f"文件大小: {file_size_mb:.2f} MB")
+    df = read_csv_with_progress_mujoco(csv_file)
     print(f"Loaded {len(df)} rows")
     
     # Analyze CSV data
