@@ -880,27 +880,24 @@ def plot_thickness_grid(csv_path, output_path=None, bins=50, cmap=None, figsize=
         print(f"{'身体部分':<20} {'力(N)':<15} {'力(kN)':<15} {'厚度(mm)':<15} {'位置(x,y,z)':<30} {'body1':<25} {'body2':<25} {'fail-type':<30}")
         print("-" * 200)
         
-        # 按身体部分分组，显示每个身体部分的最大力点
-        for body_part in invalid_df['body_part'].unique():
-            part_df = invalid_df[invalid_df['body_part'] == body_part]
-            # 找到该身体部分的最大力点
-            max_idx = part_df[force_column].idxmax()
-            row = part_df.loc[max_idx]
-            
+        # 按力从大到小排序，打印所有无法满足要求的点
+        invalid_df_sorted = invalid_df.sort_values(by=force_column, ascending=False)
+        for idx, row in invalid_df_sorted.iterrows():
+            body_part = row['body_part']
             force_n = row[force_column]
             force_kn = row['force_kn']
-            x = row.get('robot_frame_x', 0.0) if 'robot_frame_x' in row.index else 0.0
-            y = row.get('robot_frame_y', 0.0) if 'robot_frame_y' in row.index else 0.0
-            z = row.get('robot_frame_z', 0.0) if 'robot_frame_z' in row.index else 0.0
+            x_pos = row.get('robot_frame_x', 0.0) if 'robot_frame_x' in row.index else 0.0
+            y_pos = row.get('robot_frame_y', 0.0) if 'robot_frame_y' in row.index else 0.0
+            z_pos = row.get('robot_frame_z', 0.0) if 'robot_frame_z' in row.index else 0.0
             body1_name = str(row.get('body1_name', 'N/A')) if 'body1_name' in row.index and pd.notna(row.get('body1_name')) else 'N/A'
             body2_name = str(row.get('body2_name', 'N/A')) if 'body2_name' in row.index and pd.notna(row.get('body2_name')) else 'N/A'
             fail_type = str(row.get('fall_type_info', 'N/A')) if 'fall_type_info' in row.index and pd.notna(row.get('fall_type_info')) else 'N/A'
             
-            position_str = f"({x:.3f},{y:.3f},{z:.3f})"
+            position_str = f"({x_pos:.3f},{y_pos:.3f},{z_pos:.3f})"
             print(f"{body_part:<20} {force_n:<15.2f} {force_kn:<15.3f} {'N/A':<15} {position_str:<30} {body1_name:<25} {body2_name:<25} {fail_type:<30}")
         
         print("-" * 200)
-        print(f"（共 {invalid_count} 个点，上表显示每个身体部分的最大力点）\n")
+        print(f"（共 {invalid_count} 个点）\n")
         
         # 将None/nan替换为最大厚度值，以便绘图
         max_thickness = 24  # 最大可选厚度
@@ -1418,7 +1415,7 @@ def main():
     parser.add_argument('--surface-figsize', type=float, nargs=2, default=None, help='表面积图大小（单位: cm，宽 高，默认使用--figsize）')
     parser.add_argument('--pressure-figsize', type=float, nargs=2, default=None, help='压强图大小（单位: cm，宽 高，默认使用--figsize）')
     parser.add_argument('--density', type=float, default=0.4, help='材料密度（默认: 0.4）')
-    parser.add_argument('--target-force', type=float, default=1.0, help='目标衰减后的力（kN，默认: 3.0）')
+    parser.add_argument('--target-force', type=float, default=1.0, help='目标衰减后的力（kN，默认: 1.0）')
     parser.add_argument('--margin-left', type=float, default=15.0, help='左边距（百分比，默认: 5.0）')
     parser.add_argument('--margin-right', type=float, default=5.0, help='右边距（百分比，默认: 5.0）')
     parser.add_argument('--margin-top', type=float, default=5.0, help='上边距（百分比，默认: 5.0）')
@@ -1430,6 +1427,10 @@ def main():
     parser.add_argument('--search-radius', type=float, default=0.01, help='表面积计算搜索半径（米，默认: 0.01）')
     
     args = parser.parse_args()
+    
+    # 统一定义参数
+    target_force = args.target_force
+    density = args.density
     
     # 检查文件是否存在
     if not os.path.exists(args.csv_path):
@@ -1506,7 +1507,7 @@ def main():
             
             # 计算统计信息
             print(f"[6/6] 计算各身体部分的统计信息...")
-            part_stats, unsatisfied_points = calculate_part_statistics(df_stats, density=args.density, target_force=args.target_force, force_column=force_col)
+            part_stats, unsatisfied_points = calculate_part_statistics(df_stats, density=density, target_force=target_force, force_column=force_col)
             
             if part_stats is not None and len(part_stats) > 0:
                 print("\n各身体部分的最大力和厚度统计:")
@@ -1536,7 +1537,7 @@ def main():
                 
                 # 打印无法满足目标要求的点
                 if unsatisfied_points is not None and len(unsatisfied_points) > 0:
-                    print(f"\n无法满足目标要求（目标力={args.target_force}kN，最大厚度24mm仍无法满足）的接触点:")
+                    print(f"\n无法满足目标要求（目标力={target_force}kN，最大厚度24mm仍无法满足）的接触点:")
                     print("-" * 200)
                     print(f"{'身体部分':<20} {'最大力(N)':<15} {'最大力(kN)':<15} {'最大厚度(mm)':<15} {'数据点数':<10} {'最大力位置(x,y,z)':<30} {'body1':<25} {'body2':<25} {'fail-type':<30}")
                     print("-" * 200)
@@ -1611,8 +1612,8 @@ def main():
                 bins=args.bins,
                 cmap=args.cmap,
                 figsize=thickness_figsize,
-                density=args.density,
-                target_force=args.target_force,
+                density=density,
+                target_force=target_force,
                 margin_left=args.margin_left,
                 margin_right=args.margin_right,
                 margin_top=args.margin_top,
