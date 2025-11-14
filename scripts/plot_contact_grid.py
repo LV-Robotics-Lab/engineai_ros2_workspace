@@ -451,15 +451,18 @@ def calculate_part_statistics(df, density=0.4, target_force=1.0, force_column='f
             print(f"错误: 未找到力列 {force_column}，也无法找到替代列")
             return None, pd.DataFrame()
     
-    # 添加身体部分列（使用多进程加速）
+    # 添加身体部分列（使用多进程加速，如果还没有body_part列）
     df = df.copy()
-    if len(df) > 10000:
-        n_jobs = max(1, cpu_count() - 2)
-        print(f"      正在分类身体部分（{len(df)} 行数据，使用 {n_jobs} 个进程）...")
+    if 'body_part' not in df.columns:
+        if len(df) > 10000:
+            n_jobs = max(1, cpu_count() - 2)
+            print(f"      正在分类身体部分（{len(df)} 行数据，使用 {n_jobs} 个进程）...")
+        else:
+            n_jobs = 1
+            print(f"      正在分类身体部分（{len(df)} 行数据）...")
+        df = apply_body_part_multiprocess(df, n_jobs=n_jobs)
     else:
-        n_jobs = 1
-        print(f"      正在分类身体部分（{len(df)} 行数据）...")
-    df = apply_body_part_multiprocess(df, n_jobs=n_jobs)
+        print(f"      跳过分类（已有body_part列）")
     
     # 按身体部分分组，计算最大力，并找到最大力对应的索引
     def get_max_force_idx(group):
@@ -835,16 +838,20 @@ def filter_elbow_forces(df, force_column='force_normal', n_jobs=None):
     
     before_filter = len(df)
     
-    # 添加身体部分列（使用多进程加速）
+    # 添加身体部分列（使用多进程加速，如果还没有body_part列）
     df = df.copy()
-    if n_jobs is None:
-        n_jobs = max(1, cpu_count() - 2) if len(df) > 10000 else 1
     
-    if len(df) > 10000:
-        print(f"      正在分类身体部分（{len(df)} 行数据，使用 {n_jobs} 个进程）...")
+    if 'body_part' not in df.columns:
+        if n_jobs is None:
+            n_jobs = max(1, cpu_count() - 2) if len(df) > 10000 else 1
+        
+        if len(df) > 10000:
+            print(f"      正在分类身体部分（{len(df)} 行数据，使用 {n_jobs} 个进程）...")
+        else:
+            print(f"      正在分类身体部分（{len(df)} 行数据）...")
+        df = apply_body_part_multiprocess(df, n_jobs=n_jobs)
     else:
-        print(f"      正在分类身体部分（{len(df)} 行数据）...")
-    df = apply_body_part_multiprocess(df, n_jobs=n_jobs)
+        print(f"      跳过分类（已有body_part列）")
     
     # 识别elbow部位
     elbow_mask = df['body_part'].isin(['Left_Elbow', 'Right_Elbow'])
@@ -867,8 +874,8 @@ def filter_elbow_forces(df, force_column='force_normal', n_jobs=None):
         print(f"过滤掉z坐标在0.6-0.85m之间的elbow部位大于10kN的力: {filtered_count} 行")
         print(f"过滤后的数据: {after_filter} 行")
     
-    # 删除临时添加的body_part列
-    df = df.drop('body_part', axis=1)
+    # 注意：不删除body_part列，以便后续函数可以复用
+    # df = df.drop('body_part', axis=1)
     
     return df
 
@@ -929,6 +936,7 @@ def find_max_force_per_position(df, force_column='force_normal'):
         print("警告: 未找到body2_name列，无法过滤头部和踝关节链接")
     
     # 过滤掉z坐标在0.6-0.85m之间的elbow部位大于10kN的力
+    # 注意：filter_elbow_forces内部会检查是否有body_part列，如果有就跳过分类
     df = filter_elbow_forces(df, force_column=force_column, n_jobs=None)
     
     # 按位置分组，找到每个位置的最大力
@@ -958,13 +966,14 @@ def find_max_force_per_position(df, force_column='force_normal'):
     return df_max
 
 
-def plot_contact_grid(csv_path, output_path=None, bins=50, cmap=None, figsize=(10, 8), 
+def plot_contact_grid(csv_path=None, df=None, output_path=None, bins=50, cmap=None, figsize=(10, 8), 
                      margin_left=5.0, margin_right=5.0, margin_top=5.0, margin_bottom=5.0):
     """
     绘制接触力数据的网格颜色图
     
     参数:
-        csv_path: CSV文件路径
+        csv_path: CSV文件路径（如果df为None则使用此参数读取）
+        df: 已读取的DataFrame（可选，如果提供则直接使用，不读取csv_path）
         output_path: 输出图片路径（可选，如果为None则显示图片）
         bins: 网格分辨率
         cmap: 颜色映射（如果为None，则使用白色到红色的默认映射）
@@ -985,9 +994,14 @@ def plot_contact_grid(csv_path, output_path=None, bins=50, cmap=None, figsize=(1
             print(f"警告: 无法找到颜色映射 '{cmap}'，使用默认的白色到红色映射")
             cmap = create_white_to_red_cmap()
     
-    # 读取CSV文件（使用分块读取和进度条）
-    print(f"正在读取CSV文件: {csv_path}")
-    df = read_csv_with_progress(csv_path)
+    # 读取CSV文件（如果df未提供）
+    if df is None:
+        if csv_path is None:
+            raise ValueError("必须提供csv_path或df参数")
+        print(f"正在读取CSV文件: {csv_path}")
+        df = read_csv_with_progress(csv_path)
+    else:
+        df = df.copy()
     
     # 确定使用的力列（优先使用force_normal，与统计部分保持一致）
     force_column = 'force_normal' if 'force_normal' in df.columns else 'force_magnitude'
@@ -1002,9 +1016,21 @@ def plot_contact_grid(csv_path, output_path=None, bins=50, cmap=None, figsize=(1
     
     print(f"绘图使用力列: {force_column}")
     
+    # 首先过滤，只保留body1_name是'world'的数据
+    if 'body1_name' in df.columns:
+        before_filter = len(df)
+        df = df[df['body1_name'] == 'world'].copy()
+        after_filter = len(df)
+        if before_filter > after_filter:
+            print(f"过滤body1_name，只保留'world': {before_filter} -> {after_filter} 行")
+    
     # 检查是否是原始CSV（通过检查是否有contact_count列，或者文件名是否包含"clustered"）
-    csv_file = Path(csv_path)
-    is_clustered = 'clustered' in csv_file.stem.lower() or 'contact_count' in df.columns
+    if csv_path is not None:
+        csv_file = Path(csv_path)
+        is_clustered = 'clustered' in csv_file.stem.lower() or 'contact_count' in df.columns
+    else:
+        # 如果csv_path为None，只通过contact_count列判断
+        is_clustered = 'contact_count' in df.columns
     
     if not is_clustered:
         # 原始CSV：按位置分组，找到每个位置的最大力
@@ -1084,14 +1110,15 @@ def plot_contact_grid(csv_path, output_path=None, bins=50, cmap=None, figsize=(1
     plt.close()
 
 
-def plot_thickness_grid(csv_path, output_path=None, bins=50, cmap=None, figsize=(10, 8), 
+def plot_thickness_grid(csv_path=None, df=None, output_path=None, bins=50, cmap=None, figsize=(10, 8), 
                        density=0.4, target_force=3.0, margin_left=5.0, margin_right=5.0, 
                        margin_top=5.0, margin_bottom=5.0):
     """
     绘制保护层厚度的网格颜色图
     
     参数:
-        csv_path: CSV文件路径
+        csv_path: CSV文件路径（如果df为None则使用此参数读取）
+        df: 已读取的DataFrame（可选，如果提供则直接使用，不读取csv_path）
         output_path: 输出图片路径（可选，如果为None则显示图片）
         bins: 网格分辨率
         cmap: 颜色映射（如果为None，则使用橙色的默认映射）
@@ -1114,9 +1141,14 @@ def plot_thickness_grid(csv_path, output_path=None, bins=50, cmap=None, figsize=
             print(f"警告: 无法找到颜色映射 '{cmap}'，使用默认的离散橙色映射")
             cmap = create_discrete_orange_cmap()
     
-    # 读取CSV文件（使用分块读取和进度条）
-    print(f"正在读取CSV文件: {csv_path}")
-    df = read_csv_with_progress(csv_path)
+    # 读取CSV文件（如果df未提供）
+    if df is None:
+        if csv_path is None:
+            raise ValueError("必须提供csv_path或df参数")
+        print(f"正在读取CSV文件: {csv_path}")
+        df = read_csv_with_progress(csv_path)
+    else:
+        df = df.copy()
     
     # 确定使用的力列（优先使用force_normal，与统计部分保持一致）
     force_column = 'force_normal' if 'force_normal' in df.columns else 'force_magnitude'
@@ -1131,9 +1163,21 @@ def plot_thickness_grid(csv_path, output_path=None, bins=50, cmap=None, figsize=
     
     print(f"绘图使用力列: {force_column}")
     
+    # 首先过滤，只保留body1_name是'world'的数据
+    if 'body1_name' in df.columns:
+        before_filter = len(df)
+        df = df[df['body1_name'] == 'world'].copy()
+        after_filter = len(df)
+        if before_filter > after_filter:
+            print(f"过滤body1_name，只保留'world': {before_filter} -> {after_filter} 行")
+    
     # 检查是否是原始CSV（通过检查是否有contact_count列，或者文件名是否包含"clustered"）
-    csv_file = Path(csv_path)
-    is_clustered = 'clustered' in csv_file.stem.lower() or 'contact_count' in df.columns
+    if csv_path is not None:
+        csv_file = Path(csv_path)
+        is_clustered = 'clustered' in csv_file.stem.lower() or 'contact_count' in df.columns
+    else:
+        # 如果csv_path为None，只通过contact_count列判断
+        is_clustered = 'contact_count' in df.columns
     
     if not is_clustered:
         # 原始CSV：按位置分组，找到每个位置的最大力
@@ -1171,13 +1215,16 @@ def plot_thickness_grid(csv_path, output_path=None, bins=50, cmap=None, figsize=
         invalid_df['force_kn'] = invalid_df[force_column] / 1000.0
         invalid_df['thickness_mm'] = np.nan
         
-        # 添加身体部分列（使用多进程加速）
-        if len(invalid_df) > 1000:
-            n_jobs = max(1, cpu_count() - 2)
-            print(f"      正在分类无法满足要求的点（{len(invalid_df)} 行数据，使用 {n_jobs} 个进程）...")
-            invalid_df = apply_body_part_multiprocess(invalid_df, n_jobs=n_jobs)
+        # 添加身体部分列（使用多进程加速，如果还没有body_part列）
+        if 'body_part' not in invalid_df.columns:
+            if len(invalid_df) > 1000:
+                n_jobs = max(1, cpu_count() - 2)
+                print(f"      正在分类无法满足要求的点（{len(invalid_df)} 行数据，使用 {n_jobs} 个进程）...")
+                invalid_df = apply_body_part_multiprocess(invalid_df, n_jobs=n_jobs)
+            else:
+                invalid_df['body_part'] = invalid_df.apply(get_body_part, axis=1)
         else:
-            invalid_df['body_part'] = invalid_df.apply(get_body_part, axis=1)
+            print(f"      跳过分类（已有body_part列）")
         
         # 打印无法满足要求的点
         print(f"\n无法满足目标要求（目标力={target_force}kN，最大厚度24mm仍无法满足）的接触点:")
@@ -1305,14 +1352,15 @@ def plot_thickness_grid(csv_path, output_path=None, bins=50, cmap=None, figsize=
     plt.close()
 
 
-def plot_surface_area_grid(csv_path, stl_path, output_path=None, bins=50, cmap=None, figsize=(10, 8), 
+def plot_surface_area_grid(csv_path=None, df=None, stl_path=None, output_path=None, bins=50, cmap=None, figsize=(10, 8), 
                            margin_left=5.0, margin_right=5.0, margin_top=5.0, margin_bottom=5.0,
                            search_radius=0.01):
     """
     绘制表面积数据的网格颜色图
     
     参数:
-        csv_path: CSV文件路径
+        csv_path: CSV文件路径（如果df为None则使用此参数读取）
+        df: 已读取的DataFrame（可选，如果提供则直接使用，不读取csv_path）
         stl_path: STL文件路径
         output_path: 输出图片路径（可选，如果为None则显示图片）
         bins: 网格分辨率
@@ -1338,9 +1386,14 @@ def plot_surface_area_grid(csv_path, stl_path, output_path=None, bins=50, cmap=N
             print(f"警告: 无法找到颜色映射 '{cmap}'，使用默认的蓝色映射")
             cmap = create_blue_cmap()
     
-    # 读取CSV文件（使用分块读取和进度条）
-    print(f"正在读取CSV文件: {csv_path}")
-    df = read_csv_with_progress(csv_path)
+    # 读取CSV文件（如果df未提供）
+    if df is None:
+        if csv_path is None:
+            raise ValueError("必须提供csv_path或df参数")
+        print(f"正在读取CSV文件: {csv_path}")
+        df = read_csv_with_progress(csv_path)
+    else:
+        df = df.copy()
     
     # 确定使用的力列（优先使用force_normal，与统计部分保持一致）
     force_column = 'force_normal' if 'force_normal' in df.columns else 'force_magnitude'
@@ -1355,9 +1408,21 @@ def plot_surface_area_grid(csv_path, stl_path, output_path=None, bins=50, cmap=N
     
     print(f"绘图使用力列: {force_column}")
     
+    # 首先过滤，只保留body1_name是'world'的数据
+    if 'body1_name' in df.columns:
+        before_filter = len(df)
+        df = df[df['body1_name'] == 'world'].copy()
+        after_filter = len(df)
+        if before_filter > after_filter:
+            print(f"过滤body1_name，只保留'world': {before_filter} -> {after_filter} 行")
+    
     # 检查是否是原始CSV（通过检查是否有contact_count列，或者文件名是否包含"clustered"）
-    csv_file = Path(csv_path)
-    is_clustered = 'clustered' in csv_file.stem.lower() or 'contact_count' in df.columns
+    if csv_path is not None:
+        csv_file = Path(csv_path)
+        is_clustered = 'clustered' in csv_file.stem.lower() or 'contact_count' in df.columns
+    else:
+        # 如果csv_path为None，只通过contact_count列判断
+        is_clustered = 'contact_count' in df.columns
     
     if not is_clustered:
         # 原始CSV：按位置分组，找到每个位置的最大力
@@ -1491,14 +1556,15 @@ def plot_surface_area_grid(csv_path, stl_path, output_path=None, bins=50, cmap=N
     plt.close()
 
 
-def plot_pressure_grid(csv_path, stl_path, output_path=None, bins=50, cmap=None, figsize=(10, 8), 
+def plot_pressure_grid(csv_path=None, df=None, stl_path=None, output_path=None, bins=50, cmap=None, figsize=(10, 8), 
                        margin_left=5.0, margin_right=5.0, margin_top=5.0, margin_bottom=5.0,
                        search_radius=0.01):
     """
     绘制表面压强的网格颜色图（力/面积）
     
     参数:
-        csv_path: CSV文件路径
+        csv_path: CSV文件路径（如果df为None则使用此参数读取）
+        df: 已读取的DataFrame（可选，如果提供则直接使用，不读取csv_path）
         stl_path: STL文件路径
         output_path: 输出图片路径（可选，如果为None则显示图片）
         bins: 网格分辨率
@@ -1528,9 +1594,14 @@ def plot_pressure_grid(csv_path, stl_path, output_path=None, bins=50, cmap=None,
             n_bins = 256
             cmap = LinearSegmentedColormap.from_list('green_to_red', colors, N=n_bins)
     
-    # 读取CSV文件（使用分块读取和进度条）
-    print(f"正在读取CSV文件: {csv_path}")
-    df = read_csv_with_progress(csv_path)
+    # 读取CSV文件（如果df未提供）
+    if df is None:
+        if csv_path is None:
+            raise ValueError("必须提供csv_path或df参数")
+        print(f"正在读取CSV文件: {csv_path}")
+        df = read_csv_with_progress(csv_path)
+    else:
+        df = df.copy()
     
     # 确定使用的力列（优先使用force_normal，与统计部分保持一致）
     force_column = 'force_normal' if 'force_normal' in df.columns else 'force_magnitude'
@@ -1545,9 +1616,21 @@ def plot_pressure_grid(csv_path, stl_path, output_path=None, bins=50, cmap=None,
     
     print(f"绘图使用力列: {force_column}")
     
+    # 首先过滤，只保留body1_name是'world'的数据
+    if 'body1_name' in df.columns:
+        before_filter = len(df)
+        df = df[df['body1_name'] == 'world'].copy()
+        after_filter = len(df)
+        if before_filter > after_filter:
+            print(f"过滤body1_name，只保留'world': {before_filter} -> {after_filter} 行")
+    
     # 检查是否是原始CSV（通过检查是否有contact_count列，或者文件名是否包含"clustered"）
-    csv_file = Path(csv_path)
-    is_clustered = 'clustered' in csv_file.stem.lower() or 'contact_count' in df.columns
+    if csv_path is not None:
+        csv_file = Path(csv_path)
+        is_clustered = 'clustered' in csv_file.stem.lower() or 'contact_count' in df.columns
+    else:
+        # 如果csv_path为None，只通过contact_count列判断
+        is_clustered = 'contact_count' in df.columns
     
     if not is_clustered:
         # 原始CSV：按位置分组，找到每个位置的最大力
@@ -1763,6 +1846,8 @@ def main():
     print("\n" + "="*60)
     print("计算各身体部分的最大力和厚度")
     print("="*60)
+    df_stats = None
+    df_for_plotting = None
     try:
         # 读取CSV文件（使用分块读取以显示进度）
         print(f"[1/6] 正在读取CSV文件: {args.csv_path}")
@@ -1771,6 +1856,11 @@ def main():
         print(f"      文件大小: {file_size_mb:.2f} MB")
         df_stats = read_csv_with_progress(args.csv_path)
         print(f"      已读取 {len(df_stats)} 行数据")
+        
+        # 如果后续需要绘图，复用这个DataFrame
+        need_plotting = not (args.force_only and args.thickness_only and args.surface_only and args.pressure_only)
+        if need_plotting:
+            df_for_plotting = df_stats.copy()
         
         # 检查必要的列，优先使用force_normal（与violin_link_force.py保持一致）
         force_col = 'force_normal' if 'force_normal' in df_stats.columns else 'force_magnitude'
@@ -1784,18 +1874,55 @@ def main():
             csv_file = Path(args.csv_path)
             is_clustered = 'clustered' in csv_file.stem.lower() or 'contact_count' in df_stats.columns
             
+            # 首先过滤，只保留body1_name是'world'的数据
+            print(f"[3/6] 过滤body1_name，只保留'world'...")
+            if 'body1_name' in df_stats.columns:
+                before_filter = len(df_stats)
+                df_stats = df_stats[df_stats['body1_name'] == 'world'].copy()
+                after_filter = len(df_stats)
+                filtered_count = before_filter - after_filter
+                print(f"      过滤前: {before_filter} 行, 过滤后: {after_filter} 行")
+                if filtered_count > 0:
+                    print(f"      过滤掉 {filtered_count} 行（body1_name != 'world'）")
+            else:
+                print("      警告: 未找到body1_name列，跳过此过滤")
+            
+            # 统一分类一次（在过滤elbow之前，这样filter_elbow_forces可以复用）
+            print(f"[4/6] 分类身体部分...")
+            if 'body_part' not in df_stats.columns:
+                if len(df_stats) > 10000:
+                    n_jobs = max(1, cpu_count() - 2)
+                    print(f"      正在分类身体部分（{len(df_stats)} 行数据，使用 {n_jobs} 个进程）...")
+                else:
+                    n_jobs = 1
+                    print(f"      正在分类身体部分（{len(df_stats)} 行数据）...")
+                df_stats = apply_body_part_multiprocess(df_stats, n_jobs=n_jobs)
+            else:
+                print(f"      跳过分类（已有body_part列）")
+            
             # 对于所有CSV（原始和聚类后的），都应用elbow过滤
-            print(f"[3/6] 过滤elbow部位数据...")
+            print(f"[5/6] 过滤elbow部位数据...")
             df_stats = filter_elbow_forces(df_stats, force_column=force_col)
             
             # 如果是原始CSV，需要按位置分组找到最大力（保留所有列包括fail_type_info）
             # find_max_force_per_position 内部会处理头部和踝关节的过滤
+            # 注意：此时df_stats已经有body_part列了，find_max_force_per_position中的filter_elbow_forces会复用
             if not is_clustered:
-                print(f"[4/6] 按位置分组并找到最大力（包含过滤头部和踝关节）...")
+                print(f"[6/6] 按位置分组并找到最大力（包含过滤头部和踝关节）...")
                 df_stats = find_max_force_per_position(df_stats, force_column=force_col)
+                # find_max_force_per_position返回的DataFrame应该还保留body_part列（如果filter_elbow_forces没有删除的话）
+                # 但为了安全，我们检查一下，如果没有就重新分类
+                if 'body_part' not in df_stats.columns:
+                    print(f"      警告: find_max_force_per_position后丢失了body_part列，重新分类...")
+                    if len(df_stats) > 10000:
+                        n_jobs = max(1, cpu_count() - 2)
+                        df_stats = apply_body_part_multiprocess(df_stats, n_jobs=n_jobs)
+                    else:
+                        df_stats = apply_body_part_multiprocess(df_stats, n_jobs=1)
             
             # 计算统计信息
-            print(f"[6/6] 计算各身体部分的统计信息...")
+            # 注意：此时df_stats应该有body_part列了，calculate_part_statistics会复用
+            print(f"[7/7] 计算各身体部分的统计信息...")
             part_stats, unsatisfied_points = calculate_part_statistics(df_stats, density=density, target_force=target_force, force_column=force_col)
             
             if part_stats is not None and len(part_stats) > 0:
@@ -1857,6 +1984,17 @@ def main():
         import traceback
         traceback.print_exc()
     
+    # 如果统计部分没有读取（或者需要重新读取用于绘图），则读取CSV文件
+    if df_for_plotting is None:
+        need_plotting = not (args.force_only and args.thickness_only and args.surface_only and args.pressure_only)
+        if need_plotting:
+            print("\n" + "="*60)
+            print("读取CSV文件（供绘图使用）")
+            print("="*60)
+            print(f"正在读取CSV文件: {args.csv_path}")
+            df_for_plotting = read_csv_with_progress(args.csv_path)
+            print(f"已读取 {len(df_for_plotting)} 行数据")
+    
     # 绘制力图
     if not args.thickness_only and not args.surface_only and not args.pressure_only:
         if args.output is None:
@@ -1869,8 +2007,9 @@ def main():
             print("绘制接触力图")
             print("="*60)
             plot_contact_grid(
-                args.csv_path,
-                str(force_output),
+                df=df_for_plotting.copy() if df_for_plotting is not None else None,
+                csv_path=args.csv_path if df_for_plotting is None else None,
+                output_path=str(force_output),
                 bins=args.bins,
                 cmap=args.cmap,
                 figsize=force_figsize,
@@ -1896,8 +2035,9 @@ def main():
             print("绘制保护层厚度图")
             print("="*60)
             plot_thickness_grid(
-                args.csv_path,
-                str(thickness_output),
+                df=df_for_plotting.copy() if df_for_plotting is not None else None,
+                csv_path=args.csv_path if df_for_plotting is None else None,
+                output_path=str(thickness_output),
                 bins=args.bins,
                 cmap=args.cmap,
                 figsize=thickness_figsize,
@@ -1925,9 +2065,10 @@ def main():
             print("绘制表面积图")
             print("="*60)
             plot_surface_area_grid(
-                args.csv_path,
-                str(stl_path),
-                str(surface_output),
+                df=df_for_plotting.copy() if df_for_plotting is not None else None,
+                csv_path=args.csv_path if df_for_plotting is None else None,
+                stl_path=str(stl_path),
+                output_path=str(surface_output),
                 bins=args.bins,
                 cmap=args.cmap,
                 figsize=surface_figsize,
@@ -1954,9 +2095,10 @@ def main():
             print("绘制表面压强图")
             print("="*60)
             plot_pressure_grid(
-                args.csv_path,
-                str(stl_path),
-                str(pressure_output),
+                df=df_for_plotting.copy() if df_for_plotting is not None else None,
+                csv_path=args.csv_path if df_for_plotting is None else None,
+                stl_path=str(stl_path),
+                output_path=str(pressure_output),
                 bins=args.bins,
                 cmap=args.cmap,
                 figsize=pressure_figsize,
