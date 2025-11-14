@@ -1016,29 +1016,36 @@ def plot_contact_grid(csv_path=None, df=None, output_path=None, bins=50, cmap=No
     
     print(f"绘图使用力列: {force_column}")
     
-    # 首先过滤，只保留body1_name是'world'的数据
-    if 'body1_name' in df.columns:
-        before_filter = len(df)
-        df = df[df['body1_name'] == 'world'].copy()
-        after_filter = len(df)
-        if before_filter > after_filter:
-            print(f"过滤body1_name，只保留'world': {before_filter} -> {after_filter} 行")
+    # 检查数据是否已经处理过（如果已经有body_part列，且数据行数较少，说明已经处理过）
+    # 原始数据通常有数千万行，处理后会减少到数百万行
+    is_already_processed = 'body_part' in df.columns and len(df) < 5000000
     
-    # 检查是否是原始CSV（通过检查是否有contact_count列，或者文件名是否包含"clustered"）
-    if csv_path is not None:
-        csv_file = Path(csv_path)
-        is_clustered = 'clustered' in csv_file.stem.lower() or 'contact_count' in df.columns
+    if not is_already_processed:
+        # 首先过滤，只保留body1_name是'world'的数据
+        if 'body1_name' in df.columns:
+            before_filter = len(df)
+            df = df[df['body1_name'] == 'world'].copy()
+            after_filter = len(df)
+            if before_filter > after_filter:
+                print(f"过滤body1_name，只保留'world': {before_filter} -> {after_filter} 行")
+        
+        # 检查是否是原始CSV（通过检查是否有contact_count列，或者文件名是否包含"clustered"）
+        if csv_path is not None:
+            csv_file = Path(csv_path)
+            is_clustered = 'clustered' in csv_file.stem.lower() or 'contact_count' in df.columns
+        else:
+            # 如果csv_path为None，只通过contact_count列判断
+            is_clustered = 'contact_count' in df.columns
+        
+        if not is_clustered:
+            # 原始CSV：按位置分组，找到每个位置的最大力
+            df = find_max_force_per_position(df, force_column=force_column)
+        else:
+            print("检测到聚类后的CSV文件，应用过滤...")
+            # 对于聚类后的CSV，也需要应用elbow过滤
+            df = filter_elbow_forces(df, force_column=force_column)
     else:
-        # 如果csv_path为None，只通过contact_count列判断
-        is_clustered = 'contact_count' in df.columns
-    
-    if not is_clustered:
-        # 原始CSV：按位置分组，找到每个位置的最大力
-        df = find_max_force_per_position(df, force_column=force_column)
-    else:
-        print("检测到聚类后的CSV文件，应用过滤...")
-        # 对于聚类后的CSV，也需要应用elbow过滤
-        df = filter_elbow_forces(df, force_column=force_column)
+        print(f"数据已处理过（{len(df)} 行），跳过重复处理")
     
     # 提取数据
     z = df['robot_frame_z'].values
@@ -1163,29 +1170,36 @@ def plot_thickness_grid(csv_path=None, df=None, output_path=None, bins=50, cmap=
     
     print(f"绘图使用力列: {force_column}")
     
-    # 首先过滤，只保留body1_name是'world'的数据
-    if 'body1_name' in df.columns:
-        before_filter = len(df)
-        df = df[df['body1_name'] == 'world'].copy()
-        after_filter = len(df)
-        if before_filter > after_filter:
-            print(f"过滤body1_name，只保留'world': {before_filter} -> {after_filter} 行")
+    # 检查数据是否已经处理过（如果已经有body_part列，且数据行数较少，说明已经处理过）
+    # 原始数据通常有数千万行，处理后会减少到数百万行
+    is_already_processed = 'body_part' in df.columns and len(df) < 5000000
     
-    # 检查是否是原始CSV（通过检查是否有contact_count列，或者文件名是否包含"clustered"）
-    if csv_path is not None:
-        csv_file = Path(csv_path)
-        is_clustered = 'clustered' in csv_file.stem.lower() or 'contact_count' in df.columns
+    if not is_already_processed:
+        # 首先过滤，只保留body1_name是'world'的数据
+        if 'body1_name' in df.columns:
+            before_filter = len(df)
+            df = df[df['body1_name'] == 'world'].copy()
+            after_filter = len(df)
+            if before_filter > after_filter:
+                print(f"过滤body1_name，只保留'world': {before_filter} -> {after_filter} 行")
+        
+        # 检查是否是原始CSV（通过检查是否有contact_count列，或者文件名是否包含"clustered"）
+        if csv_path is not None:
+            csv_file = Path(csv_path)
+            is_clustered = 'clustered' in csv_file.stem.lower() or 'contact_count' in df.columns
+        else:
+            # 如果csv_path为None，只通过contact_count列判断
+            is_clustered = 'contact_count' in df.columns
+        
+        if not is_clustered:
+            # 原始CSV：按位置分组，找到每个位置的最大力
+            df = find_max_force_per_position(df, force_column=force_column)
+        else:
+            print("检测到聚类后的CSV文件，应用过滤...")
+            # 对于聚类后的CSV，也需要应用elbow过滤
+            df = filter_elbow_forces(df, force_column=force_column)
     else:
-        # 如果csv_path为None，只通过contact_count列判断
-        is_clustered = 'contact_count' in df.columns
-    
-    if not is_clustered:
-        # 原始CSV：按位置分组，找到每个位置的最大力
-        df = find_max_force_per_position(df, force_column=force_column)
-    else:
-        print("检测到聚类后的CSV文件，应用过滤...")
-        # 对于聚类后的CSV，也需要应用elbow过滤
-        df = filter_elbow_forces(df, force_column=force_column)
+        print(f"数据已处理过（{len(df)} 行），跳过重复处理")
     
     # 提取数据
     z = df['robot_frame_z'].values
@@ -1408,29 +1422,36 @@ def plot_surface_area_grid(csv_path=None, df=None, stl_path=None, output_path=No
     
     print(f"绘图使用力列: {force_column}")
     
-    # 首先过滤，只保留body1_name是'world'的数据
-    if 'body1_name' in df.columns:
-        before_filter = len(df)
-        df = df[df['body1_name'] == 'world'].copy()
-        after_filter = len(df)
-        if before_filter > after_filter:
-            print(f"过滤body1_name，只保留'world': {before_filter} -> {after_filter} 行")
+    # 检查数据是否已经处理过（如果已经有body_part列，且数据行数较少，说明已经处理过）
+    # 原始数据通常有数千万行，处理后会减少到数百万行
+    is_already_processed = 'body_part' in df.columns and len(df) < 5000000
     
-    # 检查是否是原始CSV（通过检查是否有contact_count列，或者文件名是否包含"clustered"）
-    if csv_path is not None:
-        csv_file = Path(csv_path)
-        is_clustered = 'clustered' in csv_file.stem.lower() or 'contact_count' in df.columns
+    if not is_already_processed:
+        # 首先过滤，只保留body1_name是'world'的数据
+        if 'body1_name' in df.columns:
+            before_filter = len(df)
+            df = df[df['body1_name'] == 'world'].copy()
+            after_filter = len(df)
+            if before_filter > after_filter:
+                print(f"过滤body1_name，只保留'world': {before_filter} -> {after_filter} 行")
+        
+        # 检查是否是原始CSV（通过检查是否有contact_count列，或者文件名是否包含"clustered"）
+        if csv_path is not None:
+            csv_file = Path(csv_path)
+            is_clustered = 'clustered' in csv_file.stem.lower() or 'contact_count' in df.columns
+        else:
+            # 如果csv_path为None，只通过contact_count列判断
+            is_clustered = 'contact_count' in df.columns
+        
+        if not is_clustered:
+            # 原始CSV：按位置分组，找到每个位置的最大力
+            df = find_max_force_per_position(df, force_column=force_column)
+        else:
+            print("检测到聚类后的CSV文件，应用过滤...")
+            # 对于聚类后的CSV，也需要应用elbow过滤
+            df = filter_elbow_forces(df, force_column=force_column)
     else:
-        # 如果csv_path为None，只通过contact_count列判断
-        is_clustered = 'contact_count' in df.columns
-    
-    if not is_clustered:
-        # 原始CSV：按位置分组，找到每个位置的最大力
-        df = find_max_force_per_position(df, force_column=force_column)
-    else:
-        print("检测到聚类后的CSV文件，应用过滤...")
-        # 对于聚类后的CSV，也需要应用elbow过滤
-        df = filter_elbow_forces(df, force_column=force_column)
+        print(f"数据已处理过（{len(df)} 行），跳过重复处理")
     
     # 提取数据
     z = df['robot_frame_z'].values
@@ -1616,29 +1637,36 @@ def plot_pressure_grid(csv_path=None, df=None, stl_path=None, output_path=None, 
     
     print(f"绘图使用力列: {force_column}")
     
-    # 首先过滤，只保留body1_name是'world'的数据
-    if 'body1_name' in df.columns:
-        before_filter = len(df)
-        df = df[df['body1_name'] == 'world'].copy()
-        after_filter = len(df)
-        if before_filter > after_filter:
-            print(f"过滤body1_name，只保留'world': {before_filter} -> {after_filter} 行")
+    # 检查数据是否已经处理过（如果已经有body_part列，且数据行数较少，说明已经处理过）
+    # 原始数据通常有数千万行，处理后会减少到数百万行
+    is_already_processed = 'body_part' in df.columns and len(df) < 5000000
     
-    # 检查是否是原始CSV（通过检查是否有contact_count列，或者文件名是否包含"clustered"）
-    if csv_path is not None:
-        csv_file = Path(csv_path)
-        is_clustered = 'clustered' in csv_file.stem.lower() or 'contact_count' in df.columns
+    if not is_already_processed:
+        # 首先过滤，只保留body1_name是'world'的数据
+        if 'body1_name' in df.columns:
+            before_filter = len(df)
+            df = df[df['body1_name'] == 'world'].copy()
+            after_filter = len(df)
+            if before_filter > after_filter:
+                print(f"过滤body1_name，只保留'world': {before_filter} -> {after_filter} 行")
+        
+        # 检查是否是原始CSV（通过检查是否有contact_count列，或者文件名是否包含"clustered"）
+        if csv_path is not None:
+            csv_file = Path(csv_path)
+            is_clustered = 'clustered' in csv_file.stem.lower() or 'contact_count' in df.columns
+        else:
+            # 如果csv_path为None，只通过contact_count列判断
+            is_clustered = 'contact_count' in df.columns
+        
+        if not is_clustered:
+            # 原始CSV：按位置分组，找到每个位置的最大力
+            df = find_max_force_per_position(df, force_column=force_column)
+        else:
+            print("检测到聚类后的CSV文件，应用过滤...")
+            # 对于聚类后的CSV，也需要应用elbow过滤
+            df = filter_elbow_forces(df, force_column=force_column)
     else:
-        # 如果csv_path为None，只通过contact_count列判断
-        is_clustered = 'contact_count' in df.columns
-    
-    if not is_clustered:
-        # 原始CSV：按位置分组，找到每个位置的最大力
-        df = find_max_force_per_position(df, force_column=force_column)
-    else:
-        print("检测到聚类后的CSV文件，应用过滤...")
-        # 对于聚类后的CSV，也需要应用elbow过滤
-        df = filter_elbow_forces(df, force_column=force_column)
+        print(f"数据已处理过（{len(df)} 行），跳过重复处理")
     
     # 提取数据
     z = df['robot_frame_z'].values
@@ -1857,11 +1885,6 @@ def main():
         df_stats = read_csv_with_progress(args.csv_path)
         print(f"      已读取 {len(df_stats)} 行数据")
         
-        # 如果后续需要绘图，复用这个DataFrame
-        need_plotting = not (args.force_only and args.thickness_only and args.surface_only and args.pressure_only)
-        if need_plotting:
-            df_for_plotting = df_stats.copy()
-        
         # 检查必要的列，优先使用force_normal（与violin_link_force.py保持一致）
         force_col = 'force_normal' if 'force_normal' in df_stats.columns else 'force_magnitude'
         required_cols = ['body2_name', force_col]
@@ -1924,6 +1947,12 @@ def main():
             # 注意：此时df_stats应该有body_part列了，calculate_part_statistics会复用
             print(f"[7/7] 计算各身体部分的统计信息...")
             part_stats, unsatisfied_points = calculate_part_statistics(df_stats, density=density, target_force=target_force, force_column=force_col)
+            
+            # 如果后续需要绘图，在统计计算完成后复制已处理好的数据
+            need_plotting = not (args.force_only and args.thickness_only and args.surface_only and args.pressure_only)
+            if need_plotting:
+                # 此时df_stats已经经过所有过滤和处理，可以直接用于绘图
+                df_for_plotting = df_stats.copy()
             
             if part_stats is not None and len(part_stats) > 0:
                 print("\n各身体部分的最大力和厚度统计:")
