@@ -173,12 +173,12 @@ def read_contact_data(csv_path):
     读取接触数据 CSV 文件，支持分块读取和进度条显示（单进程）
     返回包含 body2_name, force_normal, group_name 的 DataFrame
     """
-    print(f"[步骤 1/6] 检查文件是否存在...")
+    print(f"[步骤 1/7] 检查文件是否存在...")
     if not Path(csv_path).exists():
         raise FileNotFoundError(f"File not found: {csv_path}")
     print(f"  ✓ 文件存在: {csv_path}")
     
-    print(f"[步骤 2/6] 读取 CSV 文件...")
+    print(f"[步骤 2/7] 读取 CSV 文件...")
     file_size = os.path.getsize(csv_path)
     file_size_mb = file_size / (1024 * 1024)
     print(f"  文件大小: {file_size_mb:.2f} MB")
@@ -278,7 +278,7 @@ def read_contact_data(csv_path):
         print(f"  ✓ 统一列名: normal_force -> force_normal")
     
     # Clean data
-    print(f"[步骤 3/6] 清理数据...")
+    print(f"[步骤 3/7] 清理数据...")
     cols_to_keep = ["body2_name", "force_normal"]
     if "body1_name" in data.columns:
         cols_to_keep.append("body1_name")
@@ -310,15 +310,28 @@ def read_contact_data(csv_path):
     df = df.dropna(subset=["body2_name", "force_normal"])
     print(f"  清理前: {df_before} 行, 清理后: {len(df)} 行")
     
+    # Filter body1_name == 'world' first (before other filters)
+    print(f"[步骤 4/6] 过滤body1_name，只保留'world'...")
+    if 'body1_name' in df.columns:
+        df_before_world_filter = len(df)
+        df = df[df['body1_name'] == 'world'].copy()
+        df_after_world_filter = len(df)
+        filtered_count = df_before_world_filter - df_after_world_filter
+        print(f"  过滤前: {df_before_world_filter} 行, 过滤后: {df_after_world_filter} 行")
+        if filtered_count > 0:
+            print(f"  过滤掉 {filtered_count} 行（body1_name != 'world'）")
+    else:
+        print("  警告: 未找到body1_name列，跳过此过滤")
+    
     # Filter out ankle and head
-    print(f"[步骤 4/6] 过滤 ankle 和 head...")
+    print(f"[步骤 5/7] 过滤 ankle 和 head...")
     df_before_filter = len(df)
     mask_keep = ~df["body2_name"].str.contains(r"ankle|head", flags=re.IGNORECASE, na=False)
     df = df.loc[mask_keep].copy()
     print(f"  过滤前: {df_before_filter} 行, 过滤后: {len(df)} 行")
     
-    # Group links using classify_body_part module
-    print(f"[步骤 5/6] 根据规则对 link 进行分组（使用 classify_body_part 模块）...")
+    # Group links using classify_body_part module (needed before filtering elbow)
+    print(f"[步骤 6/7] 根据规则对 link 进行分组（使用 classify_body_part 模块）...")
     n_jobs = max(1, cpu_count() - 2) if len(df) > 10000 else 1
     if n_jobs > 1:
         print(f"  正在分类身体部分（{len(df)} 行数据，使用 {n_jobs} 个进程）...")
@@ -326,6 +339,30 @@ def read_contact_data(csv_path):
         print(f"  正在分类身体部分（{len(df)} 行数据）...")
     df = apply_group_name_multiprocess(df, n_jobs=n_jobs)
     print(f"  分组完成，共 {df['group_name'].nunique()} 个不同的组")
+    
+    # Filter out elbow forces (z坐标在0.6-0.85m之间，力大于10kN)
+    print(f"[步骤 7/7] 过滤elbow部位数据...")
+    if 'group_name' in df.columns and 'robot_frame_z' in df.columns and 'force_normal' in df.columns:
+        df_before_elbow_filter = len(df)
+        # 识别elbow部位（group_name为'Elbow'，不区分左右）
+        elbow_mask = df['group_name'] == 'Elbow'
+        # 检查z坐标是否在0.6-0.85m之间
+        z_mask = (df['robot_frame_z'] >= 0.6) & (df['robot_frame_z'] <= 0.85)
+        # 检查力是否大于10kN（10000N）
+        force_mask = df['force_normal'] > 10000
+        # 组合条件：elbow部位 AND z坐标在0.6-0.85m之间 AND 力大于10kN
+        filter_mask = elbow_mask & z_mask & force_mask
+        # 过滤掉满足条件的数据
+        df = df[~filter_mask]
+        df_after_elbow_filter = len(df)
+        filtered_count = df_before_elbow_filter - df_after_elbow_filter
+        if filtered_count > 0:
+            print(f"  过滤掉z坐标在0.6-0.85m之间的elbow部位大于10kN的力: {filtered_count} 行")
+            print(f"  过滤前: {df_before_elbow_filter} 行, 过滤后: {df_after_elbow_filter} 行")
+        else:
+            print(f"  未找到需要过滤的elbow部位数据")
+    else:
+        print(f"  警告: 缺少必要的列（group_name, robot_frame_z, force_normal），跳过elbow过滤")
     
     # Show group statistics
     group_counts = df["group_name"].value_counts().sort_index()
@@ -336,7 +373,7 @@ def read_contact_data(csv_path):
     return df
 
 
-def plot_force_normal_violin(csv_path, figsize=(11.5, 5), dpi=300, output_path=None, force_max=None, force_min_kN=0.0, use_quantile=True):
+def plot_force_normal_violin(csv_path, figsize=(11.5, 5), dpi=300, output_path=None, force_max=None, force_min_kN=0.0, use_quantile=True, margin_left=12.0, margin_bottom=15.0, margin_right=1.0, margin_top=10.0):
     """
     从接触数据 CSV 文件读入数据（body2_name 和 force_normal），
     对 body2_name 进行分类后绘制小提琴图。
@@ -351,11 +388,15 @@ def plot_force_normal_violin(csv_path, figsize=(11.5, 5), dpi=300, output_path=N
         force_min_kN: force_kN 的最小值，小于此值的数据将被过滤（默认 0.0，单位：kN）
         use_quantile: 如果为 True，使用99分位数设置y轴范围（更好地显示中位数附近的数据）；
                       如果为 False，使用实际最大值（显示所有数据，但可能有极值压缩）
+        margin_left: 左边距（百分比，默认 12.0）
+        margin_bottom: 下边距（百分比，默认 15.0）
+        margin_right: 右边距（百分比，默认 1.0）
+        margin_top: 上边距（百分比，默认 10.0）
     """
     # 将厘米转换为英寸（matplotlib 使用英寸）
     figsize_inches = (figsize[0] / 2.54, figsize[1] / 2.54)
     
-    # 读取数据
+    # 读取数据（read_contact_data 已经完成了所有过滤和分类，只执行一次）
     print(f"[步骤 1/7] 读取接触数据...")
     data = read_contact_data(csv_path)
     
@@ -404,8 +445,16 @@ def plot_force_normal_violin(csv_path, figsize=(11.5, 5), dpi=300, output_path=N
     fig.patch.set_facecolor('none')
     fig.patch.set_alpha(0)
     
-    # 设置页边距和坐标轴位置
-    ax = fig.add_axes([0.12, 0.15, 0.87, 0.75])
+    # 设置页边距和坐标轴位置（使用参数化的边距）
+    # 将百分比转换为0-1之间的值
+    left = margin_left / 100.0
+    bottom = margin_bottom / 100.0
+    right_margin = margin_right / 100.0
+    top_margin = margin_top / 100.0
+    # 计算宽度和高度
+    width = 1.0 - left - right_margin
+    height = 1.0 - bottom - top_margin
+    ax = fig.add_axes([left, bottom, width, height])
     # 设置 axes 背景透明
     ax.patch.set_facecolor('none')
     ax.patch.set_alpha(0)
@@ -1203,5 +1252,9 @@ if __name__ == "__main__":
         output_path=None,  # 自动生成文件名：{csv文件名}_force_normal_violin.png
         force_max=None,  # 可选：过滤超过此值的 force_normal，例如 force_max=10000（单位：N）
         force_min_kN=FORCE_MIN_KN,  # 过滤小于此值的力数据（单位：kN）
-        use_quantile=USE_QUANTILE  # y轴范围设置方式
+        use_quantile=USE_QUANTILE,  # y轴范围设置方式
+        margin_left=8.0,  # 左边距（百分比）
+        margin_bottom=15.0,  # 下边距（百分比）
+        margin_right=1.0,  # 右边距（百分比）
+        margin_top=8.0  # 上边距（百分比）
     )
