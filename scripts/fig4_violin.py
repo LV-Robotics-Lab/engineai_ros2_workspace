@@ -423,10 +423,10 @@ def plot_force_normal_violin(csv_path, figsize=(11.5, 5), dpi=300, output_path=N
     # 定义分组排序顺序（不区分左右）
     def group_sort_key(group_name):
         order = {
-            "Shoulder": 1,
-            "Elbow": 2,
-            "Torso": 3,
-            "Hip": 4,
+            "Shoulder": 2,
+            "Elbow": 4,
+            "Torso": 1,
+            "Hip": 3,
             "Knee": 5,
         }
         return order.get(group_name, 99)
@@ -531,7 +531,7 @@ def plot_force_normal_violin(csv_path, figsize=(11.5, 5), dpi=300, output_path=N
     print(f"[步骤 3.7/7] 计算小提琴图宽度（根据数据量）...")
     if len(group_counts) > 0:
         max_count = max(group_counts.values())
-        base_width = 0.6  # 基础宽度
+        base_width = 1.0  # 基础宽度
         violin_widths = []
         for group in group_labels:
             count = group_counts.get(group, 0)
@@ -564,7 +564,7 @@ def plot_force_normal_violin(csv_path, figsize=(11.5, 5), dpi=300, output_path=N
         pc.set_facecolor(color)
         pc.set_alpha(0.7)
         pc.set_edgecolor(edge_color)
-        pc.set_linewidth(1)  # 轮廓线宽度1pt
+        pc.set_linewidth(0)  # 轮廓线宽度1pt
     
     # 绘制四分位数线
     print(f"[步骤 5/7] 绘制四分位数线和中位数点...")
@@ -574,9 +574,9 @@ def plot_force_normal_violin(csv_path, figsize=(11.5, 5), dpi=300, output_path=N
             quartiles = np.percentile(group_data, [25, 50, 75])
             # 绘制四分位数线
             ax.plot([pos, pos], [quartiles[0], quartiles[2]], 
-                   color=edge_color, linewidth=0.5, zorder=2)
+                   color=edge_color, linewidth=2, zorder=2)
             ax.plot([pos, pos], [quartiles[1], quartiles[1]], 
-                   color=edge_color, linewidth=0.5, zorder=2)
+                   color=edge_color, linewidth=2, zorder=2)
             # 绘制中位数点（白圈）
             median_val = quartiles[1]
             ax.scatter(pos, median_val, marker='o', color='white', 
@@ -611,8 +611,8 @@ def plot_force_normal_violin(csv_path, figsize=(11.5, 5), dpi=300, output_path=N
     ax.spines['right'].set_visible(False)
     
     # 设置 y 轴范围和刻度（单位：kN）
-    # y轴最小值从过滤值开始
-    y_min = force_min_kN
+    # y轴最小值固定为0，以显示0刻度
+    y_min = 0.0
     y_min_data = data['force_kN'].min() if len(data) > 0 else force_min_kN
     y_max_data = data['force_kN'].max() if len(data) > 0 else 10.0
     
@@ -620,11 +620,11 @@ def plot_force_normal_violin(csv_path, figsize=(11.5, 5), dpi=300, output_path=N
         # 使用99分位数来设置y轴范围，这样可以更好地显示中位数附近的数据，
         # 让小提琴图的形状和分布细节更清晰可见
         y_max_99 = data['force_kN'].quantile(0.99) if len(data) > 0 else 10.0
-        y_max = max(y_max_99 * 1.1, y_min + 5.0)
+        y_max = max(y_max_99 * 1.1, 30.0)  # 至少显示到30
         method_str = "99分位数"
     else:
         # 使用实际的最大值，确保显示所有数据
-        y_max = max(y_max_data * 1.1, y_min + 5.0)
+        y_max = max(y_max_data * 1.1, 30.0)  # 至少显示到30
         method_str = "实际最大值"
         y_max_99 = None
     
@@ -638,26 +638,8 @@ def plot_force_normal_violin(csv_path, figsize=(11.5, 5), dpi=300, output_path=N
         pct_outliers = num_outliers / len(data) * 100
         print(f"  警告: 有 {num_outliers} 个数据点 ({pct_outliers:.2f}%) 超出y轴范围")
     
-    # 根据数据范围自动设置y轴刻度（从y_min开始）
-    y_range = y_max - y_min
-    if y_range <= 5:
-        y_ticks = np.linspace(y_min, y_max, 5)
-    elif y_range <= 10:
-        # 从y_min开始，步长为2
-        step = 2.0
-        y_ticks = np.arange(y_min, y_max + step, step)
-    elif y_range <= 20:
-        # 从y_min开始，步长为5
-        step = 5.0
-        y_ticks = np.arange(y_min, y_max + step, step)
-    elif y_range <= 50:
-        # 从y_min开始，步长为10
-        step = 10.0
-        y_ticks = np.arange(y_min, y_max + step, step)
-    else:
-        # 对于更大的范围，使用更灵活的刻度
-        y_ticks = np.linspace(y_min, y_max, 5)
-    y_ticks = [int(t) if t == int(t) else round(t, 1) for t in y_ticks]
+    # 设置固定的y轴刻度：0, 5, 15, 25, 30
+    y_ticks = [0, 5, 15, 25, 35]
     print(f"  y轴刻度: {y_ticks}")
     ax.set_yticks(y_ticks)
     ax.set_yticklabels(y_ticks)
@@ -692,7 +674,7 @@ def plot_force_normal_violin(csv_path, figsize=(11.5, 5), dpi=300, output_path=N
     print("✓ 所有步骤完成！")
 
 
-def plot_pixel_pressures_violin(csv_path, figsize=(11.5, 5), dpi=300, group_by='body_part', hue='status', output_path=None):
+def plot_pixel_pressures_violin(csv_path, figsize=(12.6, 6), dpi=300, group_by='body_part', hue='status', output_path=None):
     """
     从像素力 CSV 文件读入数据，绘制分组小提琴图。
     假设 CSV 文件包含 body_part, status, force_normal 或 force 列（单位N）。
@@ -773,7 +755,7 @@ def plot_pixel_pressures_violin(csv_path, figsize=(11.5, 5), dpi=300, group_by='
     # - 下边距：15% (bottom = 0.15)
     # - 上边距：10% (top = 1 - bottom - height = 1 - 0.15 - 0.75 = 0.10)
     # left=0.12, bottom=0.15, width=0.87, height=0.75
-    ax = fig.add_axes([0.30, 0.15, 0.70, 0.75])
+    ax = fig.add_axes([0.33, 0.15, 0.66, 0.75])
     # 设置 axes 背景透明
     ax.patch.set_facecolor('none')
     ax.patch.set_alpha(0)
@@ -1237,7 +1219,7 @@ if __name__ == "__main__":
     
     # ===== 配置参数 =====
     # 过滤小于此值的力数据（单位：kN），y轴最小值将从该值开始
-    FORCE_MIN_KN = 5.0  # 过滤小于2kN的数据
+    FORCE_MIN_KN = 5  # 过滤小于2kN的数据
     
     # y轴范围设置方式：
     # - True: 使用99分位数（更好地显示中位数附近的数据，小提琴图细节更清晰）
@@ -1247,13 +1229,13 @@ if __name__ == "__main__":
     csv_path = "/home/wang22/engineai/engineai_ros2_workspace/logs/4in1/merged_4in1.csv"
     plot_force_normal_violin(
         csv_path=csv_path,
-        figsize=(13.5, 3.85),
+        figsize=(12.6, 6),
         dpi=300,
         output_path=None,  # 自动生成文件名：{csv文件名}_force_normal_violin.png
         force_max=None,  # 可选：过滤超过此值的 force_normal，例如 force_max=10000（单位：N）
         force_min_kN=FORCE_MIN_KN,  # 过滤小于此值的力数据（单位：kN）
         use_quantile=USE_QUANTILE,  # y轴范围设置方式
-        margin_left=8.0,  # 左边距（百分比）
+        margin_left=10,  # 左边距（百分比）
         margin_bottom=15.0,  # 下边距（百分比）
         margin_right=1.0,  # 右边距（百分比）
         margin_top=8.0  # 上边距（百分比）
