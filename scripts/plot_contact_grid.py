@@ -138,11 +138,11 @@ def create_discrete_orange_cmap():
     # 定义5种颜色：从白色到深橙色
     # 0: 白色, 6: 浅橙, 12: 中浅橙, 18: 中橙, 24: 深橙
     colors = [
-        (1.0, 1.0, 1.0),      # 0 - 白色
-        (1.0, 0.9, 0.7),      # 6 - 浅橙
-        (1.0, 0.8, 0.5),      # 12 - 中浅橙
-        (1.0, 0.65, 0.25),    # 18 - 中橙
-        (1.0, 0.55, 0.0)      # 24 - 深橙
+        (1.0, 1.0, 1.0),      # 0 - 白色 #FFFFFF
+        (1.0, 0.9, 0.7),      # 6 - 浅橙 #FFE6B3
+        (1.0, 0.8, 0.5),      # 12 - 中浅橙 #FFCC80
+        (1.0, 0.65, 0.25),    # 18 - 中橙 #FFA640
+        (1.0, 0.55, 0.0)      # 24 - 深橙 #FF8C00
     ]
     # 使用 ListedColormap 创建真正的离散颜色映射
     cmap = ListedColormap(colors, name='discrete_orange')
@@ -371,6 +371,78 @@ def round_thickness_to_standard(thicknesses):
         rounded[valid_mask] = standard_values[nearest_indices]
     
     return rounded
+
+
+def upgrade_thickness_one_level(thicknesses):
+    """
+    将厚度值提升一个级别
+    
+    参数:
+        thicknesses: 厚度数组（单位：mm），可能包含nan，值应该是标准值：0, 6, 12, 18, 24
+    
+    返回:
+        upgraded_thicknesses: 提升后的厚度数组
+        提升规则：0->6, 6->12, 12->18, 18->24, 24->24, nan->nan
+    """
+    # 标准厚度值
+    standard_values = np.array([0, 6, 12, 18, 24])
+    # 提升后的厚度值
+    upgraded_values = np.array([6, 12, 18, 24, 24])
+    
+    # 创建结果数组，保持原始数据类型
+    upgraded = thicknesses.copy()
+    
+    # 处理nan值
+    valid_mask = ~np.isnan(thicknesses)
+    
+    if np.any(valid_mask):
+        valid_thicknesses = thicknesses[valid_mask]
+        # 使用向量化操作找到每个值对应的标准值索引
+        # 计算每个有效值到所有标准值的距离
+        distances = np.abs(valid_thicknesses[:, None] - standard_values[None, :])
+        # 找到每个值最接近的标准值索引
+        nearest_indices = np.argmin(distances, axis=1)
+        # 使用提升后的值
+        upgraded[valid_mask] = upgraded_values[nearest_indices]
+    
+    return upgraded
+
+
+def set_elbow_thickness_to_6mm(thicknesses, df, z_values):
+    """
+    将elbow和shoulder部位z坐标在0.8~1.0范围内的厚度设置为6mm
+    
+    参数:
+        thicknesses: 厚度数组（单位：mm），可能包含nan
+        df: DataFrame，包含body_part列
+        z_values: z坐标数组（单位：m）
+    
+    返回:
+        modified_thicknesses: 修改后的厚度数组
+    """
+    # 创建结果数组，保持原始数据类型
+    modified = thicknesses.copy()
+    
+    # 识别elbow和shoulder组
+    elbow_mask = df['body_part'].isin(['Left_Elbow', 'Right_Elbow'])
+    shoulder_mask = df['body_part'].isin(['Left_Shoulder', 'Right_Shoulder'])
+    # 识别z坐标在(0.8, 1.0)范围内的点
+    z_mask = (z_values >= 0.8) & (z_values <= 1.0)
+    # 组合条件：(elbow组 OR shoulder组) AND z坐标在(0.8, 1.0)范围内
+    elbow_z_mask = elbow_mask & z_mask
+    shoulder_z_mask = shoulder_mask & z_mask
+    combined_mask = elbow_z_mask | shoulder_z_mask
+    
+    if np.any(combined_mask):
+        elbow_z_count = np.sum(elbow_z_mask)
+        shoulder_z_count = np.sum(shoulder_z_mask)
+        total_count = np.sum(combined_mask)
+        print(f"      检测到 {total_count} 个elbow/shoulder组中z坐标在(0.8, 1.0)区域的点（elbow: {elbow_z_count}, shoulder: {shoulder_z_count}），将厚度设置为6mm...")
+        # 将满足条件的点的厚度设置为6mm
+        modified[combined_mask] = 6.0
+        print(f"      已修改 {total_count} 个点的厚度为6mm")
+    
+    return modified
 
 
 def calculate_thicknesses(force_magnitudes, density=0.4, target_force=3.0):
@@ -1090,16 +1162,32 @@ def plot_contact_grid(csv_path=None, df=None, output_path=None, bins=50, cmap=No
     
     # 添加颜色条，使用shrink参数控制大小
     cb = plt.colorbar(hb, ax=ax, shrink=0.8, aspect=20, pad=0.02)
-    cb.set_label('Force Magnitude (kN)', fontsize=12)
-    
-    # 设置标签和标题
-    ax.set_xlabel('y (m)', fontsize=12)
-    ax.set_ylabel('z (m)', fontsize=12)
-    ax.set_title('Collision Force Distribution', fontsize=12)
+    # 设置颜色条刻度数字字体为 Times New Roman, 8pt
+    for label in cb.ax.get_yticklabels():
+        label.set_fontfamily(TIMES_FONT)
+        label.set_fontsize(8)
     
     # 设置坐标轴范围
-    ax.set_xlim(-0.4, 0.4)
-    ax.set_ylim(0, 1.4)
+    ax.set_xlim(-0.35, 0.35)
+    ax.set_ylim(0.1, 1.2)
+    
+    # 设置x轴和y轴刻度
+    ax.set_xticks([-0.35, 0, 0.35])
+    ax.set_yticks([0.1, 0.5, 0.9, 1.2])
+    
+    # 设置坐标轴刻度数字字体为 Times New Roman, 8pt
+    for label in ax.get_xticklabels():
+        label.set_fontfamily(TIMES_FONT)
+        label.set_fontsize(8)
+    for label in ax.get_yticklabels():
+        label.set_fontfamily(TIMES_FONT)
+        label.set_fontsize(8)
+    
+    # 只显示左轴和下轴，隐藏上轴和右轴
+    ax.spines['top'].set_visible(False)
+    ax.spines['right'].set_visible(False)
+    ax.spines['bottom'].set_linewidth(1.0)
+    ax.spines['left'].set_linewidth(1.0)
     
     # 添加网格
     # ax.grid(True, alpha=0.3)
@@ -1218,6 +1306,34 @@ def plot_thickness_grid(csv_path=None, df=None, output_path=None, bins=50, cmap=
     print(f"正在计算保护层厚度（密度={density}, 目标力={target_force}kN）...")
     thicknesses = calculate_thicknesses(force, density=density, target_force=target_force)
     
+    # 对于knee组中z坐标在(0.3, 0.5)区域的点，提升厚度一个级别（因为应力集中）
+    # 确保df有body_part列
+    if 'body_part' not in df.columns:
+        print(f"      正在分类身体部分以应用knee区域厚度提升...")
+        if len(df) > 10000:
+            n_jobs = max(1, cpu_count() - 2)
+            df = apply_body_part_multiprocess(df, n_jobs=n_jobs)
+        else:
+            df = apply_body_part_multiprocess(df, n_jobs=1)
+    
+    # 识别knee组
+    knee_mask = df['body_part'].isin(['Left_Knee', 'Right_Knee'])
+    # 识别z坐标在(0.3, 0.5)范围内的点
+    z_mask = (z >= 0.3) & (z <= 0.5)
+    # 组合条件：knee组 AND z坐标在(0.3, 0.5)范围内
+    knee_stress_mask = knee_mask & z_mask
+    
+    if np.any(knee_stress_mask):
+        knee_stress_count = np.sum(knee_stress_mask)
+        print(f"      检测到 {knee_stress_count} 个knee组中z坐标在(0.3, 0.5)区域的点，提升厚度一个级别...")
+        # 只对满足条件的点提升厚度
+        knee_stress_thicknesses = upgrade_thickness_one_level(thicknesses[knee_stress_mask])
+        thicknesses[knee_stress_mask] = knee_stress_thicknesses
+        print(f"      已提升 {knee_stress_count} 个点的厚度")
+    
+    # 对于elbow组中z坐标在(0.8, 1.0)区域的点，将厚度设置为6mm
+    thicknesses = set_elbow_thickness_to_6mm(thicknesses, df, z)
+    
     # 统计无法满足要求的点（None值已被转换为nan）
     invalid_mask = np.isnan(thicknesses)
     invalid_count = np.sum(invalid_mask)
@@ -1309,40 +1425,34 @@ def plot_thickness_grid(csv_path=None, df=None, output_path=None, bins=50, cmap=
                       ticks=[0, 6, 12, 18, 24], boundaries=boundaries, 
                       format='%g', spacing='uniform', extend='neither', 
                       drawedges=True)
-    cb.set_label('Protector Thickness (mm)', fontsize=12, fontfamily=MYRIAD_FONT)
     
     # 设置颜色条刻度标签为 0, 6, 12, 18, 24mm
     cb.set_ticklabels(['0', '6', '12', '18', '24'])
-    # 设置颜色条刻度数字字体为 Times New Roman, 10pt
+    # 设置颜色条刻度数字字体为 Times New Roman, 8pt
     for label in cb.ax.get_yticklabels():
         label.set_fontfamily(TIMES_FONT)
-        label.set_fontsize(10)
+        label.set_fontsize(8)
     
     # 设置颜色条边缘线颜色，使离散块更明显
     cb.outline.set_edgecolor('black')
     cb.dividers.set_color('black')
     cb.dividers.set_linewidth(1.5)
     
-    # 设置标签和标题（Myriad Pro, 12pt）
-    ax.set_xlabel('y (m)', fontsize=12, fontfamily=MYRIAD_FONT)
-    ax.set_ylabel('z (m)', fontsize=12, fontfamily=MYRIAD_FONT)
-    ax.set_title('Protector Thickness Distribution', fontsize=12, fontfamily=MYRIAD_FONT)
-    
     # 设置坐标轴范围
-    ax.set_xlim(-0.4, 0.4)
-    ax.set_ylim(0, 1.4)
+    ax.set_xlim(-0.35, 0.35)
+    ax.set_ylim(0.1, 1.2)
     
-    # 设置x轴刻度标签为 -0.4, -0.2, 0, 0.2, 0.4
-    ax.set_xticks([-0.4, -0.2, 0, 0.2, 0.4])
+    # 设置x轴和y轴刻度
+    ax.set_xticks([-0.35, 0, 0.35])
+    ax.set_yticks([0.1, 0.5, 0.9, 1.2])
     
-    # 设置坐标轴刻度数字字体为 Times New Roman, 10pt
-    # 需要在设置坐标轴范围之后设置，以确保刻度标签已生成
+    # 设置坐标轴刻度数字字体为 Times New Roman, 8pt
     for label in ax.get_xticklabels():
         label.set_fontfamily(TIMES_FONT)
-        label.set_fontsize(10)
+        label.set_fontsize(8)
     for label in ax.get_yticklabels():
         label.set_fontfamily(TIMES_FONT)
-        label.set_fontsize(10)
+        label.set_fontsize(8)
     
     # 只显示左轴和下轴，粗1pt
     ax.spines['top'].set_visible(False)
@@ -1550,16 +1660,32 @@ def plot_surface_area_grid(csv_path=None, df=None, stl_path=None, output_path=No
     
     # 添加颜色条，使用shrink参数控制大小
     cb = plt.colorbar(hb, ax=ax, shrink=0.8, aspect=20, pad=0.02)
-    cb.set_label('Surface Area (m²)', fontsize=12)
-    
-    # 设置标签和标题
-    ax.set_xlabel('y (m)', fontsize=12)
-    ax.set_ylabel('z (m)', fontsize=12)
-    ax.set_title('Surface Area Distribution', fontsize=12)
+    # 设置颜色条刻度数字字体为 Times New Roman, 8pt
+    for label in cb.ax.get_yticklabels():
+        label.set_fontfamily(TIMES_FONT)
+        label.set_fontsize(8)
     
     # 设置坐标轴范围
-    ax.set_xlim(-0.4, 0.4)
-    ax.set_ylim(0, 1.4)
+    ax.set_xlim(-0.35, 0.35)
+    ax.set_ylim(0.1, 1.2)
+    
+    # 设置x轴和y轴刻度
+    ax.set_xticks([-0.35, 0, 0.35])
+    ax.set_yticks([0.1, 0.5, 0.9, 1.2])
+    
+    # 设置坐标轴刻度数字字体为 Times New Roman, 8pt
+    for label in ax.get_xticklabels():
+        label.set_fontfamily(TIMES_FONT)
+        label.set_fontsize(8)
+    for label in ax.get_yticklabels():
+        label.set_fontfamily(TIMES_FONT)
+        label.set_fontsize(8)
+    
+    # 只显示左轴和下轴，隐藏上轴和右轴
+    ax.spines['top'].set_visible(False)
+    ax.spines['right'].set_visible(False)
+    ax.spines['bottom'].set_linewidth(1.0)
+    ax.spines['left'].set_linewidth(1.0)
     
     # 添加网格
     ax.grid(True, alpha=0.3)
@@ -1779,16 +1905,32 @@ def plot_pressure_grid(csv_path=None, df=None, stl_path=None, output_path=None, 
     
     # 添加颜色条，使用shrink参数控制大小
     cb = plt.colorbar(hb, ax=ax, shrink=0.8, aspect=20, pad=0.02)
-    cb.set_label('Pressure (MPa)', fontsize=12)
-    
-    # 设置标签和标题
-    ax.set_xlabel('y (m)', fontsize=12)
-    ax.set_ylabel('z (m)', fontsize=12)
-    ax.set_title('Surface Pressure Distribution', fontsize=12)
+    # 设置颜色条刻度数字字体为 Times New Roman, 8pt
+    for label in cb.ax.get_yticklabels():
+        label.set_fontfamily(TIMES_FONT)
+        label.set_fontsize(8)
     
     # 设置坐标轴范围
-    ax.set_xlim(-0.4, 0.4)
-    ax.set_ylim(0, 1.4)
+    ax.set_xlim(-0.35, 0.35)
+    ax.set_ylim(0.1, 1.2)
+    
+    # 设置x轴和y轴刻度
+    ax.set_xticks([-0.35, 0, 0.35])
+    ax.set_yticks([0.1, 0.5, 0.9, 1.2])
+    
+    # 设置坐标轴刻度数字字体为 Times New Roman, 8pt
+    for label in ax.get_xticklabels():
+        label.set_fontfamily(TIMES_FONT)
+        label.set_fontsize(8)
+    for label in ax.get_yticklabels():
+        label.set_fontfamily(TIMES_FONT)
+        label.set_fontsize(8)
+    
+    # 只显示左轴和下轴，隐藏上轴和右轴
+    ax.spines['top'].set_visible(False)
+    ax.spines['right'].set_visible(False)
+    ax.spines['bottom'].set_linewidth(1.0)
+    ax.spines['left'].set_linewidth(1.0)
     
     # 添加网格
     ax.grid(True, alpha=0.3)
@@ -1813,7 +1955,7 @@ def main():
     parser.add_argument('-o', '--output', type=str, default=None, help='输出图片路径前缀（可选，会自动添加后缀）')
     parser.add_argument('-b', '--bins', type=int, default=50, help='网格分辨率（默认: 50）')
     parser.add_argument('-c', '--cmap', type=str, default=None, help='颜色映射（默认: None，力图使用白色到红色，厚度图使用橙色，表面积图使用蓝色，压强图使用绿色到红色）')
-    parser.add_argument('--figsize', type=float, nargs=2, default=[15, 22], help='图片大小（单位: cm，默认: 4 10，如果未指定单独大小则所有图都使用）')
+    parser.add_argument('--figsize', type=float, nargs=2, default=[4.5, 7.4], help='图片大小（单位: cm，默认: 4 10，如果未指定单独大小则所有图都使用）')
     parser.add_argument('--force-figsize', type=float, nargs=2, default=None, help='力图大小（单位: cm，宽 高，默认使用--figsize）')
     parser.add_argument('--thickness-figsize', type=float, nargs=2, default=None, help='厚度图大小（单位: cm，宽 高，默认使用--figsize）')
     parser.add_argument('--surface-figsize', type=float, nargs=2, default=None, help='表面积图大小（单位: cm，宽 高，默认使用--figsize）')

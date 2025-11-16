@@ -9,6 +9,14 @@ import re
 import os
 from multiprocessing import Pool, cpu_count
 
+# Try to import brokenaxes for axis break functionality
+try:
+    from brokenaxes import brokenaxes
+    HAS_BROKENAXES = True
+except ImportError:
+    HAS_BROKENAXES = False
+    print("警告: 无法导入brokenaxes模块，将使用普通轴（建议安装: pip install brokenaxes）")
+
 # 检查并设置可用字体
 def get_available_font(font_names):
     """检查字体是否可用，返回第一个可用的字体名称"""
@@ -440,10 +448,19 @@ def plot_force_normal_violin(csv_path, figsize=(11.5, 5), dpi=300, output_path=N
     print(f"  图片尺寸: {figsize[0]:.2f}cm x {figsize[1]:.2f}cm ({figsize_inches[0]:.2f}in x {figsize_inches[1]:.2f}in)")
     sns.set_theme(style="white", font=MYRIAD_FONT, font_scale=1)  # 使用white主题，无网格背景
     
-    fig = plt.figure(figsize=figsize_inches)
-    # 设置背景透明
-    fig.patch.set_facecolor('none')
-    fig.patch.set_alpha(0)
+    # 计算y轴范围（用于brokenaxes）
+    y_min_data = data['force_kN'].min() if len(data) > 0 else force_min_kN
+    y_max_data = data['force_kN'].max() if len(data) > 0 else 10.0
+    
+    if use_quantile:
+        y_max_99 = data['force_kN'].quantile(0.99) if len(data) > 0 else 10.0
+        y_max = max(y_max_99 * 1.1, 30.0)
+    else:
+        y_max = max(y_max_data * 1.1, 30.0)
+    
+    # 定义截断区域：0.4到5之间（固定值）
+    y_break_start = 0.4
+    y_break_end = 5.0  # 固定为5kN，显示0.4-5之间的断裂线
     
     # 设置页边距和坐标轴位置（使用参数化的边距）
     # 将百分比转换为0-1之间的值
@@ -454,7 +471,65 @@ def plot_force_normal_violin(csv_path, figsize=(11.5, 5), dpi=300, output_path=N
     # 计算宽度和高度
     width = 1.0 - left - right_margin
     height = 1.0 - bottom - top_margin
-    ax = fig.add_axes([left, bottom, width, height])
+    
+    # 使用brokenaxes创建带截断的y轴
+    use_brokenaxes_flag = HAS_BROKENAXES and y_break_end > y_break_start
+    print(f"  检查brokenaxes: HAS_BROKENAXES={HAS_BROKENAXES}, y_break_end={y_break_end}, y_break_start={y_break_start}, use_brokenaxes_flag={use_brokenaxes_flag}")
+    if use_brokenaxes_flag:
+        print(f"  使用brokenaxes创建y轴截断: {y_break_start}kN - {y_break_end}kN")
+        # brokenaxes需要指定ylims，格式为((min1, max1), (min2, max2))
+        # 第一个范围：0到0.4
+        # 第二个范围：5到y_max
+        # 让 brokenaxes 自己创建 figure
+        try:
+            print(f"  尝试创建brokenaxes: ylims=((0, {y_break_start}), ({y_break_end}, {y_max}))")
+            bax = brokenaxes(
+                ylims=((0, y_break_start), (y_break_end, y_max)),
+                hspace=0.05  # 两个y轴区域之间的间距
+            )
+            print(f"  ✓ brokenaxes创建成功")
+            # 获取 brokenaxes 创建的 figure 并设置大小和样式
+            fig = bax.fig
+            fig.set_size_inches(figsize_inches)
+            fig.patch.set_facecolor('none')
+            fig.patch.set_alpha(0)
+            # 调整位置（brokenaxes 使用 subplot，需要调整整个 subplot 的位置）
+            # 注意：brokenaxes 创建时可能已经设置了位置，这里尝试调整
+            try:
+                bax.set_position([left, bottom, width, height])
+                print(f"  ✓ brokenaxes位置调整成功")
+            except Exception as pos_e:
+                # 如果 set_position 失败，尝试通过调整 subplot 参数
+                print(f"  警告: brokenaxes位置调整失败 ({pos_e})，使用默认位置")
+            ax = bax  # 使用brokenaxes作为主axes
+            # 确认brokenaxes创建成功
+            if hasattr(ax, 'axs'):
+                use_brokenaxes_flag = True
+                print(f"  ✓ 确认brokenaxes已成功创建（ax有axs属性）")
+            else:
+                use_brokenaxes_flag = False
+                print(f"  警告: brokenaxes对象缺少axs属性，可能未正确创建")
+        except Exception as e:
+            import traceback
+            print(f"  警告: brokenaxes创建失败 ({e})，使用普通y轴（无截断）")
+            print(f"  错误详情: {traceback.format_exc()}")
+            use_brokenaxes_flag = False
+            # 回退到普通 axes
+            fig = plt.figure(figsize=figsize_inches)
+            fig.patch.set_facecolor('none')
+            fig.patch.set_alpha(0)
+            ax = fig.add_axes([left, bottom, width, height])
+    else:
+        # 如果不使用brokenaxes，使用普通axes
+        if not HAS_BROKENAXES:
+            print(f"  警告: brokenaxes未安装，使用普通y轴（无截断）")
+        use_brokenaxes_flag = False
+        fig = plt.figure(figsize=figsize_inches)
+        # 设置背景透明
+        fig.patch.set_facecolor('none')
+        fig.patch.set_alpha(0)
+        ax = fig.add_axes([left, bottom, width, height])
+    
     # 设置 axes 背景透明
     ax.patch.set_facecolor('none')
     ax.patch.set_alpha(0)
@@ -548,14 +623,50 @@ def plot_force_normal_violin(csv_path, figsize=(11.5, 5), dpi=300, output_path=N
     
     # 使用 matplotlib 的 violinplot 绘制（不使用 hue，每个部位一个小提琴）
     print(f"[步骤 4/7] 绘制小提琴图...")
-    parts = ax.violinplot(
-        dataset=datasets,
-        positions=group_positions,
-        showmeans=False,
-        showmedians=False,
-        showextrema=False,
-        widths=violin_widths  # 使用根据数据量计算的宽度
-    )
+    # 如果使用brokenaxes，检查是否有特殊的方法
+    if use_brokenaxes_flag and hasattr(ax, 'axs'):
+        # brokenaxes有多个子图，需要在主axes上绘制
+        # brokenaxes会自动处理y轴范围的映射
+        # 尝试在主axes上绘制（brokenaxes对象通常支持大部分axes方法）
+        try:
+            parts = ax.violinplot(
+                dataset=datasets,
+                positions=group_positions,
+                showmeans=False,
+                showmedians=False,
+                showextrema=False,
+                widths=violin_widths  # 使用根据数据量计算的宽度
+            )
+        except AttributeError:
+            # 如果brokenaxes不支持violinplot，尝试在第一个子axes上绘制
+            if hasattr(ax, 'axs') and len(ax.axs) > 0:
+                parts = ax.axs[0].violinplot(
+                    dataset=datasets,
+                    positions=group_positions,
+                    showmeans=False,
+                    showmedians=False,
+                    showextrema=False,
+                    widths=violin_widths
+                )
+            else:
+                # 回退到普通axes
+                parts = ax.violinplot(
+                    dataset=datasets,
+                    positions=group_positions,
+                    showmeans=False,
+                    showmedians=False,
+                    showextrema=False,
+                    widths=violin_widths
+                )
+    else:
+        parts = ax.violinplot(
+            dataset=datasets,
+            positions=group_positions,
+            showmeans=False,
+            showmedians=False,
+            showextrema=False,
+            widths=violin_widths  # 使用根据数据量计算的宽度
+        )
     
     # 设置小提琴图样式（使用w/o的灰色，因为数据都是w/o的）
     color = '#D1D3D4'  # w/o 的填充颜色（浅灰）
@@ -611,39 +722,30 @@ def plot_force_normal_violin(csv_path, figsize=(11.5, 5), dpi=300, output_path=N
     ax.spines['right'].set_visible(False)
     
     # 设置 y 轴范围和刻度（单位：kN）
-    # y轴最小值固定为0，以显示0刻度
-    y_min = 0.0
-    y_min_data = data['force_kN'].min() if len(data) > 0 else force_min_kN
-    y_max_data = data['force_kN'].max() if len(data) > 0 else 10.0
-    
-    if use_quantile:
-        # 使用99分位数来设置y轴范围，这样可以更好地显示中位数附近的数据，
-        # 让小提琴图的形状和分布细节更清晰可见
-        y_max_99 = data['force_kN'].quantile(0.99) if len(data) > 0 else 10.0
-        y_max = max(y_max_99 * 1.1, 30.0)  # 至少显示到30
-        method_str = "99分位数"
-    else:
-        # 使用实际的最大值，确保显示所有数据
-        y_max = max(y_max_data * 1.1, 30.0)  # 至少显示到30
-        method_str = "实际最大值"
-        y_max_99 = None
-    
     print(f"[步骤 6/7] 设置y轴范围...")
     print(f"  数据范围: [{y_min_data:.3f}, {y_max_data:.3f}] kN")
-    if use_quantile and y_max_99 is not None:
+    if use_quantile and 'y_max_99' in locals():
         print(f"  99分位数: {y_max_99:.3f} kN")
-    print(f"  y轴范围: [{y_min:.3f}, {y_max:.3f}] kN (基于{method_str})")
+    if use_brokenaxes_flag:
+        print(f"  y轴截断: {y_break_start}kN - {y_break_end}kN 之间的区域被折叠")
+        print(f"  y轴范围: [0, {y_break_start}] 和 [{y_break_end}, {y_max}] kN")
+    else:
+        y_min = 0.0
+        print(f"  y轴范围: [{y_min:.3f}, {y_max:.3f}] kN")
+    
     if y_max_data > y_max and len(data) > 0:
         num_outliers = len(data[data['force_kN'] > y_max])
         pct_outliers = num_outliers / len(data) * 100
         print(f"  警告: 有 {num_outliers} 个数据点 ({pct_outliers:.2f}%) 超出y轴范围")
     
-    # 设置固定的y轴刻度：0, 5, 15, 25, 30
-    y_ticks = [0, 5, 15, 25, 35]
-    print(f"  y轴刻度: {y_ticks}")
-    ax.set_yticks(y_ticks)
-    ax.set_yticklabels(y_ticks)
-    ax.set_ylim(y_min, y_max)
+    # 设置固定的y轴刻度：0, 5, 15, 25, 35
+    # 如果使用brokenaxes，刻度会自动处理
+    if not use_brokenaxes_flag:
+        y_ticks = [0, 5, 15, 25, 35]
+        print(f"  y轴刻度: {y_ticks}")
+        ax.set_yticks(y_ticks)
+        ax.set_yticklabels(y_ticks)
+        ax.set_ylim(0.0, y_max)
     ax.tick_params(axis='y', which='major', length=2, width=1, 
                    color='black', direction='out', left=True, labelleft=True)
     
@@ -1219,7 +1321,7 @@ if __name__ == "__main__":
     
     # ===== 配置参数 =====
     # 过滤小于此值的力数据（单位：kN），y轴最小值将从该值开始
-    FORCE_MIN_KN = 5  # 过滤小于2kN的数据
+    FORCE_MIN_KN = 4  # 过滤小于2kN的数据
     
     # y轴范围设置方式：
     # - True: 使用99分位数（更好地显示中位数附近的数据，小提琴图细节更清晰）
