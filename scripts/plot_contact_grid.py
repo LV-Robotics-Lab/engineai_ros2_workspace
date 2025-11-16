@@ -1109,7 +1109,7 @@ def plot_contact_grid(csv_path=None, df=None, output_path=None, bins=50, cmap=No
     
     # 保存或显示（不使用bbox_inches='tight'以保持设置的边距）
     if output_path:
-        plt.savefig(output_path, dpi=300, bbox_inches=None, pad_inches=0)
+        plt.savefig(output_path, dpi=300, bbox_inches=None, pad_inches=0, transparent=True)
         print(f"图片已保存到: {output_path}")
     else:
         plt.show()
@@ -1358,7 +1358,7 @@ def plot_thickness_grid(csv_path=None, df=None, output_path=None, bins=50, cmap=
     
     # 保存或显示（不使用bbox_inches='tight'以保持设置的边距）
     if output_path:
-        plt.savefig(output_path, dpi=300, bbox_inches=None, pad_inches=0)
+        plt.savefig(output_path, dpi=300, bbox_inches=None, pad_inches=0, transparent=True)
         print(f"图片已保存到: {output_path}")
     else:
         plt.show()
@@ -1569,7 +1569,7 @@ def plot_surface_area_grid(csv_path=None, df=None, stl_path=None, output_path=No
     
     # 保存或显示（不使用bbox_inches='tight'以保持设置的边距）
     if output_path:
-        plt.savefig(output_path, dpi=300, bbox_inches=None, pad_inches=0)
+        plt.savefig(output_path, dpi=300, bbox_inches=None, pad_inches=0, transparent=True)
         print(f"图片已保存到: {output_path}")
     else:
         plt.show()
@@ -1798,7 +1798,7 @@ def plot_pressure_grid(csv_path=None, df=None, stl_path=None, output_path=None, 
     
     # 保存或显示（不使用bbox_inches='tight'以保持设置的边距）
     if output_path:
-        plt.savefig(output_path, dpi=300, bbox_inches=None, pad_inches=0)
+        plt.savefig(output_path, dpi=300, bbox_inches=None, pad_inches=0, transparent=True)
         print(f"图片已保存到: {output_path}")
     else:
         plt.show()
@@ -1813,7 +1813,7 @@ def main():
     parser.add_argument('-o', '--output', type=str, default=None, help='输出图片路径前缀（可选，会自动添加后缀）')
     parser.add_argument('-b', '--bins', type=int, default=50, help='网格分辨率（默认: 50）')
     parser.add_argument('-c', '--cmap', type=str, default=None, help='颜色映射（默认: None，力图使用白色到红色，厚度图使用橙色，表面积图使用蓝色，压强图使用绿色到红色）')
-    parser.add_argument('--figsize', type=float, nargs=2, default=[15, 15], help='图片大小（单位: cm，默认: 4 10，如果未指定单独大小则所有图都使用）')
+    parser.add_argument('--figsize', type=float, nargs=2, default=[15, 22], help='图片大小（单位: cm，默认: 4 10，如果未指定单独大小则所有图都使用）')
     parser.add_argument('--force-figsize', type=float, nargs=2, default=None, help='力图大小（单位: cm，宽 高，默认使用--figsize）')
     parser.add_argument('--thickness-figsize', type=float, nargs=2, default=None, help='厚度图大小（单位: cm，宽 高，默认使用--figsize）')
     parser.add_argument('--surface-figsize', type=float, nargs=2, default=None, help='表面积图大小（单位: cm，宽 高，默认使用--figsize）')
