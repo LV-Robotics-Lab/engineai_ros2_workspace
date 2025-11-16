@@ -408,6 +408,41 @@ def upgrade_thickness_one_level(thicknesses):
     return upgraded
 
 
+def limit_force_in_z_range(force_kn, z_values, z_min=0.8, z_max=1.0, max_force=20.0):
+    """
+    将z坐标在指定范围内的力值限制为小于等于max_force
+    
+    参数:
+        force_kn: 力值数组（单位：kN）
+        z_values: z坐标数组（单位：m）
+        z_min: z坐标最小值（默认0.8）
+        z_max: z坐标最大值（默认1.0）
+        max_force: 最大力值（单位：kN，默认20.0）
+    
+    返回:
+        limited_force_kn: 限制后的力值数组
+    """
+    # 创建结果数组
+    limited = force_kn.copy()
+    
+    # 识别z坐标在指定范围内的点
+    z_mask = (z_values >= z_min) & (z_values <= z_max)
+    
+    if np.any(z_mask):
+        # 找到需要限制的点（力值大于max_force的点）
+        force_mask = force_kn > max_force
+        combined_mask = z_mask & force_mask
+        
+        if np.any(combined_mask):
+            limited_count = np.sum(combined_mask)
+            print(f"      检测到 {limited_count} 个z坐标在({z_min}, {z_max})范围内且力值大于{max_force}kN的点，将力值限制为{max_force}kN...")
+            # 将满足条件的点的力值限制为max_force
+            limited[combined_mask] = max_force
+            print(f"      已限制 {limited_count} 个点的力值")
+    
+    return limited
+
+
 def set_elbow_thickness_to_6mm(thicknesses, df, z_values):
     """
     将elbow和shoulder部位z坐标在0.8~1.0范围内的厚度设置为6mm
@@ -1134,6 +1169,9 @@ def plot_contact_grid(csv_path=None, df=None, output_path=None, bins=50, cmap=No
     
     # 将力从N转换为kN
     force_kn = force / 1000.0
+    
+    # 限制z坐标在0.8~1.0范围内的力值小于等于20kN
+    force_kn = limit_force_in_z_range(force_kn, z, z_min=0.8, z_max=1.0, max_force=20.0)
     
     # 创建图形
     fig, ax = plt.subplots(figsize=figsize)
