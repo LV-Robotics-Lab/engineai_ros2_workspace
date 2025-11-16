@@ -473,6 +473,40 @@ def set_thickness_to_12mm_in_z_range(thicknesses, df, z_values):
     return modified
 
 
+def set_elbow_thickness_to_0_in_z_range(thicknesses, df, z_values, z_min=0.5, z_max=0.7):
+    """
+    将elbow部位z坐标在指定范围内的厚度强制设置为0mm
+    
+    参数:
+        thicknesses: 厚度数组（单位：mm），可能包含nan
+        df: DataFrame，包含body_part列
+        z_values: z坐标数组（单位：m）
+        z_min: z坐标最小值（默认0.5）
+        z_max: z坐标最大值（默认0.7）
+    
+    返回:
+        modified_thicknesses: 修改后的厚度数组
+    """
+    # 创建结果数组，保持原始数据类型
+    modified = thicknesses.copy()
+    
+    # 识别elbow组
+    elbow_mask = df['body_part'].isin(['Left_Elbow', 'Right_Elbow'])
+    # 识别z坐标在指定范围内的点
+    z_mask = (z_values >= z_min) & (z_values <= z_max)
+    # 组合条件：elbow组 AND z坐标在指定范围内
+    elbow_z_mask = elbow_mask & z_mask
+    
+    if np.any(elbow_z_mask):
+        elbow_z_count = np.sum(elbow_z_mask)
+        print(f"      检测到 {elbow_z_count} 个elbow组中z坐标在({z_min}, {z_max})范围内的点，将厚度强制设置为0mm...")
+        # 将满足条件的点的厚度设置为0mm
+        modified[elbow_z_mask] = 0.0
+        print(f"      已修改 {elbow_z_count} 个点的厚度为0mm")
+    
+    return modified
+
+
 def set_elbow_thickness_to_6mm(thicknesses, df, z_values):
     """
     将elbow和shoulder部位z坐标在0.8~1.0范围内的厚度设置为6mm
@@ -960,7 +994,9 @@ def apply_body_part_multiprocess(df, n_jobs=None):
 
 def filter_elbow_forces(df, force_column='force_normal', n_jobs=None):
     """
-    过滤掉z坐标在0.6-0.85m之间的elbow部位大于10kN的力
+    过滤掉elbow部位的特定数据：
+    1. z坐标在0.5-0.7m之间的elbow部位的所有数据
+    2. z坐标在0.6-0.85m之间的elbow部位大于10kN的力
     
     参数:
         df: DataFrame，包含body2_name, robot_frame_z, force_normal或force_magnitude列
@@ -993,22 +1029,29 @@ def filter_elbow_forces(df, force_column='force_normal', n_jobs=None):
     # 识别elbow部位
     elbow_mask = df['body_part'].isin(['Left_Elbow', 'Right_Elbow'])
     
-    # 检查z坐标是否在0.6-0.85m之间
-    z_mask = (df['robot_frame_z'] >= 0.6) & (df['robot_frame_z'] <= 0.85)
+    # 过滤条件1：z坐标在0.5-0.75m之间的elbow部位的所有数据
+    z_mask_1 = (df['robot_frame_z'] >= 0.5) & (df['robot_frame_z'] <= 0.75)
+    filter_mask_1 = elbow_mask & z_mask_1
     
-    # 检查力是否大于10kN（10000N）
+    # 过滤条件2：z坐标在0.6-0.85m之间的elbow部位大于10kN的力
+    z_mask_2 = (df['robot_frame_z'] >= 0.6) & (df['robot_frame_z'] <= 0.85)
     force_mask = df[force_column] > 10000
+    filter_mask_2 = elbow_mask & z_mask_2 & force_mask
     
-    # 组合条件：elbow部位 AND z坐标在0.6-0.85m之间 AND 力大于10kN
-    filter_mask = elbow_mask & z_mask & force_mask
+    # 组合所有过滤条件
+    filter_mask = filter_mask_1 | filter_mask_2
     
     # 过滤掉满足条件的数据
     df = df[~filter_mask]
     after_filter = len(df)
     
     if before_filter > after_filter:
+        filtered_count_1 = np.sum(filter_mask_1)
+        filtered_count_2 = np.sum(filter_mask_2)
         filtered_count = before_filter - after_filter
-        print(f"过滤掉z坐标在0.6-0.85m之间的elbow部位大于10kN的力: {filtered_count} 行")
+        print(f"过滤掉elbow部位数据: {filtered_count} 行")
+        print(f"  - z坐标在0.5-0.75m之间的elbow部位: {filtered_count_1} 行")
+        print(f"  - z坐标在0.6-0.85m之间且大于10kN的elbow部位: {filtered_count_2} 行")
         print(f"过滤后的数据: {after_filter} 行")
     
     # 注意：不删除body_part列，以便后续函数可以复用
@@ -1230,6 +1273,8 @@ def plot_contact_grid(csv_path=None, df=None, output_path=None, bins=50, cmap=No
     
     # 添加颜色条，使用shrink参数控制大小
     cb = plt.colorbar(hb, ax=ax, shrink=0.8, aspect=20, pad=0.02)
+    # 隐藏颜色条框线
+    cb.outline.set_visible(False)
     # 设置颜色条刻度数字字体为 Times New Roman, 8pt
     for label in cb.ax.get_yticklabels():
         label.set_fontfamily(TIMES_FONT)
@@ -1484,15 +1529,17 @@ def plot_thickness_grid(csv_path=None, df=None, output_path=None, bins=50, cmap=
     
     # 设置颜色条刻度标签为 0, 6, 12, 18, 24mm
     cb.set_ticklabels(['0', '6', '12', '18', '24'])
+    # 隐藏颜色条框线
+    cb.outline.set_visible(False)
+    # 隐藏颜色条次刻度线
+    cb.ax.tick_params(which='minor', length=0)
     # 设置颜色条刻度数字字体为 Times New Roman, 8pt
     for label in cb.ax.get_yticklabels():
         label.set_fontfamily(TIMES_FONT)
         label.set_fontsize(8)
     
-    # 设置颜色条边缘线颜色，使离散块更明显
-    cb.outline.set_edgecolor('black')
-    cb.dividers.set_color('black')
-    cb.dividers.set_linewidth(1.5)
+    # 隐藏颜色条分隔线
+    cb.dividers.set_visible(False)
     
     # 设置坐标轴范围
     ax.set_xlim(-0.35, 0.35)
@@ -1716,6 +1763,8 @@ def plot_surface_area_grid(csv_path=None, df=None, stl_path=None, output_path=No
     
     # 添加颜色条，使用shrink参数控制大小
     cb = plt.colorbar(hb, ax=ax, shrink=0.8, aspect=20, pad=0.02)
+    # 隐藏颜色条框线
+    cb.outline.set_visible(False)
     # 设置颜色条刻度数字字体为 Times New Roman, 8pt
     for label in cb.ax.get_yticklabels():
         label.set_fontfamily(TIMES_FONT)
@@ -1961,6 +2010,8 @@ def plot_pressure_grid(csv_path=None, df=None, stl_path=None, output_path=None, 
     
     # 添加颜色条，使用shrink参数控制大小
     cb = plt.colorbar(hb, ax=ax, shrink=0.8, aspect=20, pad=0.02)
+    # 隐藏颜色条框线
+    cb.outline.set_visible(False)
     # 设置颜色条刻度数字字体为 Times New Roman, 8pt
     for label in cb.ax.get_yticklabels():
         label.set_fontfamily(TIMES_FONT)
