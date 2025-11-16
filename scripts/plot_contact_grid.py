@@ -117,10 +117,12 @@ except ImportError:
 
 
 def create_white_to_red_cmap():
-    """创建从白色到红色的颜色映射"""
-    colors = ['white', 'red']
+    """创建从淡红色到红色的颜色映射（最小值是淡红色，白色用于无数据区域）"""
+    # 淡红色 RGB: (1.0, 0.8, 0.8) 或更淡一些 (1.0, 0.85, 0.85)
+    # 红色 RGB: (1.0, 0.0, 0.0)
+    colors = [(1.0, 0.85, 0.85), (1.0, 0.0, 0.0)]  # 从淡红色到红色
     n_bins = 256
-    cmap = LinearSegmentedColormap.from_list('white_to_red', colors, N=n_bins)
+    cmap = LinearSegmentedColormap.from_list('light_red_to_red', colors, N=n_bins)
     return cmap
 
 
@@ -441,6 +443,34 @@ def limit_force_in_z_range(force_kn, z_values, z_min=0.8, z_max=1.0, max_force=2
             print(f"      已限制 {limited_count} 个点的力值")
     
     return limited
+
+
+def set_thickness_to_12mm_in_z_range(thicknesses, df, z_values):
+    """
+    将任何部位z坐标在0.3~0.5范围内的厚度直接设置为12mm
+    
+    参数:
+        thicknesses: 厚度数组（单位：mm），可能包含nan
+        df: DataFrame（保留参数以保持接口一致性，但不再使用）
+        z_values: z坐标数组（单位：m）
+    
+    返回:
+        modified_thicknesses: 修改后的厚度数组
+    """
+    # 创建结果数组，保持原始数据类型
+    modified = thicknesses.copy()
+    
+    # 识别z坐标在(0.32, 0.48)范围内的点（任何部位）
+    z_mask = (z_values >= 0.32) & (z_values <= 0.48)
+    
+    if np.any(z_mask):
+        z_count = np.sum(z_mask)
+        print(f"      检测到 {z_count} 个z坐标在(0.32, 0.48)范围内的点（任何部位），将厚度设置为12mm...")
+        # 将满足条件的点的厚度设置为12mm
+        modified[z_mask] = 12.0
+        print(f"      已修改 {z_count} 个点的厚度为12mm")
+    
+    return modified
 
 
 def set_elbow_thickness_to_6mm(thicknesses, df, z_values):
@@ -1354,20 +1384,8 @@ def plot_thickness_grid(csv_path=None, df=None, output_path=None, bins=50, cmap=
         else:
             df = apply_body_part_multiprocess(df, n_jobs=1)
     
-    # 识别knee组
-    knee_mask = df['body_part'].isin(['Left_Knee', 'Right_Knee'])
-    # 识别z坐标在(0.3, 0.5)范围内的点
-    z_mask = (z >= 0.3) & (z <= 0.5)
-    # 组合条件：knee组 AND z坐标在(0.3, 0.5)范围内
-    knee_stress_mask = knee_mask & z_mask
-    
-    if np.any(knee_stress_mask):
-        knee_stress_count = np.sum(knee_stress_mask)
-        print(f"      检测到 {knee_stress_count} 个knee组中z坐标在(0.3, 0.5)区域的点，提升厚度一个级别...")
-        # 只对满足条件的点提升厚度
-        knee_stress_thicknesses = upgrade_thickness_one_level(thicknesses[knee_stress_mask])
-        thicknesses[knee_stress_mask] = knee_stress_thicknesses
-        print(f"      已提升 {knee_stress_count} 个点的厚度")
+    # 对于任何部位z坐标在(0.3, 0.5)范围内的点，将厚度直接设置为12mm
+    thicknesses = set_thickness_to_12mm_in_z_range(thicknesses, df, z)
     
     # 对于elbow组中z坐标在(0.8, 1.0)区域的点，将厚度设置为6mm
     thicknesses = set_elbow_thickness_to_6mm(thicknesses, df, z)
