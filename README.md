@@ -237,6 +237,13 @@ python3 scripts/fig4_violin.py
 ## 基本用法（会自动生成输出文件名） 只绘制force图： --force-only
 python3 scripts/plot_contact_grid.py logs/4in1/merged_4in1.csv --target-force 1
 
+# 使用 chr 方法（默认）
+python scripts/plot_contact_grid.py logs/4in1/merged_4in1.csv --method chr --target-force 1.0
+
+# 使用 zzq 方法
+# 禁用强制厚度设置
+python scripts/plot_contact_grid.py logs/4in1/merged_4in1.csv --method zzq --target-pressure 10.0 --no-hardcode
+
 ## 指定输出路径
 python3 scripts/plot_contact_grid.py logs/4in1/merged_contact_data_4in1_20251026_194302_clustered_20251111_012128.csv -o output.png
 

@@ -115,6 +115,12 @@ except ImportError:
     select_thickness_simple = None
     params_file_path = None
 
+try:
+    from thickness_from_pressure import calculate_thickness_from_pressure
+except ImportError:
+    print("警告: 无法导入thickness_from_pressure模块，基于压强的厚度计算功能将不可用")
+    calculate_thickness_from_pressure = None
+
 
 def create_white_to_red_cmap():
     """创建从淡红色到红色的颜色映射（最小值是淡红色，白色用于无数据区域）"""
@@ -544,39 +550,77 @@ def set_elbow_thickness_to_6mm(thicknesses, df, z_values):
     return modified
 
 
-def calculate_thicknesses(force_magnitudes, density=0.4, target_force=3.0):
+def calculate_thicknesses(force_magnitudes, density=0.4, target_force=3.0, 
+                          method='chr', target_pressure=None):
     """
     计算每个接触点的保护层厚度，并四舍五入到标准值（0, 6, 12, 18, 24）
     
     参数:
         force_magnitudes: 力的大小数组（单位：N）
-        density: 材料密度（默认0.4）
-        target_force: 目标衰减后的力（kN，默认3.0）
+        density: 材料密度（默认0.4，仅用于chr方法）
+        target_force: 目标衰减后的力（kN，默认3.0，仅用于chr方法）
+        method: 计算方法，'chr'使用thickness_selection，'zzq'使用thickness_from_pressure（默认'chr'）
+        target_pressure: 期望减小后的压强（MPa，仅用于zzq方法）
     
     返回:
         thicknesses: 厚度数组（单位：mm），已四舍五入到标准值，如果无法满足要求则为nan
     """
-    if select_thickness_simple is None:
-        raise ImportError("无法导入select_thickness_simple函数，请检查ThicknessCalculate模块")
-    
     # 保存当前工作目录
     original_cwd = os.getcwd()
     
     try:
-        # 切换到ThicknessCalculate目录，以便ForceCalculator能找到参数文件
+        # 切换到ThicknessCalculate目录
         os.chdir(str(thickness_dir))
         
         thicknesses = []
-        for force_n in force_magnitudes:
-            # 将力从N转换为kN
-            force_kn = force_n / 1000.0
-            # 计算厚度
-            thickness_mm = select_thickness_simple(force_kn, density=density, target_force=target_force)
-            # 如果返回None，转换为nan以便numpy处理
-            if thickness_mm is None:
-                thicknesses.append(np.nan)
-            else:
-                thicknesses.append(float(thickness_mm))
+        
+        if method == 'chr':
+            # 使用thickness_selection方法
+            if select_thickness_simple is None:
+                raise ImportError("无法导入select_thickness_simple函数，请检查ThicknessCalculate模块")
+            
+            # 使用进度条显示计算进度
+            iterator = tqdm(force_magnitudes, desc="计算厚度", disable=not HAS_TQDM, ncols=80) if HAS_TQDM else force_magnitudes
+            
+            for force_n in iterator:
+                # 将力从N转换为kN
+                force_kn = force_n / 1000.0
+                # 计算厚度
+                thickness_mm = select_thickness_simple(force_kn, density=density, target_force=target_force)
+                # 如果返回None，转换为nan以便numpy处理
+                if thickness_mm is None:
+                    thicknesses.append(np.nan)
+                else:
+                    thicknesses.append(float(thickness_mm))
+        
+        elif method == 'zzq':
+            # 使用thickness_from_pressure方法
+            if calculate_thickness_from_pressure is None:
+                raise ImportError("无法导入calculate_thickness_from_pressure函数，请检查ThicknessCalculate模块")
+            
+            if target_pressure is None:
+                raise ValueError("使用zzq方法时必须提供target_pressure参数")
+            
+            # 导入ThicknessFromPressure类，创建单个实例以复用（避免重复加载数据）
+            from thickness_from_pressure import ThicknessFromPressure
+            calculator = ThicknessFromPressure()
+            
+            # 使用进度条显示计算进度
+            iterator = tqdm(force_magnitudes, desc="计算厚度", disable=not HAS_TQDM, ncols=80) if HAS_TQDM else force_magnitudes
+            
+            for force_n in iterator:
+                # 将力从N转换为kN
+                force_kn = force_n / 1000.0
+                # 使用计算器实例计算厚度（避免重复加载数据）
+                selected_thickness, _, _, _ = calculator.calculate_thickness(force_kn, target_pressure)
+                # 如果返回None，转换为nan以便numpy处理
+                if selected_thickness is None:
+                    thicknesses.append(np.nan)
+                else:
+                    thicknesses.append(float(selected_thickness))
+        
+        else:
+            raise ValueError(f"未知的计算方法: {method}，必须是'chr'或'zzq'")
         
         thicknesses = np.array(thicknesses)
         
@@ -590,15 +634,18 @@ def calculate_thicknesses(force_magnitudes, density=0.4, target_force=3.0):
         os.chdir(original_cwd)
 
 
-def calculate_part_statistics(df, density=0.4, target_force=1.0, force_column='force_normal'):
+def calculate_part_statistics(df, density=0.4, target_force=1.0, force_column='force_normal',
+                              method='chr', target_pressure=None):
     """
     计算每个身体部分的最大力和厚度
     
     参数:
         df: DataFrame，包含body2_name, robot_frame_y, robot_frame_z, force_magnitude或force_normal
-        density: 材料密度（默认0.4）
-        target_force: 目标衰减后的力（kN，默认1.0）
+        density: 材料密度（默认0.4，仅用于chr方法）
+        target_force: 目标衰减后的力（kN，默认1.0，仅用于chr方法）
         force_column: 使用的力列名，'force_normal'或'force_magnitude'（默认'force_normal'）
+        method: 计算方法，'chr'使用thickness_selection，'zzq'使用thickness_from_pressure（默认'chr'）
+        target_pressure: 期望减小后的压强（MPa，仅用于zzq方法）
     
     返回:
         stats: DataFrame，包含每个身体部分的统计信息
@@ -681,31 +728,52 @@ def calculate_part_statistics(df, density=0.4, target_force=1.0, force_column='f
     
     # 计算每个部分的最大力对应的厚度
     unsatisfied_points = pd.DataFrame()  # 存储无法满足要求的点
-    if select_thickness_simple is not None:
-        original_cwd = os.getcwd()
-        try:
-            os.chdir(str(thickness_dir))
-            thicknesses = []
-            iterator = tqdm(part_stats['max_force_kn'], desc="计算厚度", disable=not HAS_TQDM) if HAS_TQDM else part_stats['max_force_kn']
+    original_cwd = os.getcwd()
+    try:
+        os.chdir(str(thickness_dir))
+        thicknesses = []
+        iterator = tqdm(part_stats['max_force_kn'], desc="计算厚度", disable=not HAS_TQDM) if HAS_TQDM else part_stats['max_force_kn']
+        
+        if method == 'chr':
+            if select_thickness_simple is None:
+                raise ImportError("无法导入select_thickness_simple函数，请检查ThicknessCalculate模块")
             for force_kn in iterator:
                 thickness_mm = select_thickness_simple(force_kn, density=density, target_force=target_force)
                 if thickness_mm is None:
                     thicknesses.append(np.nan)
                 else:
                     thicknesses.append(float(thickness_mm))
-            # 将厚度值四舍五入到标准值
-            thicknesses = round_thickness_to_standard(np.array(thicknesses))
-            part_stats['max_thickness_mm'] = thicknesses
-            
-            # 找出无法满足要求的点（厚度为nan的点）
-            unsatisfied_mask = pd.isna(part_stats['max_thickness_mm'])
-            if unsatisfied_mask.any():
-                unsatisfied_points = part_stats[unsatisfied_mask].copy()
-        finally:
-            os.chdir(original_cwd)
-    else:
+        elif method == 'zzq':
+            if calculate_thickness_from_pressure is None:
+                raise ImportError("无法导入calculate_thickness_from_pressure函数，请检查ThicknessCalculate模块")
+            if target_pressure is None:
+                raise ValueError("使用zzq方法时必须提供target_pressure参数")
+            # 导入ThicknessFromPressure类，创建单个实例以复用（避免重复加载数据）
+            from thickness_from_pressure import ThicknessFromPressure
+            calculator = ThicknessFromPressure()
+            for force_kn in iterator:
+                # 使用计算器实例计算厚度（避免重复加载数据）
+                selected_thickness, _, _, _ = calculator.calculate_thickness(force_kn, target_pressure)
+                if selected_thickness is None:
+                    thicknesses.append(np.nan)
+                else:
+                    thicknesses.append(float(selected_thickness))
+        else:
+            raise ValueError(f"未知的计算方法: {method}，必须是'chr'或'zzq'")
+        
+        # 将厚度值四舍五入到标准值
+        thicknesses = round_thickness_to_standard(np.array(thicknesses))
+        part_stats['max_thickness_mm'] = thicknesses
+        
+        # 找出无法满足要求的点（厚度为nan的点）
+        unsatisfied_mask = pd.isna(part_stats['max_thickness_mm'])
+        if unsatisfied_mask.any():
+            unsatisfied_points = part_stats[unsatisfied_mask].copy()
+    except (ImportError, ValueError) as e:
         part_stats['max_thickness_mm'] = np.nan
-        print("警告: 无法导入thickness_selection模块，厚度计算功能不可用")
+        print(f"警告: 厚度计算功能不可用: {e}")
+    finally:
+        os.chdir(original_cwd)
     
     # 按身体部分排序（定义顺序）
     part_order = [
@@ -1320,7 +1388,8 @@ def plot_contact_grid(csv_path=None, df=None, output_path=None, bins=50, cmap=No
 
 def plot_thickness_grid(csv_path=None, df=None, output_path=None, bins=50, cmap=None, figsize=(10, 8), 
                        density=0.4, target_force=3.0, margin_left=5.0, margin_right=5.0, 
-                       margin_top=5.0, margin_bottom=5.0):
+                       margin_top=5.0, margin_bottom=5.0, method='chr', target_pressure=None,
+                       force_12mm_in_z_range=True):
     """
     绘制保护层厚度的网格颜色图
     
@@ -1331,12 +1400,17 @@ def plot_thickness_grid(csv_path=None, df=None, output_path=None, bins=50, cmap=
         bins: 网格分辨率
         cmap: 颜色映射（如果为None，则使用橙色的默认映射）
         figsize: 图片大小
-        density: 材料密度（默认0.4）
-        target_force: 目标衰减后的力（kN，默认3.0）
+        density: 材料密度（默认0.4，仅用于chr方法）
+        target_force: 目标衰减后的力（kN，默认3.0，仅用于chr方法）
         margin_left: 左边距（百分比，默认5.0）
         margin_right: 右边距（百分比，默认5.0）
         margin_top: 上边距（百分比，默认5.0）
         margin_bottom: 下边距（百分比，默认5.0）
+        method: 计算方法，'chr'使用thickness_selection，'zzq'使用thickness_from_pressure（默认'chr'）
+        target_pressure: 期望减小后的压强（MPa，仅用于zzq方法）
+        force_12mm_in_z_range: 是否启用强制厚度设置（默认True）
+                               包括：1) 将z坐标在(0.32, 0.48)范围内的点设置为12mm
+                                    2) 将elbow/shoulder部位z坐标在(0.8, 1.0)范围内的点设置为6mm
     """
     # 如果没有指定颜色映射，使用离散的橙色默认映射
     if cmap is None:
@@ -1416,8 +1490,12 @@ def plot_thickness_grid(csv_path=None, df=None, output_path=None, bins=50, cmap=
         y = y / 100.0
     
     # 计算每个接触点的厚度
-    print(f"正在计算保护层厚度（密度={density}, 目标力={target_force}kN）...")
-    thicknesses = calculate_thicknesses(force, density=density, target_force=target_force)
+    if method == 'chr':
+        print(f"正在计算保护层厚度（方法={method}, 密度={density}, 目标力={target_force}kN）...")
+    else:
+        print(f"正在计算保护层厚度（方法={method}, 目标压强={target_pressure}MPa）...")
+    thicknesses = calculate_thicknesses(force, density=density, target_force=target_force, 
+                                       method=method, target_pressure=target_pressure)
     
     # 对于knee组中z坐标在(0.3, 0.5)区域的点，提升厚度一个级别（因为应力集中）
     # 确保df有body_part列
@@ -1429,11 +1507,11 @@ def plot_thickness_grid(csv_path=None, df=None, output_path=None, bins=50, cmap=
         else:
             df = apply_body_part_multiprocess(df, n_jobs=1)
     
-    # 对于任何部位z坐标在(0.3, 0.5)范围内的点，将厚度直接设置为12mm
-    thicknesses = set_thickness_to_12mm_in_z_range(thicknesses, df, z)
-    
-    # 对于elbow组中z坐标在(0.8, 1.0)区域的点，将厚度设置为6mm
-    thicknesses = set_elbow_thickness_to_6mm(thicknesses, df, z)
+    # 对于任何部位z坐标在(0.3, 0.5)范围内的点，将厚度直接设置为12mm（如果开关开启）
+    if force_12mm_in_z_range:
+        thicknesses = set_thickness_to_12mm_in_z_range(thicknesses, df, z)
+        # 对于elbow组中z坐标在(0.8, 1.0)区域的点，将厚度设置为6mm
+        thicknesses = set_elbow_thickness_to_6mm(thicknesses, df, z)
     
     # 统计无法满足要求的点（None值已被转换为nan）
     invalid_mask = np.isnan(thicknesses)
@@ -2067,8 +2145,10 @@ def main():
     parser.add_argument('--thickness-figsize', type=float, nargs=2, default=None, help='厚度图大小（单位: cm，宽 高，默认使用--figsize）')
     parser.add_argument('--surface-figsize', type=float, nargs=2, default=None, help='表面积图大小（单位: cm，宽 高，默认使用--figsize）')
     parser.add_argument('--pressure-figsize', type=float, nargs=2, default=None, help='压强图大小（单位: cm，宽 高，默认使用--figsize）')
-    parser.add_argument('--density', type=float, default=0.4, help='材料密度（默认: 0.4）')
-    parser.add_argument('--target-force', type=float, default=1.0, help='目标衰减后的力（kN，默认: 1.0）')
+    parser.add_argument('--density', type=float, default=0.4, help='材料密度（默认: 0.4，仅用于chr方法）')
+    parser.add_argument('--target-force', type=float, default=1.0, help='目标衰减后的力（kN，默认: 1.0，仅用于chr方法）')
+    parser.add_argument('--method', type=str, default='chr', choices=['chr', 'zzq'], help='厚度计算方法：chr使用thickness_selection，zzq使用thickness_from_pressure（默认: chr）')
+    parser.add_argument('--target-pressure', type=float, default=None, help='期望减小后的压强（MPa，仅用于zzq方法）')
     parser.add_argument('--margin-left', type=float, default=15.0, help='左边距（百分比，默认: 5.0）')
     parser.add_argument('--margin-right', type=float, default=5.0, help='右边距（百分比，默认: 5.0）')
     parser.add_argument('--margin-top', type=float, default=5.0, help='上边距（百分比，默认: 5.0）')
@@ -2078,12 +2158,20 @@ def main():
     parser.add_argument('--surface-only', action='store_true', help='仅绘制表面积图，不绘制其他图')
     parser.add_argument('--pressure-only', action='store_true', help='仅绘制压强图，不绘制其他图')
     parser.add_argument('--search-radius', type=float, default=0.01, help='表面积计算搜索半径（米，默认: 0.01）')
+    parser.add_argument('--no-hardcode', action='store_true', help='禁用强制厚度设置（默认启用）。包括：1) z坐标在(0.32, 0.48)范围内的点设置为12mm；2) elbow/shoulder部位z坐标在(0.8, 1.0)范围内的点设置为6mm')
     
     args = parser.parse_args()
     
     # 统一定义参数
     target_force = args.target_force
     density = args.density
+    method = args.method
+    target_pressure = args.target_pressure
+    
+    # 验证参数
+    if method == 'zzq' and target_pressure is None:
+        print("错误: 使用zzq方法时必须提供--target-pressure参数")
+        return
     
     # 检查文件是否存在
     if not os.path.exists(args.csv_path):
@@ -2195,7 +2283,10 @@ def main():
             # 计算统计信息
             # 注意：此时df_stats应该有body_part列了，calculate_part_statistics会复用
             print(f"[7/7] 计算各身体部分的统计信息...")
-            part_stats, unsatisfied_points = calculate_part_statistics(df_stats, density=density, target_force=target_force, force_column=force_col)
+            part_stats, unsatisfied_points = calculate_part_statistics(
+                df_stats, density=density, target_force=target_force, force_column=force_col,
+                method=method, target_pressure=target_pressure
+            )
             
             # 如果后续需要绘图，在统计计算完成后复制已处理好的数据
             need_plotting = not (args.force_only and args.thickness_only and args.surface_only and args.pressure_only)
@@ -2276,9 +2367,9 @@ def main():
     # 绘制力图
     if not args.thickness_only and not args.surface_only and not args.pressure_only:
         if args.output is None:
-            force_output = csv_file.parent / f"{csv_file.stem}_force_grid_plot.png"
+            force_output = csv_file.parent / f"{csv_file.stem}_force_grid_plot_{method}.png"
         else:
-            force_output = Path(args.output).parent / f"{Path(args.output).stem}_force.png"
+            force_output = Path(args.output).parent / f"{Path(args.output).stem}_force_{method}.png"
         
         try:
             print("\n" + "="*60)
@@ -2304,9 +2395,9 @@ def main():
     # 绘制厚度图
     if not args.force_only and not args.surface_only and not args.pressure_only:
         if args.output is None:
-            thickness_output = csv_file.parent / f"{csv_file.stem}_thickness_grid_plot.png"
+            thickness_output = csv_file.parent / f"{csv_file.stem}_thickness_grid_plot_{method}.png"
         else:
-            thickness_output = Path(args.output).parent / f"{Path(args.output).stem}_thickness.png"
+            thickness_output = Path(args.output).parent / f"{Path(args.output).stem}_thickness_{method}.png"
         
         try:
             print("\n" + "="*60)
@@ -2324,7 +2415,10 @@ def main():
                 margin_left=args.margin_left,
                 margin_right=args.margin_right,
                 margin_top=args.margin_top,
-                margin_bottom=args.margin_bottom
+                margin_bottom=args.margin_bottom,
+                method=method,
+                target_pressure=target_pressure,
+                force_12mm_in_z_range=not args.no_hardcode
             )
         except Exception as e:
             print(f"绘制厚度图时出错: {e}")
@@ -2334,9 +2428,9 @@ def main():
     # 绘制表面积图
     if not args.force_only and not args.thickness_only and not args.pressure_only and stl_path is not None:
         if args.output is None:
-            surface_output = csv_file.parent / f"{csv_file.stem}_surface_area_grid_plot.png"
+            surface_output = csv_file.parent / f"{csv_file.stem}_surface_area_grid_plot_{method}.png"
         else:
-            surface_output = Path(args.output).parent / f"{Path(args.output).stem}_surface.png"
+            surface_output = Path(args.output).parent / f"{Path(args.output).stem}_surface_{method}.png"
         
         try:
             print("\n" + "="*60)
@@ -2364,9 +2458,9 @@ def main():
     # 绘制压强图
     if not args.force_only and not args.thickness_only and not args.surface_only and stl_path is not None:
         if args.output is None:
-            pressure_output = csv_file.parent / f"{csv_file.stem}_pressure_grid_plot.png"
+            pressure_output = csv_file.parent / f"{csv_file.stem}_pressure_grid_plot_{method}.png"
         else:
-            pressure_output = Path(args.output).parent / f"{Path(args.output).stem}_pressure.png"
+            pressure_output = Path(args.output).parent / f"{Path(args.output).stem}_pressure_{method}.png"
         
         try:
             print("\n" + "="*60)
