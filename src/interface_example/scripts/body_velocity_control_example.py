@@ -41,11 +41,11 @@ class BodyVelocityPublisher(Node):
 
         # Set linear velocity - you can modify these values for testing
         # For example, set a forward velocity of 0.1 m/s
-        self.linear_vel[0] = 0.1  # Forward velocity (x-axis)
+        self.linear_vel[0] = 0.4  # Forward velocity (x-axis)
         self.linear_vel[1] = 0.0  # Lateral velocity (y-axis)
 
         # Set yaw velocity - rotate at 0.1 rad/s (about 5.7 degrees/s)
-        self.yaw_vel = 0.1
+        self.yaw_vel = 0.0
 
         # Fill message fields
         msg.linear_velocity = self.linear_vel
