@@ -495,10 +495,10 @@ def main():
     """Main function"""
     if len(sys.argv) != 2:
         print("Usage: python3 analyze_contact_forces.py <csv_file>")
-        print("Example: python3 analyze_contact_forces.py logs/contact_data_20231201_143022.csv")
+        print("Example: python3 analyze_contact_forces.py ~/data/mujoco_logs/contact_data_20231201_143022.csv")
         
         # Auto-find latest CSV file
-        logs_dir = "logs"
+        logs_dir = os.path.expanduser("~/data/mujoco_logs")
         if os.path.exists(logs_dir):
             csv_files = [f for f in os.listdir(logs_dir) if f.endswith('.csv') and f.startswith('contact_data_')]
             if csv_files:

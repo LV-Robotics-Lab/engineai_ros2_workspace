@@ -26,7 +26,7 @@ except ImportError:
 # -------------------------------
 # Config
 # -------------------------------
-file_path = "/home/wang22/engineai/engineai_ros2_workspace/logs/4in1/merged_4in1.csv"
+file_path = os.path.expanduser("~/data/mujoco_logs/4in1/merged_4in1.csv")
 # Save image to the same directory as the CSV file
 file_dir = Path(file_path).parent
 out_path = file_dir / "force_normal_violin_single.png"

@@ -34,7 +34,7 @@ FORCE_DURATION=$(grep "force_duration:" src/simulation/mujoco/assets/config/pm_v
 
 
 # 创建实验文件夹名称：推力方向-大小-程序开始时间
-EXPERIMENT_FOLDER="logs/${DEFAULT_DIRECTION}-${FORCE_MAGNITUDE}N-${FORCE_DURATION}s-${PROGRAM_START_TIME}"
+EXPERIMENT_FOLDER="${HOME}/data/mujoco_logs/${DEFAULT_DIRECTION}-${FORCE_MAGNITUDE}N-${FORCE_DURATION}s-${PROGRAM_START_TIME}"
 
 # 创建实验文件夹
 mkdir -p "$EXPERIMENT_FOLDER"
@@ -116,4 +116,4 @@ echo ""
 echo "=========================================="
 echo "所有实验完成！"
 echo "=========================================="
-echo "CSV文件保存在: logs/"
+echo "CSV文件保存在: ${HOME}/data/mujoco_logs/"

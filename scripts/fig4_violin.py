@@ -1328,7 +1328,7 @@ if __name__ == "__main__":
     # - False: 使用实际最大值（显示所有数据，但可能有极值压缩）
     USE_QUANTILE = False  # 改为 False 使用实际最大值
     
-    csv_path = "/home/wang22/engineai/engineai_ros2_workspace/logs/4in1/merged_4in1.csv"
+    csv_path = os.path.expanduser("~/data/mujoco_logs/4in1/merged_4in1.csv")
     plot_force_normal_violin(
         csv_path=csv_path,
         figsize=(12.6, 6),

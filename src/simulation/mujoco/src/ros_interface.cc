@@ -24,6 +24,7 @@
 #include <sstream>
 #include <ctime>
 #include <algorithm>
+#include <cstdlib>
 
 #include "config_loader.h"
 #include "sim_manager.h"
@@ -126,19 +127,21 @@ bool RosInterface::Initialize() {
 
   // 如果启用CSV保存但没有指定路径，使用默认路径
   if (save_contact_csv_ && csv_file_path_.empty()) {
-    // 创建logs目录（如果不存在）
-    std::filesystem::create_directories("logs");
+    // 获取用户主目录并创建logs目录（如果不存在）
+    const char* home_dir = std::getenv("HOME");
+    std::string logs_dir = (home_dir ? std::string(home_dir) : "") + "/data/mujoco_logs";
+    std::filesystem::create_directories(logs_dir);
     
     // 生成带时间戳的文件名
     auto now = std::chrono::system_clock::now();
     auto time_t = std::chrono::system_clock::to_time_t(now);
     std::stringstream ss;
-    ss << "logs/contact_data_" << std::put_time(std::localtime(&time_t), "%Y%m%d_%H%M%S") << ".csv";
+    ss << logs_dir << "/contact_data_" << std::put_time(std::localtime(&time_t), "%Y%m%d_%H%M%S") << ".csv";
     csv_file_path_ = ss.str();
     
     // 生成推力数据CSV文件名
     std::stringstream ss_pert;
-    ss_pert << "logs/perturbation_data_" << std::put_time(std::localtime(&time_t), "%Y%m%d_%H%M%S") << ".csv";
+    ss_pert << logs_dir << "/perturbation_data_" << std::put_time(std::localtime(&time_t), "%Y%m%d_%H%M%S") << ".csv";
     perturbation_csv_file_path_ = ss_pert.str();
   } else if (save_contact_csv_ && !csv_file_path_.empty()) {
     // 如果指定了自定义路径，使用该路径并创建目录
