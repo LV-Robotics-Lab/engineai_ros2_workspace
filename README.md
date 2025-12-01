@@ -113,6 +113,25 @@ python src/interface_example/scripts/body_velocity_control_example.py
 Low-level development allows the user to use their own RL controllers trained with EngineAI's open-source RL training framework https://github.com/engineai-robotics/engineai_gym. The user can follow the directions below step by step to realize sim2sim functionality with the Mujoco simulator and deployment. 
 
 By default, a simple policy is loaded from the directory of ```src/interface_example/config/pm01/rl_basic/basic/policies/pm01_v2_rough_ppo_42obs.mnn ```. It can realize a simple walk. Users can replace it with their own one generated with our open-source training framework.
+#### Deploy: Run the joint_test_example on your host
+1. Enter passive mode
+
+2. Enter joint bridge mode
+   - Joint bridge mode allows control via joint commands
+   - With the robot in passive mode, press the Joint Bridge button on the remote control
+   - The robot will enter joint bridge mode, which allows control via joint commands
+   - Verify the robot status with the following command:
+   ```bash
+   # in host
+   ros2 topic echo /motion/motion_state
+   ```
+   - Confirm that the motion state is `joint_bridge` before proceeding
+
+3. Run the joint test example
+   ```bash
+   # in host
+   python3 src/interface_example/scripts/joint_test_example.py
+   ```
 
 #### Deploy: Run the rl_basic_example on your host
 1. Enter pd-stand mode
@@ -122,7 +141,7 @@ By default, a simple policy is loaded from the directory of ```src/interface_exa
 
 2. Enter joint bridge mode
    - Joint bridge mode allows control via joint commands
-   - With the robot in pd-stand mode, press the remote control [LB, CROSS_Y_LEFT] combination
+   - With the robot in pd-stand mode, press the Joint Bridge button on the remote control
    - The robot will enter joint bridge mode, which allows control via joint commands
    - Verify the robot status with the following command:
    ```bash
