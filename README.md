@@ -242,7 +242,7 @@ python scripts/plot_contact_grid.py logs/4in1/merged_4in1.csv --method chr --tar
 
 # 使用 zzq 方法
 # 禁用强制厚度设置
-python scripts/plot_contact_grid.py logs/4in1/merged_4in1.csv --method zzq --target-pressure 10.0 --no-hardcode
+python scripts/plot_contact_grid.py logs/4in1/merged_4in1.csv --method zzq --target-pressure 10.0 --no-hardcode --no-force-filter
 
 ## 指定输出路径
 python3 scripts/plot_contact_grid.py logs/4in1/merged_contact_data_4in1_20251026_194302_clustered_20251111_012128.csv -o output.png
@@ -267,7 +267,7 @@ python3 scripts/plot_contact_grid.py logs/4in1/merged_contact_data_4in1_20251026
 
 # 绘制 joint force
 # 基本使用
-python3 scripts/plot_joint_meq.py ~/data/mujoco_logs/joint_forces_data_20251202_175946.csv
+python3 scripts/plot_joint_meq.py ~/data/mujoco_logs/joint_forces_data_20251202_175946.csv --figsize 20 12
 
 # 叠加模式
 python3 scripts/plot_joint_meq.py ~/data/mujoco_logs/joint_forces_data_20251202_175946.csv --overlay  --figsize 20 12

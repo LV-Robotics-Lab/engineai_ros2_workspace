@@ -61,12 +61,14 @@ computeJointWrenchesChildBodyEigen(const mjModel* m, mjData* d)
         int body = m->jnt_bodyid[j];
 
         // cfrc_int[body] = [Mx,My,Mz,Fx,Fy,Fz] in body frame at COM
-        Eigen::Vector3d tau_body_com(
+        // 单位说明：MuJoCo使用MKS单位系统（米-千克-秒）
+        // 力矩 M 单位：N·m (牛顿·米), 力 F 单位：N (牛顿)
+        Eigen::Vector3d tau_body_com(  // 力矩，单位：N·m
             d->cfrc_int[6*body + 0],
             d->cfrc_int[6*body + 1],
             d->cfrc_int[6*body + 2]
         );
-        Eigen::Vector3d F_body(
+        Eigen::Vector3d F_body(  // 力，单位：N
             d->cfrc_int[6*body + 3],
             d->cfrc_int[6*body + 4],
             d->cfrc_int[6*body + 5]
@@ -91,20 +93,23 @@ computeJointWrenchesChildBodyEigen(const mjModel* m, mjData* d)
             d->xanchor[3*j + 2]
         );
 
-        // r = COM - joint
+        // r = COM - joint (单位：m)
         Eigen::Vector3d r = p_com - p_joint;
 
         // tau_joint(world) = tau_com + r × F
-        Eigen::Vector3d tau_world_joint = tau_world_com + r.cross(F_world);
-        Eigen::Vector3d F_world_joint   = F_world;
+        // 单位：N·m = N·m + m × N
+        // 注意：如果r很大（COM距离关节较远），r×F会产生较大的力矩
+        // 例如：r=0.1m, F=100N → r×F = 10 N·m
+        Eigen::Vector3d tau_world_joint = tau_world_com + r.cross(F_world);  // 单位：N·m
+        Eigen::Vector3d F_world_joint   = F_world;  // 单位：N
 
         // world -> body (child) frame
         Eigen::Matrix3d R_wb = R_bw.transpose();
-        Eigen::Vector3d tau_body_joint = R_wb * tau_world_joint;
-        Eigen::Vector3d F_body_joint   = R_wb * F_world_joint;
+        Eigen::Vector3d tau_body_joint = R_wb * tau_world_joint;  // 单位：N·m
+        Eigen::Vector3d F_body_joint   = R_wb * F_world_joint;    // 单位：N
 
-        jw[j].M = tau_body_joint;
-        jw[j].F = F_body_joint;
+        jw[j].M = tau_body_joint;  // 单位：N·m
+        jw[j].F = F_body_joint;    // 单位：N
     }
 
     return jw;

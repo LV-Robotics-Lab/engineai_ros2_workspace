@@ -269,7 +269,7 @@ def plot_force_analysis(df, save_path=None):
     force_components = ['force_x', 'force_y', 'force_z']
     if all(col in df.columns for col in force_components):
         component_data = [df[col].abs() for col in force_components]
-        ax6.boxplot(component_data, labels=['X', 'Y', 'Z'])
+        ax6.boxplot(component_data, tick_labels=['X', 'Y', 'Z'])
         ax6.set_ylabel('Force Component Magnitude (N)')
         ax6.set_title('Force Components Comparison')
         ax6.grid(True, alpha=0.3)
@@ -425,6 +425,142 @@ def analyze_collision_link_pose(df):
                 valid_data = df[col].dropna()
                 print(f"  {col}: range [{valid_data.min():.3f}, {valid_data.max():.3f}], mean: {valid_data.mean():.3f}")
 
+def plot_link_forces(df, save_path=None):
+    """Plot contact forces for each link (body2_name)"""
+    print("\nGenerating link force analysis plots...")
+    
+    # Check if body2_name column exists
+    if 'body2_name' not in df.columns:
+        print("Warning: No body2_name column found. Cannot plot link forces.")
+        return
+    
+    # Check if force_magnitude exists, if not calculate it
+    if 'force_magnitude' not in df.columns:
+        if all(col in df.columns for col in ['force_x', 'force_y', 'force_z']):
+            df['force_magnitude'] = np.sqrt(df['force_x']**2 + df['force_y']**2 + df['force_z']**2)
+        else:
+            print("Warning: Cannot calculate force_magnitude. Missing force component columns.")
+            return
+    
+    # Filter out 'world' from body2_name (world is body1, not a link)
+    df_links = df[df['body2_name'] != 'world'].copy()
+    if len(df_links) == 0:
+        print("Warning: No valid link data found (all contacts are with world).")
+        return
+    
+    # Get unique links
+    unique_links = df_links['body2_name'].unique()
+    num_links = len(unique_links)
+    
+    print(f"Found {num_links} unique links: {sorted(unique_links)}")
+    
+    # Calculate statistics for each link
+    link_stats = df_links.groupby('body2_name')['force_magnitude'].agg([
+        ('max', 'max'),
+        ('mean', 'mean'),
+        ('sum', 'sum'),
+        ('count', 'count'),
+        ('std', 'std')
+    ]).reset_index()
+    link_stats = link_stats.sort_values('max', ascending=False)
+    
+    # Create figure with subplots
+    # Layout: 2 rows, 2 columns
+    # Top row: time series for top links, statistics bar chart
+    # Bottom row: time series for more links, force distribution
+    
+    fig = plt.figure(figsize=(20, 14))
+    gs = fig.add_gridspec(3, 2, hspace=0.3, wspace=0.3)
+    
+    fig.suptitle('Contact Force Analysis by Link', fontsize=16, fontweight='bold')
+    
+    # 1. Top links force statistics (bar chart)
+    ax1 = fig.add_subplot(gs[0, 0])
+    top_n = min(15, len(link_stats))  # Show top 15 links
+    top_links = link_stats.head(top_n)
+    
+    x_pos = np.arange(len(top_links))
+    width = 0.35
+    
+    ax1.bar(x_pos - width/2, top_links['max'], width, label='Max Force', alpha=0.8, color='red')
+    ax1.bar(x_pos + width/2, top_links['mean'], width, label='Mean Force', alpha=0.8, color='blue')
+    ax1.set_xlabel('Link Name')
+    ax1.set_ylabel('Force (N)')
+    ax1.set_title(f'Top {top_n} Links: Max and Mean Force')
+    ax1.set_xticks(x_pos)
+    ax1.set_xticklabels(top_links['body2_name'], rotation=45, ha='right')
+    ax1.legend()
+    ax1.grid(True, alpha=0.3, axis='y')
+    
+    # 2. Force sum by link (bar chart)
+    ax2 = fig.add_subplot(gs[0, 1])
+    ax2.bar(range(len(top_links)), top_links['sum'], alpha=0.8, color='green')
+    ax2.set_xlabel('Link Name')
+    ax2.set_ylabel('Total Force Sum (N)')
+    ax2.set_title(f'Top {top_n} Links: Total Force Sum')
+    ax2.set_xticks(range(len(top_links)))
+    ax2.set_xticklabels(top_links['body2_name'], rotation=45, ha='right')
+    ax2.grid(True, alpha=0.3, axis='y')
+    
+    # 3. Time series for top 5 links
+    ax3 = fig.add_subplot(gs[1, :])
+    top_5_links = link_stats.head(5)['body2_name'].tolist()
+    
+    colors = plt.cm.tab10(np.linspace(0, 1, len(top_5_links)))
+    for i, link_name in enumerate(top_5_links):
+        link_data = df_links[df_links['body2_name'] == link_name]
+        # Group by timestamp and take mean force for each timestamp
+        time_series = link_data.groupby('timestamp')['force_magnitude'].mean().reset_index()
+        ax3.plot(time_series['timestamp'], time_series['force_magnitude'], 
+                label=link_name, color=colors[i], linewidth=2, alpha=0.8)
+    
+    ax3.set_xlabel('Time (seconds)')
+    ax3.set_ylabel('Mean Force (N)')
+    ax3.set_title('Time Series: Mean Force for Top 5 Links')
+    ax3.legend(loc='best', ncol=2)
+    ax3.grid(True, alpha=0.3)
+    
+    # 4. Force distribution histogram for top 5 links
+    ax4 = fig.add_subplot(gs[2, 0])
+    for i, link_name in enumerate(top_5_links):
+        link_data = df_links[df_links['body2_name'] == link_name]
+        ax4.hist(link_data['force_magnitude'], bins=30, alpha=0.5, 
+                label=link_name, color=colors[i])
+    
+    ax4.set_xlabel('Force Magnitude (N)')
+    ax4.set_ylabel('Frequency')
+    ax4.set_title('Force Distribution: Top 5 Links')
+    ax4.legend(loc='best')
+    ax4.grid(True, alpha=0.3, axis='y')
+    ax4.set_yscale('log')
+    
+    # 5. Contact count by link
+    ax5 = fig.add_subplot(gs[2, 1])
+    ax5.bar(range(len(top_links)), top_links['count'], alpha=0.8, color='orange')
+    ax5.set_xlabel('Link Name')
+    ax5.set_ylabel('Contact Count')
+    ax5.set_title(f'Top {top_n} Links: Contact Point Count')
+    ax5.set_xticks(range(len(top_links)))
+    ax5.set_xticklabels(top_links['body2_name'], rotation=45, ha='right')
+    ax5.grid(True, alpha=0.3, axis='y')
+    ax5.set_yscale('log')
+    
+    plt.tight_layout()
+    
+    if save_path:
+        plt.savefig(save_path, dpi=300, bbox_inches='tight')
+        print(f"Link force analysis plot saved to: {save_path}")
+    
+    plt.close()  # Close figure to free memory
+    
+    # Print summary statistics
+    print("\n=== Link Force Statistics ===")
+    print(f"Total number of links: {num_links}")
+    print(f"\nTop 10 links by maximum force:")
+    for i, row in link_stats.head(10).iterrows():
+        print(f"  {row['body2_name']:30s}: Max={row['max']:8.2f}N, Mean={row['mean']:8.2f}N, "
+              f"Sum={row['sum']:10.2f}N, Count={row['count']:8d}")
+
 def generate_summary_report(df, csv_file):
     """Generate analysis report focusing on force_normal and new data structure"""
     print("\n" + "="*60)
@@ -542,6 +678,10 @@ def analyze_csv_file(csv_file):
     
     # Create time evolution heatmap
     create_time_evolution_heatmap(df, plot_file)
+    
+    # Generate link force analysis plot
+    link_plot_file = csv_file.replace('.csv', '_link_forces.png')
+    plot_link_forces(df, link_plot_file)
     
     print("\nAnalysis completed!")
 

@@ -1128,7 +1128,7 @@ def filter_elbow_forces(df, force_column='force_normal', n_jobs=None):
     return df
 
 
-def find_max_force_per_position(df, force_column='force_normal'):
+def find_max_force_per_position(df, force_column='force_normal', enable_force_filter=True):
     """
     对于原始CSV文件，找到每个碰撞点位置的最大力，并过滤掉头部和踝关节链接
     
@@ -1185,7 +1185,8 @@ def find_max_force_per_position(df, force_column='force_normal'):
     
     # 过滤掉z坐标在0.6-0.85m之间的elbow部位大于10kN的力
     # 注意：filter_elbow_forces内部会检查是否有body_part列，如果有就跳过分类
-    df = filter_elbow_forces(df, force_column=force_column, n_jobs=None)
+    if enable_force_filter:
+        df = filter_elbow_forces(df, force_column=force_column, n_jobs=None)
     
     # 按位置分组，找到每个位置的最大力
     # 使用round来避免浮点数精度问题导致的位置重复
@@ -1215,7 +1216,8 @@ def find_max_force_per_position(df, force_column='force_normal'):
 
 
 def plot_contact_grid(csv_path=None, df=None, output_path=None, bins=50, cmap=None, figsize=(10, 8), 
-                     margin_left=5.0, margin_right=5.0, margin_top=5.0, margin_bottom=5.0):
+                     margin_left=5.0, margin_right=5.0, margin_top=5.0, margin_bottom=5.0,
+                     enable_force_filter=True):
     """
     绘制接触力数据的网格颜色图
     
@@ -1287,11 +1289,12 @@ def plot_contact_grid(csv_path=None, df=None, output_path=None, bins=50, cmap=No
         
         if not is_clustered:
             # 原始CSV：按位置分组，找到每个位置的最大力
-            df = find_max_force_per_position(df, force_column=force_column)
+            df = find_max_force_per_position(df, force_column=force_column, enable_force_filter=enable_force_filter)
         else:
             print("检测到聚类后的CSV文件，应用过滤...")
             # 对于聚类后的CSV，也需要应用elbow过滤
-            df = filter_elbow_forces(df, force_column=force_column)
+            if enable_force_filter:
+                df = filter_elbow_forces(df, force_column=force_column)
     else:
         print(f"数据已处理过（{len(df)} 行），跳过重复处理")
     
@@ -1312,7 +1315,8 @@ def plot_contact_grid(csv_path=None, df=None, output_path=None, bins=50, cmap=No
     force_kn = force / 1000.0
     
     # 限制z坐标在0.8~1.0范围内的力值小于等于20kN
-    force_kn = limit_force_in_z_range(force_kn, z, z_min=0.8, z_max=1.0, max_force=20.0)
+    if enable_force_filter:
+        force_kn = limit_force_in_z_range(force_kn, z, z_min=0.8, z_max=1.0, max_force=20.0)
     
     # 创建图形
     fig, ax = plt.subplots(figsize=figsize)
@@ -1389,7 +1393,7 @@ def plot_contact_grid(csv_path=None, df=None, output_path=None, bins=50, cmap=No
 def plot_thickness_grid(csv_path=None, df=None, output_path=None, bins=50, cmap=None, figsize=(10, 8), 
                        density=0.4, target_force=3.0, margin_left=5.0, margin_right=5.0, 
                        margin_top=5.0, margin_bottom=5.0, method='chr', target_pressure=None,
-                       force_12mm_in_z_range=True):
+                       force_12mm_in_z_range=True, enable_force_filter=True):
     """
     绘制保护层厚度的网格颜色图
     
@@ -1468,11 +1472,12 @@ def plot_thickness_grid(csv_path=None, df=None, output_path=None, bins=50, cmap=
         
         if not is_clustered:
             # 原始CSV：按位置分组，找到每个位置的最大力
-            df = find_max_force_per_position(df, force_column=force_column)
+            df = find_max_force_per_position(df, force_column=force_column, enable_force_filter=enable_force_filter)
         else:
             print("检测到聚类后的CSV文件，应用过滤...")
             # 对于聚类后的CSV，也需要应用elbow过滤
-            df = filter_elbow_forces(df, force_column=force_column)
+            if enable_force_filter:
+                df = filter_elbow_forces(df, force_column=force_column)
     else:
         print(f"数据已处理过（{len(df)} 行），跳过重复处理")
     
@@ -1659,7 +1664,7 @@ def plot_thickness_grid(csv_path=None, df=None, output_path=None, bins=50, cmap=
 
 def plot_surface_area_grid(csv_path=None, df=None, stl_path=None, output_path=None, bins=50, cmap=None, figsize=(10, 8), 
                            margin_left=5.0, margin_right=5.0, margin_top=5.0, margin_bottom=5.0,
-                           search_radius=0.01):
+                           search_radius=0.01, enable_force_filter=True):
     """
     绘制表面积数据的网格颜色图
     
@@ -1736,11 +1741,12 @@ def plot_surface_area_grid(csv_path=None, df=None, stl_path=None, output_path=No
         
         if not is_clustered:
             # 原始CSV：按位置分组，找到每个位置的最大力
-            df = find_max_force_per_position(df, force_column=force_column)
+            df = find_max_force_per_position(df, force_column=force_column, enable_force_filter=enable_force_filter)
         else:
             print("检测到聚类后的CSV文件，应用过滤...")
             # 对于聚类后的CSV，也需要应用elbow过滤
-            df = filter_elbow_forces(df, force_column=force_column)
+            if enable_force_filter:
+                df = filter_elbow_forces(df, force_column=force_column)
     else:
         print(f"数据已处理过（{len(df)} 行），跳过重复处理")
     
@@ -1888,7 +1894,7 @@ def plot_surface_area_grid(csv_path=None, df=None, stl_path=None, output_path=No
 
 def plot_pressure_grid(csv_path=None, df=None, stl_path=None, output_path=None, bins=50, cmap=None, figsize=(10, 8), 
                        margin_left=5.0, margin_right=5.0, margin_top=5.0, margin_bottom=5.0,
-                       search_radius=0.01):
+                       search_radius=0.01, enable_force_filter=True):
     """
     绘制表面压强的网格颜色图（力/面积）
     
@@ -1969,11 +1975,12 @@ def plot_pressure_grid(csv_path=None, df=None, stl_path=None, output_path=None, 
         
         if not is_clustered:
             # 原始CSV：按位置分组，找到每个位置的最大力
-            df = find_max_force_per_position(df, force_column=force_column)
+            df = find_max_force_per_position(df, force_column=force_column, enable_force_filter=enable_force_filter)
         else:
             print("检测到聚类后的CSV文件，应用过滤...")
             # 对于聚类后的CSV，也需要应用elbow过滤
-            df = filter_elbow_forces(df, force_column=force_column)
+            if enable_force_filter:
+                df = filter_elbow_forces(df, force_column=force_column)
     else:
         print(f"数据已处理过（{len(df)} 行），跳过重复处理")
     
@@ -2159,6 +2166,7 @@ def main():
     parser.add_argument('--pressure-only', action='store_true', help='仅绘制压强图，不绘制其他图')
     parser.add_argument('--search-radius', type=float, default=0.01, help='表面积计算搜索半径（米，默认: 0.01）')
     parser.add_argument('--no-hardcode', action='store_true', help='禁用强制厚度设置（默认启用）。包括：1) z坐标在(0.32, 0.48)范围内的点设置为12mm；2) elbow/shoulder部位z坐标在(0.8, 1.0)范围内的点设置为6mm')
+    parser.add_argument('--no-force-filter', action='store_true', help='禁用force滤波（默认启用）。包括：1) 过滤elbow部位的特定数据；2) 限制z坐标在0.8~1.0范围内的力值')
     
     args = parser.parse_args()
     
@@ -2261,15 +2269,19 @@ def main():
                 print(f"      跳过分类（已有body_part列）")
             
             # 对于所有CSV（原始和聚类后的），都应用elbow过滤
-            print(f"[5/6] 过滤elbow部位数据...")
-            df_stats = filter_elbow_forces(df_stats, force_column=force_col)
+            enable_force_filter = not args.no_force_filter
+            if enable_force_filter:
+                print(f"[5/6] 过滤elbow部位数据...")
+                df_stats = filter_elbow_forces(df_stats, force_column=force_col)
+            else:
+                print(f"[5/6] 跳过elbow部位数据过滤（--no-force-filter）...")
             
             # 如果是原始CSV，需要按位置分组找到最大力（保留所有列包括fail_type_info）
             # find_max_force_per_position 内部会处理头部和踝关节的过滤
             # 注意：此时df_stats已经有body_part列了，find_max_force_per_position中的filter_elbow_forces会复用
             if not is_clustered:
                 print(f"[6/6] 按位置分组并找到最大力（包含过滤头部和踝关节）...")
-                df_stats = find_max_force_per_position(df_stats, force_column=force_col)
+                df_stats = find_max_force_per_position(df_stats, force_column=force_col, enable_force_filter=enable_force_filter)
                 # find_max_force_per_position返回的DataFrame应该还保留body_part列（如果filter_elbow_forces没有删除的话）
                 # 但为了安全，我们检查一下，如果没有就重新分类
                 if 'body_part' not in df_stats.columns:
@@ -2385,7 +2397,8 @@ def main():
                 margin_left=args.margin_left,
                 margin_right=args.margin_right,
                 margin_top=args.margin_top,
-                margin_bottom=args.margin_bottom
+                margin_bottom=args.margin_bottom,
+                enable_force_filter=not args.no_force_filter
             )
         except Exception as e:
             print(f"绘制力图时出错: {e}")
@@ -2418,7 +2431,8 @@ def main():
                 margin_bottom=args.margin_bottom,
                 method=method,
                 target_pressure=target_pressure,
-                force_12mm_in_z_range=not args.no_hardcode
+                force_12mm_in_z_range=not args.no_hardcode,
+                enable_force_filter=not args.no_force_filter
             )
         except Exception as e:
             print(f"绘制厚度图时出错: {e}")
@@ -2448,7 +2462,8 @@ def main():
                 margin_right=args.margin_right,
                 margin_top=args.margin_top,
                 margin_bottom=args.margin_bottom,
-                search_radius=args.search_radius
+                search_radius=args.search_radius,
+                enable_force_filter=not args.no_force_filter
             )
         except Exception as e:
             print(f"绘制表面积图时出错: {e}")
@@ -2478,7 +2493,8 @@ def main():
                 margin_right=args.margin_right,
                 margin_top=args.margin_top,
                 margin_bottom=args.margin_bottom,
-                search_radius=args.search_radius
+                search_radius=args.search_radius,
+                enable_force_filter=not args.no_force_filter
             )
         except Exception as e:
             print(f"绘制压强图时出错: {e}")

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-Joint M_eq Plotting Script
-绘制所有关节的M_eq（综合破坏载荷）与时间的关系曲线
+Joint Forces Plotting Script
+绘制所有关节的M_eq（综合破坏载荷）、M_bend（弯矩）和F_shear（剪切力）与时间的关系曲线
 """
 
 import pandas as pd
@@ -29,7 +29,7 @@ def load_joint_forces_csv(csv_file):
         sys.exit(1)
 
 def plot_joint_meq(df, output_file=None, figsize=(16, 10)):
-    """绘制所有关节的M_eq与时间曲线"""
+    """绘制所有关节的M_eq、M_bend和F_shear与时间曲线"""
     
     # 获取所有唯一的关节
     unique_joints = sorted(df['joint_name'].unique())
@@ -37,8 +37,13 @@ def plot_joint_meq(df, output_file=None, figsize=(16, 10)):
     
     print(f"Found {num_joints} unique joints")
     
-    # 创建渐变色colormap
-    cmap = plt.cm.get_cmap('viridis')  # 使用viridis渐变色
+    # 创建渐变色colormap（使用彩虹色）
+    try:
+        # 新版本matplotlib API
+        cmap = plt.colormaps.get_cmap('rainbow')
+    except AttributeError:
+        # 旧版本matplotlib API
+        cmap = plt.cm.get_cmap('rainbow')
     colors = [cmap(i / max(1, num_joints - 1)) for i in range(num_joints)]
     
     # 计算子图布局（尽量接近正方形）
@@ -47,7 +52,7 @@ def plot_joint_meq(df, output_file=None, figsize=(16, 10)):
     
     # 创建图形
     fig, axes = plt.subplots(rows, cols, figsize=figsize)
-    fig.suptitle('Joint M_eq (Equivalent Bending Moment) vs Time', fontsize=16, fontweight='bold')
+    fig.suptitle('Joint Forces: M_eq, M_bend, and F_shear vs Time', fontsize=16, fontweight='bold')
     
     # 如果只有一个关节，axes不是数组
     if num_joints == 1:
@@ -64,22 +69,44 @@ def plot_joint_meq(df, output_file=None, figsize=(16, 10)):
         # 选择子图
         ax = axes[idx]
         
-        # 绘制曲线，使用渐变色
-        ax.plot(joint_data['timestamp'], joint_data['M_eq'], 
-                linewidth=1.5, label=joint_name, color=colors[idx])
+        # 创建双y轴：左轴用于力矩（N·m），右轴用于力（N）
+        ax2 = ax.twinx()
+        
+        # 绘制M_eq曲线（左y轴）
+        line1 = ax.plot(joint_data['timestamp'], joint_data['M_eq'], 
+                       linewidth=1.5, label='M_eq', color='#1f77b4', alpha=0.8)
+        
+        # 绘制M_bend曲线（左y轴）
+        line2 = ax.plot(joint_data['timestamp'], joint_data['M_bend_mag'], 
+                       linewidth=1.5, label='M_bend', color='#ff7f0e', alpha=0.8, linestyle='--')
+        
+        # 绘制F_shear曲线（右y轴）
+        line3 = ax2.plot(joint_data['timestamp'], joint_data['F_shear_mag'], 
+                        linewidth=1.5, label='F_shear', color='#2ca02c', alpha=0.8, linestyle=':')
         
         # 设置标签和标题
         ax.set_xlabel('Time (s)', fontsize=10)
-        ax.set_ylabel('M_eq (N·m)', fontsize=10)
+        ax.set_ylabel('Moment (N·m)', fontsize=10, color='#1f77b4')
+        ax2.set_ylabel('Force (N)', fontsize=10, color='#2ca02c')
         ax.set_title(f'{joint_name}', fontsize=11, fontweight='bold')
         ax.grid(True, alpha=0.3)
-        ax.legend(loc='upper right', fontsize=8)
         
-        # 设置y轴从0开始（可选）
-        y_min = joint_data['M_eq'].min()
-        y_max = joint_data['M_eq'].max()
-        if y_max > 0:
-            ax.set_ylim(bottom=0, top=y_max * 1.1)
+        # 设置y轴颜色
+        ax.tick_params(axis='y', labelcolor='#1f77b4')
+        ax2.tick_params(axis='y', labelcolor='#2ca02c')
+        
+        # 合并图例
+        lines = line1 + line2 + line3
+        labels = [l.get_label() for l in lines]
+        ax.legend(lines, labels, loc='upper right', fontsize=8)
+        
+        # 设置y轴从0开始
+        y_max_moment = max(joint_data['M_eq'].max(), joint_data['M_bend_mag'].max())
+        y_max_force = joint_data['F_shear_mag'].max()
+        if y_max_moment > 0:
+            ax.set_ylim(bottom=0, top=y_max_moment * 1.1)
+        if y_max_force > 0:
+            ax2.set_ylim(bottom=0, top=y_max_force * 1.1)
     
     # 隐藏多余的子图
     for idx in range(num_joints, len(axes)):
@@ -95,7 +122,7 @@ def plot_joint_meq(df, output_file=None, figsize=(16, 10)):
         plt.show()
 
 def plot_joint_meq_overlay(df, output_file=None, figsize=(14, 8)):
-    """绘制所有关节的M_eq曲线叠加在同一张图上"""
+    """绘制所有关节的M_eq、M_bend和F_shear曲线叠加在同一张图上"""
     
     # 获取所有唯一的关节
     unique_joints = sorted(df['joint_name'].unique())
@@ -103,35 +130,65 @@ def plot_joint_meq_overlay(df, output_file=None, figsize=(14, 8)):
     
     print(f"Found {num_joints} unique joints")
     
-    # 创建渐变色colormap
-    cmap = plt.cm.get_cmap('viridis')  # 使用viridis渐变色
+    # 创建渐变色colormap（使用彩虹色）
+    try:
+        # 新版本matplotlib API
+        cmap = plt.colormaps.get_cmap('rainbow')
+    except AttributeError:
+        # 旧版本matplotlib API
+        cmap = plt.cm.get_cmap('rainbow')
     colors = [cmap(i / max(1, num_joints - 1)) for i in range(num_joints)]
     
-    # 创建图形
-    fig, ax = plt.subplots(figsize=figsize)
+    # 创建图形，使用三个子图分别显示M_eq、M_bend和F_shear
+    fig, axes = plt.subplots(3, 1, figsize=figsize, sharex=True)
+    fig.suptitle('All Joints: M_eq, M_bend, and F_shear vs Time', 
+                 fontsize=14, fontweight='bold')
     
-    # 为每个关节绘制曲线
+    # 绘制M_eq
+    ax1 = axes[0]
     for idx, joint_name in enumerate(unique_joints):
-        # 获取该关节的数据
         joint_data = df[df['joint_name'] == joint_name].copy()
         joint_data = joint_data.sort_values('timestamp')
-        
-        # 绘制曲线，使用渐变色
-        ax.plot(joint_data['timestamp'], joint_data['M_eq'], 
+        ax1.plot(joint_data['timestamp'], joint_data['M_eq'], 
                 linewidth=1.5, label=joint_name, alpha=0.8, color=colors[idx])
-    
-    # 设置标签和标题
-    ax.set_xlabel('Time (s)', fontsize=12)
-    ax.set_ylabel('M_eq (N·m)', fontsize=12)
-    ax.set_title('All Joints M_eq (Equivalent Bending Moment) vs Time', 
-                 fontsize=14, fontweight='bold')
-    ax.grid(True, alpha=0.3)
-    ax.legend(bbox_to_anchor=(1.05, 1), loc='upper left', fontsize=8, ncol=2)
-    
-    # 设置y轴从0开始
+    ax1.set_ylabel('M_eq (N·m)', fontsize=12)
+    ax1.set_title('M_eq (Equivalent Bending Moment)', fontsize=11, fontweight='bold')
+    ax1.grid(True, alpha=0.3)
+    ax1.legend(bbox_to_anchor=(1.05, 1), loc='upper left', fontsize=7, ncol=2)
     y_max = df['M_eq'].max()
     if y_max > 0:
-        ax.set_ylim(bottom=0, top=y_max * 1.1)
+        ax1.set_ylim(bottom=0, top=y_max * 1.1)
+    
+    # 绘制M_bend
+    ax2 = axes[1]
+    for idx, joint_name in enumerate(unique_joints):
+        joint_data = df[df['joint_name'] == joint_name].copy()
+        joint_data = joint_data.sort_values('timestamp')
+        ax2.plot(joint_data['timestamp'], joint_data['M_bend_mag'], 
+                linewidth=1.5, label=joint_name, alpha=0.8, color=colors[idx], linestyle='--')
+    ax2.set_ylabel('M_bend (N·m)', fontsize=12)
+    ax2.set_title('M_bend (Bending Moment)', fontsize=11, fontweight='bold')
+    ax2.grid(True, alpha=0.3)
+    ax2.legend(bbox_to_anchor=(1.05, 1), loc='upper left', fontsize=7, ncol=2)
+    y_max = df['M_bend_mag'].max()
+    if y_max > 0:
+        ax2.set_ylim(bottom=0, top=y_max * 1.1)
+    
+    # 绘制F_shear
+    ax3 = axes[2]
+    for idx, joint_name in enumerate(unique_joints):
+        joint_data = df[df['joint_name'] == joint_name].copy()
+        joint_data = joint_data.sort_values('timestamp')
+        ax3.plot(joint_data['timestamp'], joint_data['F_shear_mag'], 
+                linewidth=1.5, label=joint_name, alpha=0.8, color=colors[idx], linestyle=':')
+    ax3.set_xlabel('Time (s)', fontsize=12)
+    ax3.set_ylabel('F_shear (N)', fontsize=12)
+    ax3.set_title('F_shear (Shear Force)', fontsize=11, fontweight='bold')
+    ax3.grid(True, alpha=0.3)
+    ax3.legend(bbox_to_anchor=(1.05, 1), loc='upper left', fontsize=7, ncol=2)
+    y_max = df['F_shear_mag'].max()
+    if y_max > 0:
+        ax3.set_ylim(bottom=0, top=y_max * 1.1)
     
     plt.tight_layout()
     
@@ -144,7 +201,7 @@ def plot_joint_meq_overlay(df, output_file=None, figsize=(14, 8)):
 
 def main():
     parser = argparse.ArgumentParser(
-        description='Plot M_eq (Equivalent Bending Moment) vs Time for all joints',
+        description='Plot M_eq, M_bend, and F_shear vs Time for all joints',
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
@@ -179,7 +236,7 @@ Examples:
     df = load_joint_forces_csv(args.csv_file)
     
     # 检查必要的列是否存在
-    required_columns = ['timestamp', 'joint_name', 'M_eq']
+    required_columns = ['timestamp', 'joint_name', 'M_eq', 'M_bend_mag', 'F_shear_mag']
     missing_columns = [col for col in required_columns if col not in df.columns]
     if missing_columns:
         print(f"Error: Missing required columns: {missing_columns}")
