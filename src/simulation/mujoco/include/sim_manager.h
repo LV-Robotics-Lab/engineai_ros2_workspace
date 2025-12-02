@@ -13,6 +13,7 @@
 #include "ros_interface.h"
 #include "simulate/simulate.h"
 #include "simulate/glfw_adapter.h"
+#include "joint_forces_eigen.hpp"
 
 // Forward declaration
 class CustomGlfwAdapter;
@@ -93,6 +94,24 @@ bool IsContactVisualizationEnabled();
   
   // 获取配置加载器
   std::shared_ptr<ConfigLoader> GetConfigLoader() const { return config_loader_; }
+  
+  // 关节反力计算相关方法
+  // 计算并更新关节反力数据（在mj_step或mj_forward之后调用）
+  void ComputeJointForces();
+  
+  // 获取子body坐标系下的关节反力
+  const std::vector<WrenchEigen>& GetJointWrenchesChild() const { return joint_wrenches_child_; }
+  
+  // 获取父body坐标系下的关节反力
+  const std::vector<WrenchEigen>& GetJointWrenchesParent() const { return joint_wrenches_parent_; }
+  
+  // 获取每个link两端的关节受力
+  const std::vector<LinkEndForcesEigen>& GetLinkEndWrenches() const { return link_end_wrenches_; }
+  
+  // 获取指定关节的载荷分解（轴向力、剪切力、扭矩、弯矩）
+  // @param joint_name 关节名称
+  // @return 载荷分解结果，如果关节不存在则返回nullptr
+  std::unique_ptr<DecomposedWrenchEigen> GetJointDecomposedWrench(const std::string& joint_name) const;
 
  private:
   // Private constructor for singleton
@@ -139,5 +158,11 @@ bool IsContactVisualizationEnabled();
   bool auto_triggered_ = false;
   double auto_start_time_ = -1.0;
   bool auto_completed_ = false;
+  
+  // 关节反力数据存储
+  std::vector<WrenchEigen> joint_wrenches_child_;   // 子body坐标系下的关节反力
+  std::vector<WrenchEigen> joint_wrenches_parent_;  // 父body坐标系下的关节反力
+  std::vector<LinkEndForcesEigen> link_end_wrenches_;  // 每个link两端的关节受力
+  mutable std::mutex joint_forces_mutex_;  // 保护关节反力数据的互斥锁
 
 };

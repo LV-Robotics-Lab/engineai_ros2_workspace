@@ -110,7 +110,7 @@ cd /home/wang22/engineai/engineai_ros2_workspace && conda activate engineai_ros2
 ./scripts/build_nodes_4090.sh sim
 source install/setup.bash 
 # ros2 launch mujoco_simulator mujoco_simulator.launch.py
-ros2 launch mujoco_simulator mujoco_simulator.launch.py export_contact:=true save_contact_csv:=true save_perturbation_csv:=true 
+ros2 launch mujoco_simulator mujoco_simulator.launch.py export_contact:=true save_contact_csv:=true save_perturbation_csv:=true save_joint_forces_csv:=true 
 
 # # 推倒采样仿真器 - 支持交互式干扰力控制
 # # 基本启动
@@ -262,10 +262,28 @@ python3 scripts/plot_contact_grid.py logs/4in1/merged_contact_data_4in1_20251026
 ## 只设置力图大小，厚度图使用默认值
 python3 scripts/plot_contact_grid.py logs/4in1/merged_contact_data_4in1_20251026_194302_clustered_20251111_012128.csv --force-figsize 12 8
 
+
+
+
+# 绘制 joint force
+# 基本使用
+python3 scripts/plot_joint_meq.py ~/data/mujoco_logs/joint_forces_data_20251202_175946.csv
+
+# 叠加模式
+python3 scripts/plot_joint_meq.py ~/data/mujoco_logs/joint_forces_data_20251202_175946.csv --overlay  --figsize 20 12
+
+
+
+
+
 # terminal 4
 # 小球撞地测试
 conda activate engineai_ros2
 python /home/wang22/engineai/engineai_ros2_workspace/scripts/FreeBallTest/iron_ball_drop_bySensor.py
+
+
+
+
 
 
 # terminal 5

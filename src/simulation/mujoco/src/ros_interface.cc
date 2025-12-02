@@ -28,6 +28,7 @@
 
 #include "config_loader.h"
 #include "sim_manager.h"
+#include "joint_forces_eigen.hpp"
 #include "rclcpp/rclcpp.hpp"
 #include <mujoco/mujoco.h>
 
@@ -94,6 +95,13 @@ RosInterface::~RosInterface() {
     perturbation_csv_file_.close();
     RCLCPP_INFO(node_->get_logger(), "Perturbation data saved to: %s", perturbation_csv_file_path_.c_str());
   }
+  
+  // 关闭关节反力CSV文件
+  if (joint_forces_csv_file_.is_open()) {
+    std::lock_guard<std::mutex> lock(joint_forces_csv_mutex_);
+    joint_forces_csv_file_.close();
+    RCLCPP_INFO(node_->get_logger(), "Joint forces data saved to: %s", joint_forces_csv_file_path_.c_str());
+  }
 }
 
 /**
@@ -117,47 +125,51 @@ bool RosInterface::Initialize() {
   // 读取CSV保存参数
   node_->declare_parameter("save_contact_csv", false);
   node_->declare_parameter("save_perturbation_csv", false);
+  node_->declare_parameter("save_joint_forces_csv", false);
   node_->declare_parameter("csv_file_path", "");
   node_->declare_parameter("csv_save_frequency", 1);  // 每帧都保存
   
   save_contact_csv_ = node_->get_parameter("save_contact_csv").as_bool();
   save_perturbation_csv_ = node_->get_parameter("save_perturbation_csv").as_bool();
+  save_joint_forces_csv_ = node_->get_parameter("save_joint_forces_csv").as_bool();
   csv_file_path_ = node_->get_parameter("csv_file_path").as_string();
   csv_save_frequency_ = node_->get_parameter("csv_save_frequency").as_int();
 
-  // 如果启用CSV保存但没有指定路径，使用默认路径
-  if (save_contact_csv_ && csv_file_path_.empty()) {
-    // 获取用户主目录并创建logs目录（如果不存在）
+  // 确定CSV文件保存的目录
+  std::string csv_dir;
+  auto now = std::chrono::system_clock::now();
+  auto time_t = std::chrono::system_clock::to_time_t(now);
+  
+  if (!csv_file_path_.empty()) {
+    // 如果指定了路径，使用该路径作为目录
+    csv_dir = csv_file_path_;
+    std::filesystem::create_directories(csv_dir);
+  } else {
+    // 如果没有指定路径，使用默认路径
     const char* home_dir = std::getenv("HOME");
-    std::string logs_dir = (home_dir ? std::string(home_dir) : "") + "/data/mujoco_logs";
-    std::filesystem::create_directories(logs_dir);
-    
-    // 生成带时间戳的文件名
-    auto now = std::chrono::system_clock::now();
-    auto time_t = std::chrono::system_clock::to_time_t(now);
+    csv_dir = (home_dir ? std::string(home_dir) : "") + "/data/mujoco_logs";
+    std::filesystem::create_directories(csv_dir);
+  }
+  
+  // 生成接触力CSV文件路径
+  if (save_contact_csv_) {
     std::stringstream ss;
-    ss << logs_dir << "/contact_data_" << std::put_time(std::localtime(&time_t), "%Y%m%d_%H%M%S") << ".csv";
+    ss << csv_dir << "/contact_data_" << std::put_time(std::localtime(&time_t), "%Y%m%d_%H%M%S") << ".csv";
     csv_file_path_ = ss.str();
-    
-    // 生成推力数据CSV文件名
+  }
+  
+  // 生成推力数据CSV文件路径（与接触力CSV在同一目录）
+  if (save_contact_csv_) {
     std::stringstream ss_pert;
-    ss_pert << logs_dir << "/perturbation_data_" << std::put_time(std::localtime(&time_t), "%Y%m%d_%H%M%S") << ".csv";
+    ss_pert << csv_dir << "/perturbation_data_" << std::put_time(std::localtime(&time_t), "%Y%m%d_%H%M%S") << ".csv";
     perturbation_csv_file_path_ = ss_pert.str();
-  } else if (save_contact_csv_ && !csv_file_path_.empty()) {
-    // 如果指定了自定义路径，使用该路径并创建目录
-    std::filesystem::create_directories(csv_file_path_);
-    
-    // 在指定目录下生成带时间戳的文件名
-    auto now = std::chrono::system_clock::now();
-    auto time_t = std::chrono::system_clock::to_time_t(now);
-    std::stringstream ss;
-    ss << csv_file_path_ << "/contact_data_" << std::put_time(std::localtime(&time_t), "%Y%m%d_%H%M%S") << ".csv";
-    csv_file_path_ = ss.str();
-    
-    // 生成推力数据CSV文件名
-    std::stringstream ss_pert;
-    ss_pert << csv_file_path_.substr(0, csv_file_path_.find_last_of("/")) << "/perturbation_data_" << std::put_time(std::localtime(&time_t), "%Y%m%d_%H%M%S") << ".csv";
-    perturbation_csv_file_path_ = ss_pert.str();
+  }
+  
+  // 生成关节反力数据CSV文件路径（与接触力CSV在同一目录）
+  if (save_joint_forces_csv_) {
+    std::stringstream ss_joint;
+    ss_joint << csv_dir << "/joint_forces_data_" << std::put_time(std::localtime(&time_t), "%Y%m%d_%H%M%S") << ".csv";
+    joint_forces_csv_file_path_ = ss_joint.str();
   }
 
   // 获取关节数量（无论是否保存CSV都需要这个值）
@@ -197,6 +209,29 @@ bool RosInterface::Initialize() {
       RCLCPP_INFO(node_->get_logger(), "Perturbation data will be saved to: %s", perturbation_csv_file_path_.c_str());
     } else {
       RCLCPP_ERROR(node_->get_logger(), "Failed to open perturbation CSV file: %s", perturbation_csv_file_path_.c_str());
+    }
+  }
+
+  // 初始化关节反力CSV文件
+  if (save_joint_forces_csv_) {
+    std::lock_guard<std::mutex> lock(joint_forces_csv_mutex_);
+    joint_forces_csv_file_.open(joint_forces_csv_file_path_, std::ios::out);
+    if (joint_forces_csv_file_.is_open()) {
+      // 写入关节反力CSV头部
+      joint_forces_csv_file_ << "timestamp,joint_id,joint_name,body_id,body_name,"
+                             << "child_Mx,child_My,child_Mz,child_Fx,child_Fy,child_Fz,"
+                             << "parent_Mx,parent_My,parent_Mz,parent_Fx,parent_Fy,parent_Fz,"
+                             << "axis_x,axis_y,axis_z,"
+                             << "F_axial_mag,F_shear_mag,M_torsion_mag,M_bend_mag,M_eq,"
+                             << "F_axial_x,F_axial_y,F_axial_z,"
+                             << "F_shear_x,F_shear_y,F_shear_z,"
+                             << "M_torsion_x,M_torsion_y,M_torsion_z,"
+                             << "M_bend_x,M_bend_y,M_bend_z\n";
+      joint_forces_csv_file_.flush();
+      RCLCPP_INFO(node_->get_logger(), "Joint forces data will be saved to: %s", joint_forces_csv_file_path_.c_str());
+    } else {
+      RCLCPP_ERROR(node_->get_logger(), "Failed to open joint forces CSV file: %s", joint_forces_csv_file_path_.c_str());
+      save_joint_forces_csv_ = false;
     }
   }
 
@@ -376,6 +411,11 @@ void RosInterface::UpdateSimState(const mjModel* m, mjData* d) {
     // 使用全局同步机制，确保所有情况下都有适当的同步
     std::lock_guard<std::mutex> global_lock(contact_force_mutex_);
     PublishContactForces(m, d);
+  }
+
+  // 保存关节反力到CSV
+  if (save_joint_forces_csv_) {
+    SaveJointForcesToCSV(m, d);
   }
 }
 
@@ -1556,6 +1596,132 @@ void RosInterface::MotionStateTimerCallback() {
   
   // 发布消息
   motion_state_pub_->publish(std::move(motion_state_msg));
+}
+
+/**
+ * @brief 保存关节反力数据到CSV文件
+ * @param m MuJoCo模型指针
+ * @param d MuJoCo数据指针
+ * @details 从SimManager获取关节反力数据并保存到CSV文件
+ */
+void RosInterface::SaveJointForcesToCSV(const mjModel* m, mjData* d) {
+  if (!m || !d) return;
+  
+  static int frame_counter = 0;
+  frame_counter++;
+  
+  // 根据配置的频率决定是否保存
+  if (frame_counter % csv_save_frequency_ != 0) {
+    return;
+  }
+  
+  std::lock_guard<std::mutex> lock(joint_forces_csv_mutex_);
+  
+  if (!joint_forces_csv_file_.is_open()) {
+    return;
+  }
+  
+  // 使用MuJoCo仿真时间
+  double sim_time = d->time;
+  
+  // 从SimManager获取关节反力数据
+  auto& sim_manager = SimManager::GetInstance();
+  const auto& joint_wrenches_child = sim_manager.GetJointWrenchesChild();
+  const auto& joint_wrenches_parent = sim_manager.GetJointWrenchesParent();
+  
+  // 遍历所有关节
+  for (int j = 0; j < m->njnt; ++j) {
+    int jtype = m->jnt_type[j];
+    if (jtype == mjJNT_FREE) {
+      continue;  // 跳过自由关节
+    }
+    
+    // 获取关节名称
+    std::string joint_name = m->names + m->name_jntadr[j];
+    
+    // 获取关节所属的body
+    int body_id = m->jnt_bodyid[j];
+    std::string body_name = m->names + m->name_bodyadr[body_id];
+    
+    // 获取关节轴向量
+    Eigen::Vector3d axis(
+      m->jnt_axis[3 * j + 0],
+      m->jnt_axis[3 * j + 1],
+      m->jnt_axis[3 * j + 2]
+    );
+    
+    // 获取子body坐标系下的反力
+    const auto& child_wrench = joint_wrenches_child[j];
+    const auto& parent_wrench = joint_wrenches_parent[j];
+    
+    // 计算载荷分解
+    DecomposedWrenchEigen decomposed;
+    try {
+      decomposed = decomposeWrenchBodyFrameEigen(child_wrench, axis);
+    } catch (const std::exception& e) {
+      // 如果分解失败，使用零值
+      decomposed.F_axial_mag = 0.0;
+      decomposed.F_axial = Eigen::Vector3d::Zero();
+      decomposed.F_shear_mag = 0.0;
+      decomposed.F_shear = Eigen::Vector3d::Zero();
+      decomposed.M_torsion_mag = 0.0;
+      decomposed.M_torsion = Eigen::Vector3d::Zero();
+      decomposed.M_bend_mag = 0.0;
+      decomposed.M_bend = Eigen::Vector3d::Zero();
+      decomposed.M_eq = 0.0;
+    }
+    
+    // 写入CSV行
+    joint_forces_csv_file_ << std::fixed << std::setprecision(6)
+                           << sim_time << ","
+                           << j << ","
+                           << "\"" << joint_name << "\","
+                           << body_id << ","
+                           << "\"" << body_name << "\","
+                           // 子body坐标系下的反力
+                           << child_wrench.M.x() << ","
+                           << child_wrench.M.y() << ","
+                           << child_wrench.M.z() << ","
+                           << child_wrench.F.x() << ","
+                           << child_wrench.F.y() << ","
+                           << child_wrench.F.z() << ","
+                           // 父body坐标系下的反力
+                           << parent_wrench.M.x() << ","
+                           << parent_wrench.M.y() << ","
+                           << parent_wrench.M.z() << ","
+                           << parent_wrench.F.x() << ","
+                           << parent_wrench.F.y() << ","
+                           << parent_wrench.F.z() << ","
+                           // 关节轴向量
+                           << axis.x() << ","
+                           << axis.y() << ","
+                           << axis.z() << ","
+                           // 载荷分解的标量值
+                           << decomposed.F_axial_mag << ","
+                           << decomposed.F_shear_mag << ","
+                           << decomposed.M_torsion_mag << ","
+                           << decomposed.M_bend_mag << ","
+                           << decomposed.M_eq << ","  // 综合破坏载荷
+                           // 轴向力向量
+                           << decomposed.F_axial.x() << ","
+                           << decomposed.F_axial.y() << ","
+                           << decomposed.F_axial.z() << ","
+                           // 剪切力向量
+                           << decomposed.F_shear.x() << ","
+                           << decomposed.F_shear.y() << ","
+                           << decomposed.F_shear.z() << ","
+                           // 扭矩向量
+                           << decomposed.M_torsion.x() << ","
+                           << decomposed.M_torsion.y() << ","
+                           << decomposed.M_torsion.z() << ","
+                           // 弯矩向量
+                           << decomposed.M_bend.x() << ","
+                           << decomposed.M_bend.y() << ","
+                           << decomposed.M_bend.z() << "\n";
+  }
+  
+  // 刷新CSV文件缓冲区
+  joint_forces_csv_file_.flush();
 }
 
 

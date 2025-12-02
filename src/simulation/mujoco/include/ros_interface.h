@@ -89,6 +89,9 @@ class RosInterface {
   // Motion state timer callback
   void MotionStateTimerCallback();
 
+  // Save joint forces to CSV file
+  void SaveJointForcesToCSV(const mjModel* m, mjData* d);
+
   // Contact force publishing parameters
   bool export_contact_ = false;
   std::string contact_topic_ = "/mujoco/contact_forces";
@@ -105,6 +108,12 @@ class RosInterface {
   std::string perturbation_csv_file_path_;
   std::ofstream perturbation_csv_file_;
   std::mutex perturbation_csv_mutex_;
+
+  // Joint forces CSV logging parameters
+  bool save_joint_forces_csv_ = false;
+  std::string joint_forces_csv_file_path_;
+  std::ofstream joint_forces_csv_file_;
+  std::mutex joint_forces_csv_mutex_;
 
   // Mutex for thread safety
   mutable std::mutex mtx_;

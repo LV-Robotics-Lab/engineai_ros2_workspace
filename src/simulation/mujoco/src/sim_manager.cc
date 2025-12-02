@@ -17,6 +17,7 @@
 #include <iomanip>
 #include "simulate/array_safety.h"
 #include "simulate/glfw_adapter.h"
+#include "joint_forces_eigen.hpp"
 
 namespace mj = mujoco;
 namespace mju = mujoco::sample_util;
@@ -1032,6 +1033,9 @@ void SimManager::HandleDropLoad() {
     }
     
     mj_forward(m_, d_);
+    
+    // 计算关节反力
+    ComputeJointForces();
   } else {
     sim_->LoadMessageClear();
   }
@@ -1065,6 +1069,9 @@ void SimManager::HandleUILoad() {
     }
     
     mj_forward(m_, d_);
+    
+    // 计算关节反力
+    ComputeJointForces();
   } else {
     sim_->LoadMessageClear();
   }
@@ -1153,6 +1160,9 @@ void SimManager::PhysicsLoop() {
             // 这样可以确保用户施加的外力不会被UI系统覆盖
             ApplyPerturbationForces();
             
+            // 计算关节反力
+            ComputeJointForces();
+            
             // 更新ROS接口状态，发送最新的仿真数据
             ros_interface_->UpdateSimState(m_, d_);
             
@@ -1197,6 +1207,9 @@ void SimManager::PhysicsLoop() {
               // 这样可以确保用户施加的外力不会被UI系统覆盖
               ApplyPerturbationForces();
               
+              // 计算关节反力
+              ComputeJointForces();
+              
               // 更新ROS接口状态，发送最新的仿真数据
               ros_interface_->UpdateSimState(m_, d_);
               
@@ -1228,6 +1241,10 @@ void SimManager::PhysicsLoop() {
           // 仿真暂停状态：不推进时间，只更新当前状态的计算
           // 这确保用户交互（如拖拽、施加外力）和可视化能正常工作
           mj_forward(m_, d_);
+          
+          // 计算关节反力（即使暂停时也更新，以便可视化）
+          ComputeJointForces();
+          
           sim_->speed_changed = true;  // 标记速度已改变，下次运行时需要重新同步
         }
       }
@@ -1307,6 +1324,9 @@ void SimManager::PhysicsThread(std::string_view filename) {
       RCLCPP_INFO(logger, "Performing initial mj_forward calculation...");
       mj_forward(m_, d_);
       RCLCPP_INFO(logger, "mj_forward calculation completed");
+      
+      // 计算初始关节反力
+      ComputeJointForces();
     } else {
       sim_->LoadMessageClear();
     }
@@ -1339,6 +1359,79 @@ void SimManager::PhysicsThread(std::string_view filename) {
     RCLCPP_ERROR(logger, "Exception during physics thread cleanup: %s", e.what());
   } catch (...) {
     RCLCPP_ERROR(logger, "Unknown exception during physics thread cleanup");
+  }
+}
+
+/**
+ * @brief 计算并更新关节反力数据
+ * @details 在mj_step或mj_forward之后调用，计算所有关节的反力
+ * 
+ * 使用示例：
+ * @code
+ * // 1. 获取子body坐标系下的关节反力
+ * const auto& jointChild = sim_manager.GetJointWrenchesChild();
+ * 
+ * // 2. 获取父body坐标系下的关节反力
+ * const auto& jointParent = sim_manager.GetJointWrenchesParent();
+ * 
+ * // 3. 获取每个link两端的关节受力
+ * const auto& linkEnds = sim_manager.GetLinkEndWrenches();
+ * 
+ * // 4. 获取特定关节的载荷分解（轴向力、剪切力、扭矩、弯矩）
+ * auto comp = sim_manager.GetJointDecomposedWrench("J03_KNEE_PITCH_L");
+ * if (comp) {
+ *   std::cout << "轴向力: " << comp->F_axial_mag << std::endl;
+ *   std::cout << "剪切力: " << comp->F_shear_mag << std::endl;
+ *   std::cout << "扭矩: " << comp->M_torsion_mag << std::endl;
+ *   std::cout << "弯矩: " << comp->M_bend_mag << std::endl;
+ * }
+ * @endcode
+ */
+void SimManager::ComputeJointForces() {
+  if (!m_ || !d_) return;
+  
+  std::lock_guard<std::mutex> lock(joint_forces_mutex_);
+  
+  // 计算子body坐标系下的关节反力
+  joint_wrenches_child_ = computeJointWrenchesChildBodyEigen(m_, d_);
+  
+  // 计算父body坐标系下的关节反力
+  joint_wrenches_parent_ = computeJointWrenchesParentBodyEigen(m_, d_, joint_wrenches_child_);
+  
+  // 计算每个link两端的关节受力
+  link_end_wrenches_ = collectLinkEndWrenchesEigen(m_, joint_wrenches_child_, joint_wrenches_parent_);
+}
+
+/**
+ * @brief 获取指定关节的载荷分解
+ * @param joint_name 关节名称
+ * @return 载荷分解结果，如果关节不存在则返回nullptr
+ */
+std::unique_ptr<DecomposedWrenchEigen> SimManager::GetJointDecomposedWrench(const std::string& joint_name) const {
+  if (!m_ || !d_) return nullptr;
+  
+  std::lock_guard<std::mutex> lock(joint_forces_mutex_);
+  
+  // 查找关节ID
+  int joint_id = mj_name2id(m_, mjOBJ_JOINT, joint_name.c_str());
+  if (joint_id < 0 || joint_id >= static_cast<int>(joint_wrenches_child_.size())) {
+    return nullptr;
+  }
+  
+  // 获取关节轴向量
+  Eigen::Vector3d axis(
+    m_->jnt_axis[3 * joint_id + 0],
+    m_->jnt_axis[3 * joint_id + 1],
+    m_->jnt_axis[3 * joint_id + 2]
+  );
+  
+  // 分解载荷
+  try {
+    DecomposedWrenchEigen result = decomposeWrenchBodyFrameEigen(joint_wrenches_child_[joint_id], axis);
+    return std::make_unique<DecomposedWrenchEigen>(result);
+  } catch (const std::exception& e) {
+    std::cerr << "Error decomposing wrench for joint " << joint_name << ": " << e.what() << std::endl;
+    return nullptr;
   }
 }
 

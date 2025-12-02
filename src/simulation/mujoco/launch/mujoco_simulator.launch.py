@@ -44,6 +44,12 @@ def generate_launch_description():
         description='是否保存推力数据到CSV文件 (true/false)'
     )
     
+    declare_save_joint_forces_csv_arg = DeclareLaunchArgument(
+        'save_joint_forces_csv',
+        default_value='true',
+        description='是否保存关节反力数据到CSV文件 (true/false)'
+    )
+    
     declare_csv_path_arg = DeclareLaunchArgument(
         'csv_file_path',
         default_value='',
@@ -102,6 +108,7 @@ def generate_launch_description():
         contact_topic = LaunchConfiguration('contact_topic').perform(context)
         save_csv_str = LaunchConfiguration('save_contact_csv').perform(context)
         save_perturbation_csv_str = LaunchConfiguration('save_perturbation_csv').perform(context)
+        save_joint_forces_csv_str = LaunchConfiguration('save_joint_forces_csv').perform(context)
         csv_file_path = LaunchConfiguration('csv_file_path').perform(context)
         urdf_file = LaunchConfiguration('urdf_file').perform(context)
         perturb_force = LaunchConfiguration('perturb_force_magnitude').perform(context)
@@ -113,6 +120,7 @@ def generate_launch_description():
         export_contact = export_contact_str.lower() == 'true'
         save_csv = save_csv_str.lower() == 'true'
         save_perturbation_csv = save_perturbation_csv_str.lower() == 'true'
+        save_joint_forces_csv = save_joint_forces_csv_str.lower() == 'true'
 
         # 读取URDF文件内容
         try:
@@ -154,6 +162,7 @@ def generate_launch_description():
                 {'contact_topic': contact_topic},    # 接触力话题名称
                 {'save_contact_csv': save_csv},      # 是否保存CSV
                 {'save_perturbation_csv': save_perturbation_csv},  # 是否保存推力CSV
+                {'save_joint_forces_csv': save_joint_forces_csv},  # 是否保存关节反力CSV
                 {'csv_file_path': csv_file_path},    # CSV文件路径
                 {'perturb_force_magnitude': float(perturb_force)},      # 干扰力大小
                 {'perturb_torque_magnitude': float(perturb_torque)},    # 干扰力矩大小
@@ -204,6 +213,7 @@ def generate_launch_description():
         declare_contact_topic_arg,
         declare_save_csv_arg,
         declare_save_perturbation_csv_arg,
+        declare_save_joint_forces_csv_arg,
         declare_csv_path_arg,
         declare_urdf_file_arg,
         declare_perturb_force_arg,
