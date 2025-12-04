@@ -69,6 +69,7 @@ add_executable(mujoco_simulator
   src/ros_interface.cc
   src/config_loader.cc
   src/sim_manager.cc
+  src/force_interpolation.cc
 )
 
 # # 推倒采样仿真器 - 支持交互式干扰力控制
