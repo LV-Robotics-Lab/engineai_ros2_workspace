@@ -15,6 +15,8 @@
 #include <cstring>
 #include <iostream>
 #include <iomanip>
+#include <sys/stat.h>
+#include <vector>
 #include "simulate/array_safety.h"
 #include "simulate/glfw_adapter.h"
 #include "joint_forces_eigen.hpp"
@@ -607,6 +609,62 @@ bool SimManager::Initialize() {
   RCLCPP_INFO(logger, "Loaded perturbation parameters from YAML: force=%.1fN, torque=%.1fN.m, duration=%.1fs", 
               perturb_force_magnitude_, perturb_torque_magnitude_, perturb_duration_);
 
+  // 初始化力插值计算器（用于柔性护具防护力计算）
+  try {
+    // 尝试多个可能的路径来找到RT-FEM.tsv文件
+    std::string tsv_path;
+    std::vector<std::string> possible_paths = {
+      // 源代码目录
+      "/home/wang22/engineai/engineai_ros2_workspace/scripts/ThicknessCalculate/RT-FEM.tsv",
+      // 相对于当前工作目录
+      "scripts/ThicknessCalculate/RT-FEM.tsv",
+      "../scripts/ThicknessCalculate/RT-FEM.tsv",
+      "../../scripts/ThicknessCalculate/RT-FEM.tsv",
+      // 安装目录（可能不存在）
+      assets_path + "/scripts/ThicknessCalculate/RT-FEM.tsv",
+    };
+    
+    // 检查文件是否存在
+    auto file_exists = [](const std::string& path) -> bool {
+      struct stat buffer;
+      return (stat(path.c_str(), &buffer) == 0);
+    };
+    
+    bool found = false;
+    for (const auto& path : possible_paths) {
+      if (file_exists(path)) {
+        tsv_path = path;
+        found = true;
+        break;
+      }
+    }
+    
+    // 如果找不到，让ForceInterpolation使用默认路径查找
+    if (!found) {
+      RCLCPP_WARN(logger, "RT-FEM.tsv not found in common paths, using default search");
+      tsv_path = "";  // 空字符串让ForceInterpolation自己查找
+    }
+    
+    force_interpolator_ = std::make_unique<ForceInterpolation>(tsv_path);
+    
+    // 获取力插值范围信息
+    auto force_range = force_interpolator_->GetForceRange();
+    auto thickness_range = force_interpolator_->GetThicknessRange();
+    
+    RCLCPP_INFO(logger, "=== Protection Feature Initialized ===");
+    RCLCPP_INFO(logger, "Protection enabled: %s", protection_enabled_ ? "YES" : "NO");
+    RCLCPP_INFO(logger, "Protection thickness: %.1f mm", protection_thickness_);
+    RCLCPP_INFO(logger, "RT-FEM data file: %s", tsv_path.c_str());
+    RCLCPP_INFO(logger, "Force range: [%.1f, %.1f] kN", force_range.first, force_range.second);
+    RCLCPP_INFO(logger, "Thickness range: [%.1f, %.1f] mm", thickness_range.first, thickness_range.second);
+    RCLCPP_INFO(logger, "=====================================");
+  } catch (const std::exception& e) {
+    RCLCPP_ERROR(logger, "Failed to initialize force interpolation: %s", e.what());
+    RCLCPP_ERROR(logger, "Protection feature will be DISABLED!");
+    protection_enabled_ = false;
+    force_interpolator_.reset();
+  }
+
   // 创建MuJoCo ROS接口
   ros_interface_ = std::make_unique<mujoco::RosInterface>(node_, config_loader_);
   if (!ros_interface_->Initialize()) {
@@ -1153,12 +1211,37 @@ void SimManager::PhysicsLoop() {
             syncSim = d_->time;        // 重置仿真时间基准
             sim_->speed_changed = false;  // 清除速度变化标志
 
-            // 执行单步仿真：计算动力学并推进时间
-            mj_step(m_, d_);
+            // 执行仿真步进：使用mj_step1和mj_step2分离，以便在中间应用防护
+            // mj_step1: 计算位置、速度，调用控制回调
+            mj_step1(m_, d_);
             
-            // 在仿真步进后施加推力（确保在UI系统清空外力之后）
-            // 这样可以确保用户施加的外力不会被UI系统覆盖
+            // 在mj_step1之后，mj_step2之前，施加推力（确保在UI系统清空外力之后）
             ApplyPerturbationForces();
+            
+            // mj_step2: 计算执行器力、加速度、约束力，并进行时间积分
+            // 注意：我们需要手动调用mj_step2的内部步骤，以便在mj_fwdConstraint之后应用防护
+            mj_fwdActuation(m_, d_);
+            mj_fwdAcceleration(m_, d_);
+            mj_fwdConstraint(m_, d_);
+            
+            // 在约束求解之后，应用防护到接触力
+            ApplyProtectionToContactForces();
+            
+            // 继续mj_step2的剩余步骤
+            mj_sensorAcc(m_, d_);
+            mj_checkAcc(m_, d_);
+            
+            // 比较前向和逆向解（如果启用）
+            if (m_->opt.enableflags & mjENBL_FWDINV) {
+              mj_compareFwdInv(m_, d_);
+            }
+            
+            // 时间积分（使用Euler积分，因为mj_step1/mj_step2只支持Euler）
+            if (m_->opt.integrator == mjINT_IMPLICIT || m_->opt.integrator == mjINT_IMPLICITFAST) {
+              mj_implicit(m_, d_);
+            } else {
+              mj_Euler(m_, d_);
+            }
             
             // 计算关节反力
             ComputeJointForces();
@@ -1200,12 +1283,37 @@ void SimManager::PhysicsLoop() {
               // 注入噪声（如果启用）：模拟传感器噪声、环境扰动等
               sim_->InjectNoise();
               
-              // 执行仿真步进
-              mj_step(m_, d_);
+              // 执行仿真步进：使用mj_step1和mj_step2分离，以便在中间应用防护
+              // mj_step1: 计算位置、速度，调用控制回调
+              mj_step1(m_, d_);
               
-              // 在仿真步进后施加推力（确保在UI系统清空外力之后）
-              // 这样可以确保用户施加的外力不会被UI系统覆盖
+              // 在mj_step1之后，mj_step2之前，施加推力（确保在UI系统清空外力之后）
               ApplyPerturbationForces();
+              
+              // mj_step2: 计算执行器力、加速度、约束力，并进行时间积分
+              // 注意：我们需要手动调用mj_step2的内部步骤，以便在mj_fwdConstraint之后应用防护
+              mj_fwdActuation(m_, d_);
+              mj_fwdAcceleration(m_, d_);
+              mj_fwdConstraint(m_, d_);
+              
+              // 在约束求解之后，应用防护到接触力
+              ApplyProtectionToContactForces();
+              
+              // 继续mj_step2的剩余步骤
+              mj_sensorAcc(m_, d_);
+              mj_checkAcc(m_, d_);
+              
+              // 比较前向和逆向解（如果启用）
+              if (m_->opt.enableflags & mjENBL_FWDINV) {
+                mj_compareFwdInv(m_, d_);
+              }
+              
+              // 时间积分（使用Euler积分，因为mj_step1/mj_step2只支持Euler）
+              if (m_->opt.integrator == mjINT_IMPLICIT || m_->opt.integrator == mjINT_IMPLICITFAST) {
+                mj_implicit(m_, d_);
+              } else {
+                mj_Euler(m_, d_);
+              }
               
               // 计算关节反力
               ComputeJointForces();
@@ -1359,6 +1467,329 @@ void SimManager::PhysicsThread(std::string_view filename) {
     RCLCPP_ERROR(logger, "Exception during physics thread cleanup: %s", e.what());
   } catch (...) {
     RCLCPP_ERROR(logger, "Unknown exception during physics thread cleanup");
+  }
+}
+
+/**
+ * @brief 应用防护到接触力
+ * @details 在mj_fwdConstraint之后调用，根据防护材料厚度减少接触力
+ *          该函数会遍历所有接触点，计算每个接触点的力大小，
+ *          使用ForceInterpolation计算防护后的力，然后按比例缩放efc_force
+ */
+void SimManager::ApplyProtectionToContactForces() {
+  if (!m_ || !d_) {
+    return;
+  }
+  
+  // 检查防护功能是否启用
+  if (!protection_enabled_) {
+    static bool warned_once = false;
+    if (!warned_once && node_) {
+      RCLCPP_WARN_THROTTLE(node_->get_logger(), *node_->get_clock(), 10000, 
+                          "Protection feature is DISABLED");
+      warned_once = true;
+    }
+    return;
+  }
+  
+  if (!force_interpolator_) {
+    static bool warned_once = false;
+    if (!warned_once && node_) {
+      RCLCPP_WARN_THROTTLE(node_->get_logger(), *node_->get_clock(), 10000, 
+                          "Force interpolator is not initialized - protection disabled");
+      warned_once = true;
+    }
+    return;
+  }
+  
+  // 获取当前接触数量
+  int ncon = d_->ncon;
+  if (ncon == 0) {
+    return;
+  }
+  
+  // 每1000帧打印一次，确认防护功能被调用
+  static int call_count = 0;
+  call_count++;
+  if (call_count % 1000 == 0 && node_) {
+    RCLCPP_INFO_THROTTLE(node_->get_logger(), *node_->get_clock(), 5000,
+                        "ApplyProtectionToContactForces called: ncon=%d", ncon);
+  }
+  
+  // 对于高接触数量，立即记录（用于调试，但只记录前几次）
+  // if (ncon > 5 && call_count <= 10) {
+  //   RCLCPP_INFO(node_->get_logger(), 
+  //               "ApplyProtectionToContactForces: ncon=%d, protection_enabled=%s, thickness=%.1fmm",
+  //               ncon, protection_enabled_ ? "YES" : "NO", protection_thickness_);
+  // }
+  
+  // 统计信息
+  int protected_contacts = 0;
+  int skipped_small_force = 0;
+  int skipped_out_of_range = 0;
+  int skipped_no_effect = 0;
+  double total_force_reduction = 0.0;
+  double max_force_before = 0.0;
+  double max_force_after = 0.0;
+  static int frame_count = 0;  // 用于调试输出频率控制
+  
+  // 遍历所有接触点
+  for (int i = 0; i < ncon; ++i) {
+    const mjContact& contact = d_->contact[i];
+    
+    // 获取接触坐标系下的6D接触力 [fx, fy, fz, tx, ty, tz]
+    mjtNum contact_force[6] = {0.0, 0.0, 0.0, 0.0, 0.0, 0.0};
+    mj_contactForce(m_, d_, i, contact_force);
+    
+    // 计算接触坐标系下的法向力大小（接触系x方向，正值，即正压力）
+    double contact_force_normal = std::max(0.0, static_cast<double>(contact_force[0]));
+    
+    // 记录最大力（用于调试）
+    if (contact_force_normal > max_force_before) {
+      max_force_before = contact_force_normal;
+    }
+    
+    // 如果法向力太小，跳过（避免对微小接触力进行插值）
+    if (contact_force_normal < 1000) {  // 1000 N阈值
+      skipped_small_force++;
+      // 对于高力，立即记录（不依赖frame_count）
+      if (contact_force_normal > 20000) {
+        static int high_force_small_count = 0;
+        high_force_small_count++;
+        if (high_force_small_count <= 5) {
+          RCLCPP_WARN(node_->get_logger(), 
+                      "High force %.2f N detected but skipped (small force threshold: 1000 N)",
+                      contact_force_normal);
+        }
+      }
+      continue;
+    }
+    
+    // 将力从N转换为kN（ForceInterpolation使用kN作为单位）
+    double force_unprotected_kN = contact_force_normal / 1000.0;
+    
+    // 使用ForceInterpolation计算防护后的力
+    double force_protected_kN;
+    try {
+      if (!force_interpolator_->IsInputValid(force_unprotected_kN, protection_thickness_)) {
+        // 如果超出范围，跳过该接触点
+        skipped_out_of_range++;
+        // 对于超出范围的力，立即记录调试信息（不依赖frame_count）
+        if (contact_force_normal > 20000) {
+          static int out_of_range_count = 0;
+          out_of_range_count++;
+          if (out_of_range_count <= 5) {
+            RCLCPP_WARN(node_->get_logger(),
+                        "Force %.2f kN (%.2f N) out of range for thickness %.1f mm",
+                        force_unprotected_kN, contact_force_normal, protection_thickness_);
+          }
+        }
+        continue;
+      }
+      force_protected_kN = force_interpolator_->GetProtectedForce(force_unprotected_kN, protection_thickness_);
+    } catch (const std::exception& e) {
+      // 如果插值失败，跳过该接触点
+      skipped_out_of_range++;
+      if (contact_force_normal > 20000) {
+        RCLCPP_WARN_THROTTLE(node_->get_logger(), *node_->get_clock(), 1000,
+                            "Interpolation failed for force %.2f kN: %s",
+                            force_unprotected_kN, e.what());
+      }
+      continue;
+    }
+    
+    // 计算缩放因子：防护后的力 / 原始力
+    double scale_factor = force_protected_kN / force_unprotected_kN;
+    
+    // 确保缩放因子在合理范围内（0到1之间，因为防护应该减少力）
+    scale_factor = std::max(0.0, std::min(1.0, scale_factor));
+    
+    // 如果缩放因子接近1，说明防护效果不明显，跳过
+    // 但是，即使缩放因子不是1.0，如果防护效果很小（比如只减少1%），也可能被跳过
+    // 这里我们只跳过真正没有效果的情况（缩放因子 = 1.0）
+    if (std::abs(scale_factor - 1.0) < 1e-6) {
+      skipped_no_effect++;
+      // 对于高力，立即记录为什么没有效果（不依赖frame_count）
+      if (contact_force_normal > 20000) {
+        static int no_effect_count = 0;
+        no_effect_count++;
+        if (no_effect_count <= 5) {
+          RCLCPP_WARN(node_->get_logger(),
+                      "Force %.2f kN: scale_factor=%.6f (too close to 1.0, no effect)",
+                      force_unprotected_kN, scale_factor);
+        }
+      }
+      continue;
+    }
+    
+    // 对于高力，总是应用防护，即使效果不明显
+    // 这样可以确保防护功能总是生效
+    
+    // 对于高力，立即记录防护应用信息（不依赖frame_count）
+    if (contact_force_normal > 20000) {
+      static int protection_applied_count = 0;
+      protection_applied_count++;
+      if (protection_applied_count <= 10) {
+        RCLCPP_INFO(node_->get_logger(),
+                    "Applying protection: force=%.2f kN -> %.2f kN (scale=%.4f)",
+                    force_unprotected_kN, force_protected_kN, scale_factor);
+      }
+    }
+    
+    // 记录最大防护后的力（用于调试）
+    double force_after = force_protected_kN * 1000.0;  // 转换回N
+    if (force_after > max_force_after) {
+      max_force_after = force_after;
+    }
+    
+    // 获取该接触点对应的约束索引
+    // 每个接触点可能对应多个约束（法向约束和摩擦约束）
+    // 我们需要找到该接触点对应的所有约束并缩放它们的efc_force
+    
+    // 查找该接触点对应的约束范围
+    // 接触约束在efc_force中的索引可以通过contact.efc_address获取
+    int efc_address = contact.efc_address;
+    if (efc_address < 0 || efc_address >= d_->nefc) {
+      continue;
+    }
+    
+    // 接触约束通常包括：
+    // 1. 法向约束（1个）
+    // 2. 摩擦约束（最多4个，取决于摩擦维数）
+    // 我们需要缩放法向约束的力，摩擦约束的力按相同比例缩放
+    
+    // 获取接触的约束维数（dim = 1, 3, 4, 或 6）
+    // dim = 1: 只有法向约束
+    // dim = 3: 法向约束 + 2个切向摩擦约束
+    // dim = 4: 法向约束 + 3个切向摩擦约束（椭圆摩擦）
+    // dim = 6: 法向约束 + 5个切向摩擦约束（椭球摩擦）
+    int dim = contact.dim;
+    
+    // 检查摩擦锥类型
+    // 对于 pyramidal 摩擦锥，efc_force 存储的是 pyramid 编码，需要先解码、缩放、再编码
+    // 对于 elliptic 摩擦锥，efc_force 直接存储力值，可以直接缩放
+    bool is_pyramidal = mj_isPyramidal(m_);
+    
+    if (is_pyramidal && dim > 1) {
+      // Pyramidal 摩擦锥：需要解码、缩放、再编码
+      // pyramid 表示：对于 dim=3，有 2*(dim-1) = 4 个元素
+      // 对于 dim=4，有 2*(dim-1) = 6 个元素
+      // 对于 dim=6，有 2*(dim-1) = 10 个元素（最大）
+      int pyramid_size = 2 * (dim - 1);
+      
+      // 安全检查：确保不会越界
+      if (efc_address < 0 || efc_address + pyramid_size > d_->nefc) {
+        // 如果越界，跳过该接触点
+        continue;
+      }
+      
+      // 保存原始的 pyramid 表示（用于验证）
+      // 使用足够大的数组（最大 dim=6，pyramid_size=10）
+      mjtNum original_pyramid[10];
+      for (int k = 0; k < pyramid_size; ++k) {
+        original_pyramid[k] = d_->efc_force[efc_address + k];
+      }
+      
+      // 解码 pyramid 表示得到实际的接触力
+      mjtNum decoded_force[6] = {0.0, 0.0, 0.0, 0.0, 0.0, 0.0};
+      mju_decodePyramid(decoded_force, d_->efc_force + efc_address, contact.friction, dim);
+      
+      // 记录原始法向力（用于验证）
+      double original_normal = decoded_force[0];
+      
+      // 缩放接触力（只缩放法向力，切向力按相同比例缩放以保持方向）
+      decoded_force[0] *= scale_factor;  // 法向力
+      for (int j = 1; j < dim && j < 6; ++j) {  // 确保不越界
+        decoded_force[j] *= scale_factor;  // 切向力
+      }
+      
+      // 重新编码为 pyramid 表示
+      mju_encodePyramid(d_->efc_force + efc_address, decoded_force, contact.friction, dim);
+      
+      // 验证：重新解码检查是否正确（仅对高力进行验证，避免性能影响）
+      if (contact_force_normal > 20000 && frame_count % 10 == 0) {
+        mjtNum verify_force[6] = {0.0, 0.0, 0.0, 0.0, 0.0, 0.0};
+        mju_decodePyramid(verify_force, d_->efc_force + efc_address, contact.friction, dim);
+        double verify_normal = verify_force[0];
+        double expected_normal = original_normal * scale_factor;
+        double error = std::abs(verify_normal - expected_normal) / (expected_normal + 1e-6);  // 避免除零
+        if (error > 0.01) {  // 1% 误差阈值
+          RCLCPP_WARN_THROTTLE(node_->get_logger(), *node_->get_clock(), 1000,
+                              "Pyramid encode/decode error: original=%.2f, expected=%.2f, got=%.2f, error=%.2f%%",
+                              original_normal, expected_normal, verify_normal, error * 100.0);
+        }
+      }
+    } else {
+      // Elliptic 摩擦锥或 dim=1（无摩擦）：直接缩放 efc_force
+      // 对于 dim=1，只有 1 个元素（法向力）
+      // 对于 elliptic，有 dim 个元素
+      int efc_size = (dim == 1) ? 1 : dim;
+      if (efc_address >= 0 && efc_address < d_->nefc && efc_size > 0) {
+        int max_size = std::min(efc_size, d_->nefc - efc_address);
+        for (int j = 0; j < max_size; ++j) {
+          int efc_idx = efc_address + j;
+          if (efc_idx >= 0 && efc_idx < d_->nefc) {
+            d_->efc_force[efc_idx] *= scale_factor;
+          }
+        }
+      }
+    }
+    
+    // 记录统计信息
+    protected_contacts++;
+    total_force_reduction += (1.0 - scale_factor) * contact_force_normal;
+  }
+  
+  // 重要：修改efc_force后，需要重新计算qfrc_constraint
+  // 因为qfrc_constraint = J^T * efc_force，其中J是约束雅可比矩阵
+  // 如果不重新计算，修改的efc_force不会影响后续的动力学计算
+  if (protected_contacts > 0) {
+    mj_mulJacTVec(m_, d_, d_->qfrc_constraint, d_->efc_force);
+  }
+  
+  // 每1000帧打印一次统计信息（避免日志过多）
+  frame_count++;
+  if (frame_count % 1000 == 0 && node_) {
+    auto logger = node_->get_logger();
+    auto clock = node_->get_clock();
+    if (clock) {
+      double reduction_percent = (max_force_before > 0) ? 
+        (1.0 - max_force_after / max_force_before) * 100.0 : 0.0;
+      RCLCPP_INFO_THROTTLE(logger, *clock, 5000, 
+                          "Protection stats: contacts=%d, protected=%d, skipped_small=%d, skipped_range=%d, skipped_no_effect=%d, max_force_before=%.2fN (%.2f kN), max_force_after=%.2fN (%.2f kN), reduction=%.1f%%, avg_reduction=%.2fN",
+                          ncon, protected_contacts, skipped_small_force, skipped_out_of_range, skipped_no_effect,
+                          max_force_before, max_force_before/1000.0, max_force_after, max_force_after/1000.0,
+                          reduction_percent,
+                          protected_contacts > 0 ? total_force_reduction / protected_contacts : 0.0);
+    }
+  }
+  
+  // 对于高力，即使没有达到1000帧，也输出统计信息（但限制频率）
+  if (max_force_before > 20000 && node_) {
+    static int high_force_stats_count = 0;
+    high_force_stats_count++;
+    if (high_force_stats_count <= 5) {  // 只记录前5次
+      double reduction_percent = (max_force_before > 0) ? 
+        (1.0 - max_force_after / max_force_before) * 100.0 : 0.0;
+      RCLCPP_INFO(node_->get_logger(),
+                  "Protection stats (high force): contacts=%d, protected=%d, skipped_small=%d, skipped_range=%d, skipped_no_effect=%d, max_force_before=%.2fN (%.2f kN), max_force_after=%.2fN (%.2f kN), reduction=%.1f%%",
+                  ncon, protected_contacts, skipped_small_force, skipped_out_of_range, skipped_no_effect,
+                  max_force_before, max_force_before/1000.0, max_force_after, max_force_after/1000.0,
+                  reduction_percent);
+    }
+  }
+  
+  // 对于非常大的力，立即记录调试信息（不限制频率）
+  if (max_force_before > 20000 && protected_contacts == 0 && node_) {
+    static int high_force_warn_count = 0;
+    high_force_warn_count++;
+    if (high_force_warn_count <= 10) {  // 只记录前10次
+      RCLCPP_WARN(node_->get_logger(), 
+                  "High force detected (%.2f N) but NO contacts were protected! "
+                  "skipped_small=%d, skipped_range=%d, skipped_no_effect=%d, protection_enabled=%s",
+                  max_force_before, skipped_small_force, skipped_out_of_range, skipped_no_effect,
+                  protection_enabled_ ? "YES" : "NO");
+    }
   }
 }
 

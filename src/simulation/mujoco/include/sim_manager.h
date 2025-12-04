@@ -14,6 +14,7 @@
 #include "simulate/simulate.h"
 #include "simulate/glfw_adapter.h"
 #include "joint_forces_eigen.hpp"
+#include "force_interpolation.h"
 
 // Forward declaration
 class CustomGlfwAdapter;
@@ -113,6 +114,15 @@ bool IsContactVisualizationEnabled();
   // @return 载荷分解结果，如果关节不存在则返回nullptr
   std::unique_ptr<DecomposedWrenchEigen> GetJointDecomposedWrench(const std::string& joint_name) const;
 
+  // 防护护具相关方法
+  // 设置防护材料厚度
+  void SetProtectionThickness(double thickness) { protection_thickness_ = thickness; }
+  double GetProtectionThickness() const { return protection_thickness_; }
+  
+  // 启用/禁用防护功能
+  void EnableProtection(bool enable) { protection_enabled_ = enable; }
+  bool IsProtectionEnabled() const { return protection_enabled_; }
+
  private:
   // Private constructor for singleton
   SimManager();
@@ -125,6 +135,10 @@ bool IsContactVisualizationEnabled();
   const char* Diverged(int disableflags, const mjData* d);
   void HandleDropLoad();
   void HandleUILoad();
+  
+  // 应用防护到接触力（在mj_fwdConstraint之后调用）
+  // 该函数会修改d->efc_force来减少接触力
+  void ApplyProtectionToContactForces();
 
   // Private member variables
   rclcpp::Node::SharedPtr node_;
@@ -164,5 +178,10 @@ bool IsContactVisualizationEnabled();
   std::vector<WrenchEigen> joint_wrenches_parent_;  // 父body坐标系下的关节反力
   std::vector<LinkEndForcesEigen> link_end_wrenches_;  // 每个link两端的关节受力
   mutable std::mutex joint_forces_mutex_;  // 保护关节反力数据的互斥锁
+  
+  // 防护护具相关成员变量
+  std::unique_ptr<ForceInterpolation> force_interpolator_;  // 力插值计算器
+  double protection_thickness_ = 12.0;  // 防护材料厚度 (mm)，默认12mm
+  bool protection_enabled_ = true;  // 是否启用防护功能，默认启用
 
 };
