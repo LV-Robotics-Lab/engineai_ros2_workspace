@@ -494,6 +494,11 @@ void RosInterface::PublishContactForces(const mjModel* m, mjData* d) {
   std::unique_ptr<std::vector<mjtNum>> csv_green_ball_pos_x;
   std::unique_ptr<std::vector<mjtNum>> csv_green_ball_pos_y;
   std::unique_ptr<std::vector<mjtNum>> csv_green_ball_pos_z;
+  std::unique_ptr<std::vector<mjtNum>> csv_green_ball_pos_body2_x;  // body2坐标系下的绿球坐标（当两个geom都不是world时）
+  std::unique_ptr<std::vector<mjtNum>> csv_green_ball_pos_body2_y;
+  std::unique_ptr<std::vector<mjtNum>> csv_green_ball_pos_body2_z;
+  std::unique_ptr<std::vector<int>> csv_body1_ids;  // body1的ID（用于判断是否为world）
+  std::unique_ptr<std::vector<int>> csv_body2_ids;  // body2的ID（用于判断是否为world）
   std::unique_ptr<std::vector<mjtNum>> csv_world_forces_x;
   std::unique_ptr<std::vector<mjtNum>> csv_world_forces_y;
   std::unique_ptr<std::vector<mjtNum>> csv_world_forces_z;
@@ -536,6 +541,11 @@ void RosInterface::PublishContactForces(const mjModel* m, mjData* d) {
     csv_green_ball_pos_x = std::make_unique<std::vector<mjtNum>>(ncon);
     csv_green_ball_pos_y = std::make_unique<std::vector<mjtNum>>(ncon);
     csv_green_ball_pos_z = std::make_unique<std::vector<mjtNum>>(ncon);
+    csv_green_ball_pos_body2_x = std::make_unique<std::vector<mjtNum>>(ncon);
+    csv_green_ball_pos_body2_y = std::make_unique<std::vector<mjtNum>>(ncon);
+    csv_green_ball_pos_body2_z = std::make_unique<std::vector<mjtNum>>(ncon);
+    csv_body1_ids = std::make_unique<std::vector<int>>(ncon);
+    csv_body2_ids = std::make_unique<std::vector<int>>(ncon);
     csv_world_forces_x = std::make_unique<std::vector<mjtNum>>(ncon);
     csv_world_forces_y = std::make_unique<std::vector<mjtNum>>(ncon);
     csv_world_forces_z = std::make_unique<std::vector<mjtNum>>(ncon);
@@ -701,6 +711,11 @@ void RosInterface::PublishContactForces(const mjModel* m, mjData* d) {
       (*csv_body1_names)[i] = name1;
       (*csv_body2_names)[i] = name2;
     }
+    // 存储body1_id和body2_id（用于判断是否为world）
+    if (save_contact_csv_ && csv_body1_ids && csv_body2_ids) {
+      (*csv_body1_ids)[i] = body1_id;
+      (*csv_body2_ids)[i] = body2_id;
+    }
 
     // 计算红球坐标：世界坐标系接触点（应用偏移量）
     mjtNum normal[3] = {contact.frame[0], contact.frame[1], contact.frame[2]};
@@ -722,26 +737,19 @@ void RosInterface::PublishContactForces(const mjModel* m, mjData* d) {
     }
 
     // 计算绿球坐标：标准姿态下的接触点
+    // 如果两个geom都不是world，需要分别计算两次（一次用body1，一次用body2）
     mjtNum green_ball_pos[3] = {0, 0, 0};
-    int link = m->geom_bodyid[contact.geom[0]];
-    if (link == 0) link = m->geom_bodyid[contact.geom[1]]; // 如果第一个是 world
+    mjtNum green_ball_pos_body2[3] = {0, 0, 0};
     
-    if (link > 0 && link < m->nbody && !std_xpos_cache.empty() && !std_xmat_cache.empty()) {
+    // 判断两个geom是否都不是world
+    bool both_not_world = (body1_id != 0 && body2_id != 0);
+    
+    // 计算body1坐标系下的绿球坐标（或如果body1是world，则用body2）
+    int link1 = body1_id != 0 ? body1_id : body2_id;
+    if (link1 > 0 && link1 < m->nbody && !std_xpos_cache.empty() && !std_xmat_cache.empty()) {
       // 当前姿态下接触点 → link 局部坐标系
-      // --------------------------------
-      // d->xpos + 3*link：
-      // d->xpos 是 MuJoCo 数据结构中存储所有link当前位置的一维数组
-      // 格式：[link0_x, link0_y, link0_z, link1_x, link1_y, link1_z, ...]
-      // + 3*link 跳转到指定link的位置数据起始地址
-      // x_LW 指向该link当前的 (x,y,z) 坐标
-      // --------------------------------
-      // d->xmat + 9*link：
-      // d->xmat 是 MuJoCo 数据结构中存储所有link当前旋转矩阵的一维数组
-      // 格式：[link0_R00,R01,R02,R10,R11,R12,R20,R21,R22, link1_R00,R01,...]
-      // + 9*link 跳转到指定link的3x3旋转矩阵起始地址
-      // R_LW 指向该link当前的旋转矩阵（按行存储）
-      const mjtNum* x_LW = d->xpos + 3*link;
-      const mjtNum* R_LW = d->xmat + 9*link;
+      const mjtNum* x_LW = d->xpos + 3*link1;
+      const mjtNum* R_LW = d->xmat + 9*link1;
       
       double pW_minus_x[3] = {contact.pos[0]-x_LW[0],
                               contact.pos[1]-x_LW[1],
@@ -750,12 +758,32 @@ void RosInterface::PublishContactForces(const mjModel* m, mjData* d) {
       rotT3(R_LW, pW_minus_x, p_L);
       
       // 标准姿态：link 局部 → 世界
-      const mjtNum* x_LW_std = std_xpos_cache.data() + 3*link;
-      const mjtNum* R_LW_std = std_xmat_cache.data() + 9*link;
+      const mjtNum* x_LW_std = std_xpos_cache.data() + 3*link1;
+      const mjtNum* R_LW_std = std_xmat_cache.data() + 9*link1;
       rot3(R_LW_std, p_L, green_ball_pos);
       green_ball_pos[0] += x_LW_std[0];
       green_ball_pos[1] += x_LW_std[1];
       green_ball_pos[2] += x_LW_std[2];
+    }
+    
+    // 如果两个geom都不是world，还需要计算body2坐标系下的绿球坐标
+    if (both_not_world && body2_id > 0 && body2_id < m->nbody && !std_xpos_cache.empty() && !std_xmat_cache.empty()) {
+      const mjtNum* x_LW_body2 = d->xpos + 3*body2_id;
+      const mjtNum* R_LW_body2 = d->xmat + 9*body2_id;
+      
+      double pW_minus_x_body2[3] = {contact.pos[0]-x_LW_body2[0],
+                                    contact.pos[1]-x_LW_body2[1],
+                                    contact.pos[2]-x_LW_body2[2]};
+      double p_L_body2[3];
+      rotT3(R_LW_body2, pW_minus_x_body2, p_L_body2);
+      
+      // 标准姿态：link 局部 → 世界
+      const mjtNum* x_LW_std_body2 = std_xpos_cache.data() + 3*body2_id;
+      const mjtNum* R_LW_std_body2 = std_xmat_cache.data() + 9*body2_id;
+      rot3(R_LW_std_body2, p_L_body2, green_ball_pos_body2);
+      green_ball_pos_body2[0] += x_LW_std_body2[0];
+      green_ball_pos_body2[1] += x_LW_std_body2[1];
+      green_ball_pos_body2[2] += x_LW_std_body2[2];
     }
     
     // 存储绿球坐标到CSV变量
@@ -763,6 +791,12 @@ void RosInterface::PublishContactForces(const mjModel* m, mjData* d) {
       (*csv_green_ball_pos_x)[i] = green_ball_pos[0];
       (*csv_green_ball_pos_y)[i] = green_ball_pos[1];
       (*csv_green_ball_pos_z)[i] = green_ball_pos[2];
+    }
+    // 如果两个geom都不是world，存储body2坐标系下的绿球坐标
+    if (save_contact_csv_ && both_not_world && csv_green_ball_pos_body2_x && csv_green_ball_pos_body2_y && csv_green_ball_pos_body2_z) {
+      (*csv_green_ball_pos_body2_x)[i] = green_ball_pos_body2[0];
+      (*csv_green_ball_pos_body2_y)[i] = green_ball_pos_body2[1];
+      (*csv_green_ball_pos_body2_z)[i] = green_ball_pos_body2[2];
     }
 
     // 获取接触坐标系下的6D接触力 [fx, fy, fz, tx, ty, tz]
@@ -1392,68 +1426,105 @@ void RosInterface::PublishContactForces(const mjModel* m, mjData* d) {
       auto active_perturbations = sim_manager.GetActivePerturbations();
       int num_perturbations = active_perturbations.size();
       
-      // 为每个接触点写入一行数据
+      // 为每个接触点写入数据（如果两个geom都不是world，写入两行；否则写入一行）
       for (int i = 0; i < ncon; ++i) {
-        // 写入CSV行 - 使用智能指针访问
-        if (csv_body1_names && csv_body2_names && csv_red_ball_pos_x && csv_red_ball_pos_y && csv_red_ball_pos_z &&
-            csv_green_ball_pos_x && csv_green_ball_pos_y && csv_green_ball_pos_z &&
-            csv_world_forces_x && csv_world_forces_y && csv_world_forces_z &&
-            csv_contact_force_magnitudes && csv_contact_force_normals &&
-            csv_world_torques_x && csv_world_torques_y && csv_world_torques_z &&
-            csv_base_link_pos_x && csv_base_link_pos_y && csv_base_link_pos_z &&
-            csv_base_link_quat_w && csv_base_link_quat_x && csv_base_link_quat_y && csv_base_link_quat_z &&
-            csv_base_link_vel_x && csv_base_link_vel_y && csv_base_link_vel_z &&
-            csv_base_link_angvel_x && csv_base_link_angvel_y && csv_base_link_angvel_z &&
-            csv_collision_link_pos_x && csv_collision_link_pos_y && csv_collision_link_pos_z &&
-            csv_collision_link_quat_w && csv_collision_link_quat_x && csv_collision_link_quat_y && csv_collision_link_quat_z) {
-          csv_file_ << std::fixed << std::setprecision(6)
-                    << sim_time << ","
-                    << i << ","
-                    << "\"" << (*csv_body1_names)[i] << "\","
-                    << "\"" << (*csv_body2_names)[i] << "\","
-                    << (*csv_red_ball_pos_x)[i] << ","   // 红球坐标：世界坐标系接触点
-                    << (*csv_red_ball_pos_y)[i] << ","
-                    << (*csv_red_ball_pos_z)[i] << ","
-                    << (*csv_green_ball_pos_x)[i] << "," // 绿球坐标：标准姿态下的接触点
-                    << (*csv_green_ball_pos_y)[i] << ","
-                    << (*csv_green_ball_pos_z)[i] << ","
-                    << (*csv_world_forces_x)[i] << ","
-                    << (*csv_world_forces_y)[i] << ","
-                    << (*csv_world_forces_z)[i] << ","
-                    << (*csv_contact_force_magnitudes)[i] << ","  // 单个接触点合力大小
-                    << (*csv_contact_force_normals)[i] << ","     // 接触坐标系下的法向力分量
-                    << (*csv_world_torques_x)[i] << ","
-                    << (*csv_world_torques_y)[i] << ","
-                    << (*csv_world_torques_z)[i] << ","
-                    << (*csv_base_link_pos_x)[i] << ","
-                    << (*csv_base_link_pos_y)[i] << ","
-                    << (*csv_base_link_pos_z)[i] << ","
-                    << (*csv_base_link_quat_w)[i] << ","
-                    << (*csv_base_link_quat_x)[i] << ","
-                    << (*csv_base_link_quat_y)[i] << ","
-                    << (*csv_base_link_quat_z)[i] << ","
-                    << (*csv_base_link_vel_x)[i] << ","      // base link线速度x
-                    << (*csv_base_link_vel_y)[i] << ","      // base link线速度y
-                    << (*csv_base_link_vel_z)[i] << ","      // base link线速度z
-                    << (*csv_base_link_angvel_x)[i] << ","   // base link角速度x
-                    << (*csv_base_link_angvel_y)[i] << ","   // base link角速度y
-                    << (*csv_base_link_angvel_z)[i] << ","   // base link角速度z
-                    << (*csv_collision_link_pos_x)[i] << ","    // 碰撞link的世界坐标位置
-                    << (*csv_collision_link_pos_y)[i] << ","
-                    << (*csv_collision_link_pos_z)[i] << ","
-                    << (*csv_collision_link_quat_w)[i] << ","   // 碰撞link的世界坐标姿态四元数
-                    << (*csv_collision_link_quat_x)[i] << ","
-                    << (*csv_collision_link_quat_y)[i] << ","
-                    << (*csv_collision_link_quat_z)[i];
+        // 获取body1_id和body2_id
+        int body1_id = 0;
+        int body2_id = 0;
+        if (csv_body1_ids && csv_body2_ids) {
+          body1_id = (*csv_body1_ids)[i];
+          body2_id = (*csv_body2_ids)[i];
         }
+        
+        // 判断是否需要写入两行（只有当两个geom都不是world时）
+        bool write_two_rows = (body1_id != 0 && body2_id != 0);
+        
+        // 确定要写入的行数
+        int num_rows = write_two_rows ? 2 : 1;
+        
+        for (int row = 0; row < num_rows; ++row) {
+          // 确定当前行使用的绿球坐标
+          mjtNum green_ball_x, green_ball_y, green_ball_z;
+          if (write_two_rows) {
+            // 写入两行：第一行用body1的坐标系，第二行用body2的坐标系
+            if (row == 0) {
+              // 第一行：使用body1的坐标系
+              green_ball_x = (*csv_green_ball_pos_x)[i];
+              green_ball_y = (*csv_green_ball_pos_y)[i];
+              green_ball_z = (*csv_green_ball_pos_z)[i];
+            } else {
+              // 第二行：使用body2的坐标系
+              green_ball_x = (*csv_green_ball_pos_body2_x)[i];
+              green_ball_y = (*csv_green_ball_pos_body2_y)[i];
+              green_ball_z = (*csv_green_ball_pos_body2_z)[i];
+            }
+          } else {
+            // 只写入一行：使用非world的那个body的坐标系
+            green_ball_x = (*csv_green_ball_pos_x)[i];
+            green_ball_y = (*csv_green_ball_pos_y)[i];
+            green_ball_z = (*csv_green_ball_pos_z)[i];
+          }
+          
+          // 写入CSV行 - 使用智能指针访问
+          if (csv_body1_names && csv_body2_names && csv_red_ball_pos_x && csv_red_ball_pos_y && csv_red_ball_pos_z &&
+              csv_green_ball_pos_x && csv_green_ball_pos_y && csv_green_ball_pos_z &&
+              csv_world_forces_x && csv_world_forces_y && csv_world_forces_z &&
+              csv_contact_force_magnitudes && csv_contact_force_normals &&
+              csv_world_torques_x && csv_world_torques_y && csv_world_torques_z &&
+              csv_base_link_pos_x && csv_base_link_pos_y && csv_base_link_pos_z &&
+              csv_base_link_quat_w && csv_base_link_quat_x && csv_base_link_quat_y && csv_base_link_quat_z &&
+              csv_base_link_vel_x && csv_base_link_vel_y && csv_base_link_vel_z &&
+              csv_base_link_angvel_x && csv_base_link_angvel_y && csv_base_link_angvel_z &&
+              csv_collision_link_pos_x && csv_collision_link_pos_y && csv_collision_link_pos_z &&
+              csv_collision_link_quat_w && csv_collision_link_quat_x && csv_collision_link_quat_y && csv_collision_link_quat_z) {
+            csv_file_ << std::fixed << std::setprecision(6)
+                      << sim_time << ","
+                      << i << ","
+                      << "\"" << (*csv_body1_names)[i] << "\","
+                      << "\"" << (*csv_body2_names)[i] << "\","
+                      << (*csv_red_ball_pos_x)[i] << ","   // 红球坐标：世界坐标系接触点
+                      << (*csv_red_ball_pos_y)[i] << ","
+                      << (*csv_red_ball_pos_z)[i] << ","
+                      << green_ball_x << "," // 绿球坐标：标准姿态下的接触点（使用body1或body2的坐标系）
+                      << green_ball_y << ","
+                      << green_ball_z << ","
+                      << (*csv_world_forces_x)[i] << ","
+                      << (*csv_world_forces_y)[i] << ","
+                      << (*csv_world_forces_z)[i] << ","
+                      << (*csv_contact_force_magnitudes)[i] << ","  // 单个接触点合力大小
+                      << (*csv_contact_force_normals)[i] << ","     // 接触坐标系下的法向力分量
+                      << (*csv_world_torques_x)[i] << ","
+                      << (*csv_world_torques_y)[i] << ","
+                      << (*csv_world_torques_z)[i] << ","
+                      << (*csv_base_link_pos_x)[i] << ","
+                      << (*csv_base_link_pos_y)[i] << ","
+                      << (*csv_base_link_pos_z)[i] << ","
+                      << (*csv_base_link_quat_w)[i] << ","
+                      << (*csv_base_link_quat_x)[i] << ","
+                      << (*csv_base_link_quat_y)[i] << ","
+                      << (*csv_base_link_quat_z)[i] << ","
+                      << (*csv_base_link_vel_x)[i] << ","      // base link线速度x
+                      << (*csv_base_link_vel_y)[i] << ","      // base link线速度y
+                      << (*csv_base_link_vel_z)[i] << ","      // base link线速度z
+                      << (*csv_base_link_angvel_x)[i] << ","   // base link角速度x
+                      << (*csv_base_link_angvel_y)[i] << ","   // base link角速度y
+                      << (*csv_base_link_angvel_z)[i] << ","   // base link角速度z
+                      << (*csv_collision_link_pos_x)[i] << ","    // 碰撞link的世界坐标位置
+                      << (*csv_collision_link_pos_y)[i] << ","
+                      << (*csv_collision_link_pos_z)[i] << ","
+                      << (*csv_collision_link_quat_w)[i] << ","   // 碰撞link的世界坐标姿态四元数
+                      << (*csv_collision_link_quat_x)[i] << ","
+                      << (*csv_collision_link_quat_y)[i] << ","
+                      << (*csv_collision_link_quat_z)[i];
+          }
 
-        // 添加关节角度参数
-        for (int j = 0; j < num_total_joints_; j++) {
-          csv_file_ << "," << d->qpos[j];
+          // 添加关节角度参数
+          for (int j = 0; j < num_total_joints_; j++) {
+            csv_file_ << "," << d->qpos[j];
+          }
+          
+          csv_file_ << "\n";
         }
-        
-        
-        csv_file_ << "\n";
       }
       
       // 每帧都刷新文件缓冲区（10kHz频率）
