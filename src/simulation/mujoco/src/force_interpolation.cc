@@ -3,6 +3,7 @@
 #include <sstream>
 #include <algorithm>
 #include <cmath>
+#include <numeric>
 #include <sys/stat.h>
 
 ForceInterpolation::ForceInterpolation(const std::string& tsv_file_path) {
@@ -131,6 +132,25 @@ void ForceInterpolation::LoadData(const std::string& file_path) {
   if (force_values_.empty()) {
     throw std::runtime_error("RT-FEM文件中没有有效数据");
   }
+  
+  // 对数据进行排序，确保force_values_是升序的（lower_bound需要升序数据）
+  // 同时需要同步排序force_protected_matrix_
+  std::vector<size_t> indices(force_values_.size());
+  std::iota(indices.begin(), indices.end(), 0);
+  std::sort(indices.begin(), indices.end(), [this](size_t a, size_t b) {
+    return force_values_[a] < force_values_[b];
+  });
+  
+  // 创建排序后的数据
+  std::vector<double> sorted_force_values;
+  std::vector<std::vector<double>> sorted_force_protected_matrix;
+  for (size_t idx : indices) {
+    sorted_force_values.push_back(force_values_[idx]);
+    sorted_force_protected_matrix.push_back(force_protected_matrix_[idx]);
+  }
+  
+  force_values_ = std::move(sorted_force_values);
+  force_protected_matrix_ = std::move(sorted_force_protected_matrix);
   
   // 计算数据范围
   force_min_ = *std::min_element(force_values_.begin(), force_values_.end());

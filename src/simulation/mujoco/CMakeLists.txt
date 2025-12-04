@@ -80,6 +80,17 @@ add_executable(mujoco_simulator
 #   src/sim_manager.cc
 # )
 
+# 测试程序 - 测试ForceInterpolation功能
+add_executable(test_force_interpolation
+  test_force_interpolation.cpp
+  src/force_interpolation.cc
+)
+
+target_include_directories(test_force_interpolation PUBLIC
+  ${CMAKE_CURRENT_SOURCE_DIR}/include
+  ${CMAKE_CURRENT_SOURCE_DIR}
+)
+
 # 设置运行时搜索路径，避免conda环境与系统库冲突
 set_target_properties(mujoco_simulator PROPERTIES
   BUILD_WITH_INSTALL_RPATH TRUE
@@ -155,6 +166,7 @@ ament_target_dependencies(mujoco_simulator
 
 install(TARGETS
   mujoco_simulator
+  test_force_interpolation
   # perturbation_simulator
   DESTINATION lib/${PROJECT_NAME}
 )
