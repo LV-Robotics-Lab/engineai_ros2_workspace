@@ -14,6 +14,7 @@ import xml.etree.ElementTree as ET
 import mediapy as media
 from datetime import datetime
 from multiprocessing import Pool, cpu_count
+from functools import partial
 
 # Set MuJoCo memory limits to avoid stack overflow - MUST be set before importing mujoco
 # os.environ['MUJOCO_GL'] = 'egl'  # Use EGL for better memory management
@@ -353,12 +354,24 @@ def cluster_nearby_contacts(contact_forces, min_distance=0.1):
             clusters[root] = []
         clusters[root].append(i)
     
-    # For each cluster, select the contact with maximum force
+    # For each cluster, select the contact with maximum force for each body
+    # CSV中如果body1和body2都不是world，会有两行数据（一行用body1坐标系，一行用body2坐标系）
+    # 聚类时需要为每个body保留最大力的点
     clustered_forces = []
     for cluster_indices in clusters.values():
         cluster_contacts = [contact_forces[i] for i in cluster_indices]
-        max_force_cf = max(cluster_contacts, key=lambda x: x['max_force'])
-        clustered_forces.append(max_force_cf)
+        # 按body2_name分组，为每个body保留最大力的点
+        body_groups = {}
+        for cf in cluster_contacts:
+            body_name = cf.get('body2_name', '')
+            if body_name not in body_groups:
+                body_groups[body_name] = []
+            body_groups[body_name].append(cf)
+        
+        # 为每个body选择最大力的点
+        for body_name, body_contacts in body_groups.items():
+            max_force_cf = max(body_contacts, key=lambda x: x['max_force'])
+            clustered_forces.append(max_force_cf)
     
     print(f"Clustered {len(contact_forces)} contacts into {len(clustered_forces)} non-overlapping spheres")
     
@@ -394,19 +407,17 @@ def cluster_nearby_contacts_simple(contact_forces, min_distance=0.1):
         spatial_hash[hash_key].append((i, cf))
     
     # Cluster points within the same or adjacent hash cells
+    # CSV中如果body1和body2都不是world，会有两行数据（一行用body1坐标系，一行用body2坐标系）
+    # 聚类时需要为每个body保留最大力的点
     clustered_forces = []
     processed = set()
     
     for hash_key, points in spatial_hash.items():
         if len(points) == 0:
             continue
-            
-        # Find the point with maximum force in this cell
-        max_force_cf = max(points, key=lambda x: x[1]['max_force'])
-        clustered_forces.append(max_force_cf[1])
-        processed.add(max_force_cf[0])
         
-        # Check adjacent cells for nearby points
+        # 收集相邻cell的所有点
+        all_nearby_points = list(points)
         for dx in [-1, 0, 1]:
             for dy in [-1, 0, 1]:
                 for dz in [-1, 0, 1]:
@@ -417,14 +428,74 @@ def cluster_nearby_contacts_simple(contact_forces, min_distance=0.1):
                         for i, cf in spatial_hash[adj_key]:
                             if i not in processed:
                                 # Check if within distance
-                                pos1 = max_force_cf[1]['position']
+                                pos1 = points[0][1]['position']
                                 pos2 = cf['position']
                                 distance = np.linalg.norm(np.array(pos1) - np.array(pos2))
                                 if distance < min_distance:
-                                    processed.add(i)
+                                    all_nearby_points.append((i, cf))
+        
+        # 按body2_name分组，为每个body保留最大力的点
+        body_groups = {}
+        for i, cf in all_nearby_points:
+            body_name = cf.get('body2_name', '')
+            if body_name not in body_groups:
+                body_groups[body_name] = []
+            body_groups[body_name].append((i, cf))
+        
+        # 为每个body选择最大力的点
+        for body_name, body_points in body_groups.items():
+            max_force_cf = max(body_points, key=lambda x: x[1]['max_force'])
+            clustered_forces.append(max_force_cf[1])
+            processed.add(max_force_cf[0])
+            # 标记该body的其他点已处理
+            for i, _ in body_points:
+                if i != max_force_cf[0]:
+                    processed.add(i)
     
     print(f"Simplified clustering: {len(contact_forces)} -> {len(clustered_forces)} points")
     return clustered_forces
+
+def _process_chunk(chunk_df, x_col, y_col, z_col, has_fall_type):
+    """处理一个数据块（模块级函数，可以被pickle）"""
+    chunk_body_groups = {}
+    for _, row in chunk_df.iterrows():
+        body2_name = row['body2_name']
+        body1_name = row.get('body1_name', '') if 'body1_name' in row else ''
+        fall_type = row.get('fall-type', '') if has_fall_type else ''
+        pos = (row[x_col], row[y_col], row[z_col])
+        
+        # Use normal force as primary, with fallbacks
+        if 'force_normal' in row and pd.notna(row['force_normal']):
+            force_mag = abs(row['force_normal'])
+        elif 'force_magnitude' in row and pd.notna(row['force_magnitude']):
+            force_mag = row['force_magnitude']
+        elif all(col in row for col in ['force_x', 'force_y', 'force_z']) and all(pd.notna(row[col]) for col in ['force_x', 'force_y', 'force_z']):
+            force_mag = np.sqrt(row['force_x']**2 + row['force_y']**2 + row['force_z']**2)
+        else:
+            force_mag = 1.0
+        
+        if body2_name not in chunk_body_groups:
+            chunk_body_groups[body2_name] = {}
+        
+        if pos in chunk_body_groups[body2_name]:
+            chunk_body_groups[body2_name][pos]['forces'].append(force_mag)
+            chunk_body_groups[body2_name][pos]['count'] += 1
+            if force_mag > chunk_body_groups[body2_name][pos].get('max_force', 0):
+                chunk_body_groups[body2_name][pos]['body1_name'] = body1_name
+                if has_fall_type:
+                    chunk_body_groups[body2_name][pos]['fall-type'] = fall_type
+                chunk_body_groups[body2_name][pos]['max_force'] = force_mag
+        else:
+            chunk_body_groups[body2_name][pos] = {
+                'position': pos,
+                'forces': [force_mag],
+                'count': 1,
+                'body1_name': body1_name,
+                'max_force': force_mag
+            }
+            if has_fall_type:
+                chunk_body_groups[body2_name][pos]['fall-type'] = fall_type
+    return chunk_body_groups
 
 def create_contact_force_visualization(df, x_col, y_col, z_col, max_spheres_override=None, custom_filter_bodies=None, min_points_per_link=5, min_sphere_distance=0.01, enable_clustering=True, uniform_distribution=False):
     """Create contact force visualization data with sphere sizes based on force magnitude
@@ -487,48 +558,6 @@ def create_contact_force_visualization(df, x_col, y_col, z_col, max_spheres_over
     if n_jobs > 1 and n_rows > 10000:
         print(f"使用 {n_jobs} 个进程处理 {n_rows} 行数据...")
         
-        def process_chunk(chunk_df):
-            """处理一个数据块"""
-            chunk_body_groups = {}
-            for _, row in chunk_df.iterrows():
-                body2_name = row['body2_name']
-                body1_name = row.get('body1_name', '') if 'body1_name' in row else ''
-                fall_type = row.get('fall-type', '') if has_fall_type else ''
-                pos = (row[x_col], row[y_col], row[z_col])
-                
-                # Use normal force as primary, with fallbacks
-                if 'force_normal' in row and pd.notna(row['force_normal']):
-                    force_mag = abs(row['force_normal'])
-                elif 'force_magnitude' in row and pd.notna(row['force_magnitude']):
-                    force_mag = row['force_magnitude']
-                elif all(col in row for col in ['force_x', 'force_y', 'force_z']) and all(pd.notna(row[col]) for col in ['force_x', 'force_y', 'force_z']):
-                    force_mag = np.sqrt(row['force_x']**2 + row['force_y']**2 + row['force_z']**2)
-                else:
-                    force_mag = 1.0
-                
-                if body2_name not in chunk_body_groups:
-                    chunk_body_groups[body2_name] = {}
-                
-                if pos in chunk_body_groups[body2_name]:
-                    chunk_body_groups[body2_name][pos]['forces'].append(force_mag)
-                    chunk_body_groups[body2_name][pos]['count'] += 1
-                    if force_mag > chunk_body_groups[body2_name][pos].get('max_force', 0):
-                        chunk_body_groups[body2_name][pos]['body1_name'] = body1_name
-                        if has_fall_type:
-                            chunk_body_groups[body2_name][pos]['fall-type'] = fall_type
-                        chunk_body_groups[body2_name][pos]['max_force'] = force_mag
-                else:
-                    chunk_body_groups[body2_name][pos] = {
-                        'position': pos,
-                        'forces': [force_mag],
-                        'count': 1,
-                        'body1_name': body1_name,
-                        'max_force': force_mag
-                    }
-                    if has_fall_type:
-                        chunk_body_groups[body2_name][pos]['fall-type'] = fall_type
-            return chunk_body_groups
-        
         # 将数据分成多个块
         chunk_size = max(1000, n_rows // (n_jobs * 4))
         chunks = []
@@ -536,13 +565,20 @@ def create_contact_force_visualization(df, x_col, y_col, z_col, max_spheres_over
             chunk = df_valid.iloc[i:i+chunk_size].copy()
             chunks.append(chunk)
         
+        # 使用partial创建可pickle的函数
+        process_chunk_func = partial(_process_chunk, 
+                                     x_col=x_col, 
+                                     y_col=y_col, 
+                                     z_col=z_col, 
+                                     has_fall_type=has_fall_type)
+        
         # 使用多进程处理
         with Pool(processes=n_jobs) as pool:
             if HAS_TQDM:
-                chunk_results = list(tqdm(pool.imap(process_chunk, chunks), 
+                chunk_results = list(tqdm(pool.imap(process_chunk_func, chunks), 
                                          total=len(chunks), desc="处理进度", unit="块", ncols=80))
             else:
-                chunk_results = pool.map(process_chunk, chunks)
+                chunk_results = pool.map(process_chunk_func, chunks)
         
         # 合并结果
         for chunk_body_groups in chunk_results:
@@ -677,11 +713,32 @@ def create_contact_force_visualization(df, x_col, y_col, z_col, max_spheres_over
     
     # STEP 2: Group results by body2_name for proportional distribution
     body_contact_forces = {}
+    # Debug: Check for same position with different bodies
+    position_bodies = {}
     for cf in clustered_contact_forces:
         body_name = cf['body2_name']
+        pos = cf['position']
+        pos_key = (round(pos[0], 6), round(pos[1], 6), round(pos[2], 6))  # Round to avoid floating point issues
+        if pos_key not in position_bodies:
+            position_bodies[pos_key] = []
+        position_bodies[pos_key].append(body_name)
+        
         if body_name not in body_contact_forces:
             body_contact_forces[body_name] = []
         body_contact_forces[body_name].append(cf)
+    
+    # Debug: Print positions with multiple bodies
+    multi_body_positions = {pos: bodies for pos, bodies in position_bodies.items() if len(bodies) > 1}
+    if multi_body_positions:
+        print(f"\n=== 相同位置有多个body的碰撞点 ===")
+        print(f"找到 {len(multi_body_positions)} 个位置有多个body碰撞:")
+        for i, (pos, bodies) in enumerate(list(multi_body_positions.items())[:10]):  # Show first 10
+            unique_bodies = list(set(bodies))
+            print(f"  位置 {i+1}: ({pos[0]:.3f}, {pos[1]:.3f}, {pos[2]:.3f}) - {len(unique_bodies)} 个body: {unique_bodies}")
+        if len(multi_body_positions) > 10:
+            print(f"  ... 还有 {len(multi_body_positions) - 10} 个位置")
+    else:
+        print(f"\n=== 没有找到相同位置有多个body的碰撞点 ===")
     
     # Sort each body's contacts by force magnitude (highest first)
     for body_name in body_contact_forces:
@@ -1100,7 +1157,9 @@ def show_mujoco_viewer_with_spheres(model, data, contact_forces):
             for i, cf in enumerate(sorted_forces[:10]):
                 pos = cf['position']
                 force = cf['max_force']
-                print(f"  {i+1:2d}. {force:8.3f} N at ({pos[0]:6.3f}, {pos[1]:6.3f}, {pos[2]:6.3f})")
+                body2_name = cf.get('body2_name', 'unknown')
+                body1_name = cf.get('body1_name', 'unknown')
+                print(f"  {i+1:2d}. {force:8.3f} N at ({pos[0]:6.3f}, {pos[1]:6.3f}, {pos[2]:6.3f}) | body2={body2_name}, body1={body1_name}")
         
         # Keep viewer open
         while viewer_handle.is_running():
@@ -1248,7 +1307,9 @@ def load_mujoco_model_with_contact_spheres(xml_file, contact_forces):
             
             # Debug: Print sphere info for first few spheres
             if i < 5:
-                print(f"  Sphere {i}: force={cf['max_force']:.3f}N, ratio={force_ratio:.3f}, radius={radius:.4f}m, color=({r:.2f},{g:.2f},{b:.2f})")
+                body2_name = cf.get('body2_name', 'unknown')
+                body1_name = cf.get('body1_name', 'unknown')
+                print(f"  Sphere {i}: force={cf['max_force']:.3f}N, ratio={force_ratio:.3f}, radius={radius:.4f}m, color=({r:.2f},{g:.2f},{b:.2f}), body2={body2_name}, body1={body1_name}, pos=({pos[0]:.3f},{pos[1]:.3f},{pos[2]:.3f})")
             
             spheres_xml += f'''    <body name="contact_sphere_{i}" pos="{pos[0]:.6f} {pos[1]:.6f} {pos[2]:.6f}">
       <geom name="contact_geom_{i}" type="sphere" size="{radius:.6f}" rgba="{r:.2f} {g:.2f} {b:.2f} {a:.2f}" group="1"/>
@@ -1456,8 +1517,13 @@ def main():
     available_bodies = show_available_joints(df)
     
     # 基础排除的link（写死的）
-    base_excluded_links = ['LINK_ANKLE_PITCH_L', 'LINK_ANKLE_PITCH_R', 'LINK_ANKLE_ROLL_L', 'LINK_ANKLE_ROLL_R', 'LINK_HEAD_YAW']
-    
+    # 只排除内部关节连接件（ANKLE_PITCH），保留脚部（ANKLE_ROLL）的碰撞点
+    # LINK_ANKLE_PITCH 是内部关节连接件，不应该有碰撞
+    # LINK_ANKLE_ROLL 是脚部，是机器人接触地面的主要部位，应该显示碰撞点
+    base_excluded_links = []
+    # base_excluded_links = ['LINK_ANKLE_PITCH_L', 'LINK_ANKLE_PITCH_R', 'LINK_HEAD_YAW']
+    # base_excluded_links = ['LINK_ANKLE_PITCH_L', 'LINK_ANKLE_PITCH_R', 'LINK_ANKLE_ROLL_L', 'LINK_ANKLE_ROLL_R', 'LINK_HEAD_YAW']
+
     # 处理用户指定的关节过滤
     if joint_filter_str:
         print(f"\n=== 处理关节过滤参数 ===")
