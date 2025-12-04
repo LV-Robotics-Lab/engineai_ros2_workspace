@@ -1443,26 +1443,34 @@ void RosInterface::PublishContactForces(const mjModel* m, mjData* d) {
         int num_rows = write_two_rows ? 2 : 1;
         
         for (int row = 0; row < num_rows; ++row) {
-          // 确定当前行使用的绿球坐标
+          // 确定当前行使用的绿球坐标和body名称
           mjtNum green_ball_x, green_ball_y, green_ball_z;
+          std::string body1_name_for_row, body2_name_for_row;
+          
           if (write_two_rows) {
             // 写入两行：第一行用body1的坐标系，第二行用body2的坐标系
             if (row == 0) {
-              // 第一行：使用body1的坐标系
+              // 第一行：使用body1的坐标系，不交换名字
               green_ball_x = (*csv_green_ball_pos_x)[i];
               green_ball_y = (*csv_green_ball_pos_y)[i];
               green_ball_z = (*csv_green_ball_pos_z)[i];
+              body1_name_for_row = (*csv_body1_names)[i];
+              body2_name_for_row = (*csv_body2_names)[i];
             } else {
-              // 第二行：使用body2的坐标系
+              // 第二行：使用body2的坐标系，交换body1和body2的名字
               green_ball_x = (*csv_green_ball_pos_body2_x)[i];
               green_ball_y = (*csv_green_ball_pos_body2_y)[i];
               green_ball_z = (*csv_green_ball_pos_body2_z)[i];
+              body1_name_for_row = (*csv_body2_names)[i];  // 交换：body2变成body1
+              body2_name_for_row = (*csv_body1_names)[i];  // 交换：body1变成body2
             }
           } else {
-            // 只写入一行：使用非world的那个body的坐标系
+            // 只写入一行：使用非world的那个body的坐标系，不交换名字
             green_ball_x = (*csv_green_ball_pos_x)[i];
             green_ball_y = (*csv_green_ball_pos_y)[i];
             green_ball_z = (*csv_green_ball_pos_z)[i];
+            body1_name_for_row = (*csv_body1_names)[i];
+            body2_name_for_row = (*csv_body2_names)[i];
           }
           
           // 写入CSV行 - 使用智能指针访问
@@ -1480,8 +1488,8 @@ void RosInterface::PublishContactForces(const mjModel* m, mjData* d) {
             csv_file_ << std::fixed << std::setprecision(6)
                       << sim_time << ","
                       << i << ","
-                      << "\"" << (*csv_body1_names)[i] << "\","
-                      << "\"" << (*csv_body2_names)[i] << "\","
+                      << "\"" << body1_name_for_row << "\","
+                      << "\"" << body2_name_for_row << "\","
                       << (*csv_red_ball_pos_x)[i] << ","   // 红球坐标：世界坐标系接触点
                       << (*csv_red_ball_pos_y)[i] << ","
                       << (*csv_red_ball_pos_z)[i] << ","
