@@ -1564,17 +1564,17 @@ void RosInterface::PublishContactForces(const mjModel* m, mjData* d) {
       auto& sim_manager = SimManager::GetInstance();
       auto active_perturbations = sim_manager.GetActivePerturbations();
       
-      // 调试信息
-      if (active_perturbations.empty()) {
-        // 只在第一次为空时打印，避免刷屏
-        static bool debug_printed = false;
-        if (!debug_printed) {
-          RCLCPP_INFO(node_->get_logger(), "推力CSV记录：active_perturbations为空，推力数量: %zu", active_perturbations.size());
-          debug_printed = true;
-        }
-      } else {
-        RCLCPP_INFO(node_->get_logger(), "推力CSV记录：找到 %zu 个推力", active_perturbations.size());
-      }
+      // 调试信息（已关闭，避免日志过多）
+      // if (active_perturbations.empty()) {
+      //   // 只在第一次为空时打印，避免刷屏
+      //   static bool debug_printed = false;
+      //   if (!debug_printed) {
+      //     RCLCPP_INFO(node_->get_logger(), "推力CSV记录：active_perturbations为空，推力数量: %zu", active_perturbations.size());
+      //     debug_printed = true;
+      //   }
+      // } else {
+      //   RCLCPP_INFO(node_->get_logger(), "推力CSV记录：找到 %zu 个推力", active_perturbations.size());
+      // }
       
       // 为每个活跃的推力写入一行数据
       for (const auto& pert : active_perturbations) {
