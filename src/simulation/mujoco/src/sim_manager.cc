@@ -1575,13 +1575,24 @@ void SimManager::ApplyProtectionToContactForces() {
         // 如果超出范围，跳过该接触点
         skipped_out_of_range++;
         // 对于超出范围的力，立即记录调试信息（不依赖frame_count）
-        if (contact_force_normal > 20000) {
+        // 对于超过15kN的力，总是打印（不限制次数）
+        if (contact_force_normal > 15000) {
+          auto force_range = force_interpolator_->GetForceRange();
+          RCLCPP_WARN(node_->get_logger(),
+                      "Force %.2f kN (%.2f N) out of range for thickness %.1f mm. "
+                      "Valid range: [%.2f, %.2f] kN",
+                      force_unprotected_kN, contact_force_normal, protection_thickness_,
+                      force_range.first, force_range.second);
+        } else if (contact_force_normal > 20000) {
           static int out_of_range_count = 0;
           out_of_range_count++;
           if (out_of_range_count <= 5) {
+            auto force_range = force_interpolator_->GetForceRange();
             RCLCPP_WARN(node_->get_logger(),
-                        "Force %.2f kN (%.2f N) out of range for thickness %.1f mm",
-                        force_unprotected_kN, contact_force_normal, protection_thickness_);
+                        "Force %.2f kN (%.2f N) out of range for thickness %.1f mm. "
+                        "Valid range: [%.2f, %.2f] kN",
+                        force_unprotected_kN, contact_force_normal, protection_thickness_,
+                        force_range.first, force_range.second);
           }
         }
         continue;
@@ -1626,7 +1637,13 @@ void SimManager::ApplyProtectionToContactForces() {
     // 这样可以确保防护功能总是生效
     
     // 对于高力，立即记录防护应用信息（不依赖frame_count）
-    if (contact_force_normal > 400) {
+    // 对于超过15kN的力，总是打印（不限制次数）
+    if (contact_force_normal > 15000) {
+      RCLCPP_INFO(node_->get_logger(),
+                  "Applying protection: force=%.2f kN (%.2f N) -> %.2f kN (%.2f N) (scale=%.4f)",
+                  force_unprotected_kN, contact_force_normal, force_protected_kN, 
+                  force_protected_kN * 1000.0, scale_factor);
+    } else if (contact_force_normal > 400) {
       static int protection_applied_count = 0;
       protection_applied_count++;
       if (protection_applied_count <= 10) {
@@ -1764,8 +1781,17 @@ void SimManager::ApplyProtectionToContactForces() {
     }
   }
   
-  // 对于高力，即使没有达到1000帧，也输出统计信息（但限制频率）
-  if (max_force_before > 20000 && node_) {
+  // 对于高力，即使没有达到1000帧，也输出统计信息
+  // 对于超过15kN的力，总是打印（不限制次数）
+  if (max_force_before > 15000 && node_) {
+    double reduction_percent = (max_force_before > 0) ? 
+      (1.0 - max_force_after / max_force_before) * 100.0 : 0.0;
+    RCLCPP_INFO(node_->get_logger(),
+                "Protection stats (high force): contacts=%d, protected=%d, skipped_small=%d, skipped_range=%d, skipped_no_effect=%d, max_force_before=%.2fN (%.2f kN), max_force_after=%.2fN (%.2f kN), reduction=%.1f%%",
+                ncon, protected_contacts, skipped_small_force, skipped_out_of_range, skipped_no_effect,
+                max_force_before, max_force_before/1000.0, max_force_after, max_force_after/1000.0,
+                reduction_percent);
+  } else if (max_force_before > 20000 && node_) {
     static int high_force_stats_count = 0;
     high_force_stats_count++;
     if (high_force_stats_count <= 5) {  // 只记录前5次
@@ -1779,8 +1805,15 @@ void SimManager::ApplyProtectionToContactForces() {
     }
   }
   
-  // 对于非常大的力，立即记录调试信息（不限制频率）
-  if (max_force_before > 20000 && protected_contacts == 0 && node_) {
+  // 对于非常大的力，立即记录调试信息
+  // 对于超过15kN的力，总是打印（不限制次数）
+  if (max_force_before > 15000 && protected_contacts == 0 && node_) {
+    RCLCPP_WARN(node_->get_logger(), 
+                "High force detected (%.2f N, %.2f kN) but NO contacts were protected! "
+                "skipped_small=%d, skipped_range=%d, skipped_no_effect=%d, protection_enabled=%s, thickness=%.1fmm",
+                max_force_before, max_force_before/1000.0, skipped_small_force, skipped_out_of_range, skipped_no_effect,
+                protection_enabled_ ? "YES" : "NO", protection_thickness_);
+  } else if (max_force_before > 20000 && protected_contacts == 0 && node_) {
     static int high_force_warn_count = 0;
     high_force_warn_count++;
     if (high_force_warn_count <= 10) {  // 只记录前10次

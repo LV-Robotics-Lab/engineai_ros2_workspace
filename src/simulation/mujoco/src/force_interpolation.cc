@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <cmath>
 #include <numeric>
+#include <iostream>
 #include <sys/stat.h>
 
 ForceInterpolation::ForceInterpolation(const std::string& tsv_file_path) {
@@ -93,19 +94,44 @@ void ForceInterpolation::LoadData(const std::string& file_path) {
   thickness_values_ = {6.0, 12.0, 18.0, 24.0};
   
   // 读取数据行
+  int line_number = 1;  // 从1开始（表头是第1行）
   while (std::getline(file, line)) {
+    line_number++;
     if (line.empty()) continue;
     
+    // 先尝试tab分隔，如果失败则尝试空格分隔（处理格式错误）
     std::istringstream line_stream(line);
     std::vector<std::string> fields;
     std::string field;
     
+    // 尝试tab分隔
     while (std::getline(line_stream, field, '\t')) {
-      fields.push_back(field);
+      // 如果字段包含空格，可能是格式错误，尝试分割
+      if (field.find(' ') != std::string::npos) {
+        std::istringstream field_stream(field);
+        std::string sub_field;
+        while (field_stream >> sub_field) {
+          fields.push_back(sub_field);
+        }
+      } else {
+        fields.push_back(field);
+      }
+    }
+    
+    // 如果tab分隔后字段数不够，尝试整个行用空格分隔
+    if (fields.size() < 6) {
+      fields.clear();
+      std::istringstream line_stream2(line);
+      while (line_stream2 >> field) {
+        fields.push_back(field);
+      }
     }
     
     if (fields.size() <= static_cast<size_t>(std::max(force_col_idx, 
         *std::max_element(thickness_col_indices.begin(), thickness_col_indices.end())))) {
+      // 输出警告但继续处理其他行
+      std::cerr << "Warning: Line " << line_number << " has insufficient fields (" 
+                << fields.size() << "), skipping." << std::endl;
       continue;  // 跳过不完整的行
     }
     
@@ -122,7 +148,9 @@ void ForceInterpolation::LoadData(const std::string& file_path) {
       }
       force_protected_matrix_.push_back(protected_forces);
     } catch (const std::exception& e) {
-      // 跳过无法解析的行
+      // 输出警告但继续处理其他行
+      std::cerr << "Warning: Line " << line_number << " parsing error: " << e.what() 
+                << ", skipping." << std::endl;
       continue;
     }
   }
