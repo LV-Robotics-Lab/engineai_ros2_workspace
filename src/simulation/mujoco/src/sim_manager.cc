@@ -878,7 +878,7 @@ void SimManager::ApplyPerturbation(bool apply) {
     std::cout << "当前active_perturbations_数量: " << active_perturbations_.size() << std::endl;
     std::cout << "时间: " << std::fixed << std::setprecision(3) << d_->time << "s" << std::endl;
     std::cout << "推力大小: " << force_magnitude << "N" << std::endl;
-    std::cout << "推力方向: [" << perturb_force_.x() << ", " << perturb_force_.y() << ", " << perturb_force_.z() << "]" << std::endl;
+    std::cout << "推力方向分量: [" << perturb_force_.x() << ", " << perturb_force_.y() << ", " << perturb_force_.z() << "]" << std::endl;
     if (torque_magnitude > 0.001) {
       std::cout << "力矩大小: " << torque_magnitude << "N.m" << std::endl;
       std::cout << "力矩方向: [" << perturb_torque_.x() << ", " << perturb_torque_.y() << ", " << perturb_torque_.z() << "]" << std::endl;
@@ -1550,7 +1550,7 @@ void SimManager::ApplyProtectionToContactForces() {
     }
     
     // 如果法向力太小，跳过（避免对微小接触力进行插值）
-    if (contact_force_normal < 1000) {  // 1000 N阈值
+    if (contact_force_normal < 400) {  // 400 N阈值
       skipped_small_force++;
       // 对于高力，立即记录（不依赖frame_count）
       if (contact_force_normal > 20000) {
@@ -1558,7 +1558,7 @@ void SimManager::ApplyProtectionToContactForces() {
         high_force_small_count++;
         if (high_force_small_count <= 5) {
           RCLCPP_WARN(node_->get_logger(), 
-                      "High force %.2f N detected but skipped (small force threshold: 1000 N)",
+                      "High force %.2f N detected but skipped (small force threshold: 400 N)",
                       contact_force_normal);
         }
       }
@@ -1626,7 +1626,7 @@ void SimManager::ApplyProtectionToContactForces() {
     // 这样可以确保防护功能总是生效
     
     // 对于高力，立即记录防护应用信息（不依赖frame_count）
-    if (contact_force_normal > 20000) {
+    if (contact_force_normal > 400) {
       static int protection_applied_count = 0;
       protection_applied_count++;
       if (protection_applied_count <= 10) {

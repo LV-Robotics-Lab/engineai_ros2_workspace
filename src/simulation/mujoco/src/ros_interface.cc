@@ -1106,13 +1106,13 @@ void RosInterface::PublishContactForces(const mjModel* m, mjData* d) {
         // 调试打印：显示RViz中使用的推力值
         static int debug_counter = 0;
         if (++debug_counter % 100 == 0) {
-          std::cout << "RViz推力调试 - ID " << pert.id << ": 局部力=[" 
-                    << perturb_force_local[0] << ", " << perturb_force_local[1] << ", " << perturb_force_local[2] 
-                    << "], 世界力=[" 
-                    << perturb_force_world[0] << ", " << perturb_force_world[1] << ", " << perturb_force_world[2] 
-                    << "], 大小=" << sqrt(perturb_force_world[0]*perturb_force_world[0] + 
-                                         perturb_force_world[1]*perturb_force_world[1] + 
-                                         perturb_force_world[2]*perturb_force_world[2]) << "N" << std::endl;
+          // std::cout << "RViz推力调试 - ID " << pert.id << ": 局部力=[" 
+          //           << perturb_force_local[0] << ", " << perturb_force_local[1] << ", " << perturb_force_local[2] 
+          //           << "], 世界力=[" 
+          //           << perturb_force_world[0] << ", " << perturb_force_world[1] << ", " << perturb_force_world[2] 
+          //           << "], 大小=" << sqrt(perturb_force_world[0]*perturb_force_world[0] + 
+          //                                perturb_force_world[1]*perturb_force_world[1] + 
+          //                                perturb_force_world[2]*perturb_force_world[2]) << "N" << std::endl;
         }
         
         // -------------------
