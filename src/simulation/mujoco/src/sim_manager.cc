@@ -28,6 +28,12 @@ using namespace std::chrono_literals;
 
 // 常量定义
 const int kDofFloatingBase = 6;        // 浮动基座的自由度数量
+
+// 排除防护的接触对列表定义
+const std::vector<std::pair<std::string, std::string>> SimManager::excluded_contact_pairs_ = {
+  {"LINK_ANKLE_PITCH_L", "world"},
+  {"LINK_ANKLE_PITCH_R", "world"}
+};
 const int kNumFloatingBaseJoints = 7;  // 浮动基座的关节数量（四元数 + xyz位置）
 constexpr double kSyncMisalign = 0.1;  // 重新同步前的最大偏差
 constexpr double kSimRefreshFraction = 0.7;  // 可用于仿真的刷新率分数
@@ -657,6 +663,10 @@ bool SimManager::Initialize() {
     RCLCPP_INFO(logger, "RT-FEM data file: %s", tsv_path.c_str());
     RCLCPP_INFO(logger, "Force range: [%.1f, %.1f] kN", force_range.first, force_range.second);
     RCLCPP_INFO(logger, "Thickness range: [%.1f, %.1f] mm", thickness_range.first, thickness_range.second);
+    RCLCPP_INFO(logger, "Excluded contact pairs: %zu", excluded_contact_pairs_.size());
+    for (const auto& pair : excluded_contact_pairs_) {
+      RCLCPP_INFO(logger, "  - %s <-> %s", pair.first.c_str(), pair.second.c_str());
+    }
     RCLCPP_INFO(logger, "=====================================");
   } catch (const std::exception& e) {
     RCLCPP_ERROR(logger, "Failed to initialize force interpolation: %s", e.what());
@@ -1536,6 +1546,32 @@ void SimManager::ApplyProtectionToContactForces() {
   // 遍历所有接触点
   for (int i = 0; i < ncon; ++i) {
     const mjContact& contact = d_->contact[i];
+    
+    // 获取接触体的名称，检查是否在排除列表中
+    int body1_id = m_->geom_bodyid[contact.geom[0]];
+    int body2_id = m_->geom_bodyid[contact.geom[1]];
+    
+    const char* body1_name = mj_id2name(m_, mjOBJ_BODY, body1_id);
+    const char* body2_name = mj_id2name(m_, mjOBJ_BODY, body2_id);
+    
+    // 如果body没有名称，使用ID作为名称
+    std::string name1 = body1_name ? body1_name : "body" + std::to_string(body1_id);
+    std::string name2 = body2_name ? body2_name : "body" + std::to_string(body2_id);
+    
+    // 检查是否在排除列表中（顺序无关）
+    bool is_excluded = false;
+    for (const auto& excluded_pair : excluded_contact_pairs_) {
+      if ((excluded_pair.first == name1 && excluded_pair.second == name2) ||
+          (excluded_pair.first == name2 && excluded_pair.second == name1)) {
+        is_excluded = true;
+        break;
+      }
+    }
+    
+    // 如果在排除列表中，跳过防护处理
+    if (is_excluded) {
+      continue;
+    }
     
     // 获取接触坐标系下的6D接触力 [fx, fy, fz, tx, ty, tz]
     mjtNum contact_force[6] = {0.0, 0.0, 0.0, 0.0, 0.0, 0.0};
