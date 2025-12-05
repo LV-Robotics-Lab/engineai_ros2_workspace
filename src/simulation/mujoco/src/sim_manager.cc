@@ -626,8 +626,8 @@ bool SimManager::Initialize() {
     
     // 检查文件是否存在
     auto file_exists = [](const std::string& path) -> bool {
-      struct stat buffer;
-      return (stat(path.c_str(), &buffer) == 0);
+      struct ::stat buffer;
+      return (::stat(path.c_str(), &buffer) == 0);
     };
     
     bool found = false;
