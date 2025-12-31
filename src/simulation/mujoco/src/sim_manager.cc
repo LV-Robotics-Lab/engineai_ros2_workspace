@@ -1221,36 +1221,44 @@ void SimManager::PhysicsLoop() {
             syncSim = d_->time;        // 重置仿真时间基准
             sim_->speed_changed = false;  // 清除速度变化标志
 
-            // 执行仿真步进：使用mj_step1和mj_step2分离，以便在中间应用防护
-            // mj_step1: 计算位置、速度，调用控制回调
-            mj_step1(m_, d_);
-            
-            // 在mj_step1之后，mj_step2之前，施加推力（确保在UI系统清空外力之后）
-            ApplyPerturbationForces();
-            
-            // mj_step2: 计算执行器力、加速度、约束力，并进行时间积分
-            // 注意：我们需要手动调用mj_step2的内部步骤，以便在mj_fwdConstraint之后应用防护
-            mj_fwdActuation(m_, d_);
-            mj_fwdAcceleration(m_, d_);
-            mj_fwdConstraint(m_, d_);
-            
-            // 在约束求解之后，应用防护到接触力
-            ApplyProtectionToContactForces();
-            
-            // 继续mj_step2的剩余步骤
-            mj_sensorAcc(m_, d_);
-            mj_checkAcc(m_, d_);
-            
-            // 比较前向和逆向解（如果启用）
-            if (m_->opt.enableflags & mjENBL_FWDINV) {
-              mj_compareFwdInv(m_, d_);
-            }
-            
-            // 时间积分（使用Euler积分，因为mj_step1/mj_step2只支持Euler）
-            if (m_->opt.integrator == mjINT_IMPLICIT || m_->opt.integrator == mjINT_IMPLICITFAST) {
-              mj_implicit(m_, d_);
+            // 根据防护功能是否启用，选择不同的步进方式
+            if (protection_enabled_) {
+              // 防护功能启用：使用mj_step1和mj_step2分离，以便在中间应用防护
+              // mj_step1: 计算位置、速度，调用控制回调
+              mj_step1(m_, d_);
+              
+              // 在mj_step1之后，mj_step2之前，施加推力（确保在UI系统清空外力之后）
+              ApplyPerturbationForces();
+              
+              // mj_step2: 计算执行器力、加速度、约束力，并进行时间积分
+              // 注意：我们需要手动调用mj_step2的内部步骤，以便在mj_fwdConstraint之后应用防护
+              mj_fwdActuation(m_, d_);
+              mj_fwdAcceleration(m_, d_);
+              mj_fwdConstraint(m_, d_);
+              
+              // 在约束求解之后，应用防护到接触力
+              ApplyProtectionToContactForces();
+              
+              // 继续mj_step2的剩余步骤
+              mj_sensorAcc(m_, d_);
+              mj_checkAcc(m_, d_);
+              
+              // 比较前向和逆向解（如果启用）
+              if (m_->opt.enableflags & mjENBL_FWDINV) {
+                mj_compareFwdInv(m_, d_);
+              }
+              
+              // 时间积分（使用Euler积分，因为mj_step1/mj_step2只支持Euler）
+              if (m_->opt.integrator == mjINT_IMPLICIT || m_->opt.integrator == mjINT_IMPLICITFAST) {
+                mj_implicit(m_, d_);
+              } else {
+                mj_Euler(m_, d_);
+              }
             } else {
-              mj_Euler(m_, d_);
+              // 防护功能禁用：使用标准的mj_step，性能更好
+              mj_step1(m_, d_);
+              ApplyPerturbationForces();
+              mj_step2(m_, d_);
             }
             
             // 计算关节反力
@@ -1293,36 +1301,44 @@ void SimManager::PhysicsLoop() {
               // 注入噪声（如果启用）：模拟传感器噪声、环境扰动等
               sim_->InjectNoise();
               
-              // 执行仿真步进：使用mj_step1和mj_step2分离，以便在中间应用防护
-              // mj_step1: 计算位置、速度，调用控制回调
-              mj_step1(m_, d_);
-              
-              // 在mj_step1之后，mj_step2之前，施加推力（确保在UI系统清空外力之后）
-              ApplyPerturbationForces();
-              
-              // mj_step2: 计算执行器力、加速度、约束力，并进行时间积分
-              // 注意：我们需要手动调用mj_step2的内部步骤，以便在mj_fwdConstraint之后应用防护
-              mj_fwdActuation(m_, d_);
-              mj_fwdAcceleration(m_, d_);
-              mj_fwdConstraint(m_, d_);
-              
-              // 在约束求解之后，应用防护到接触力
-              ApplyProtectionToContactForces();
-              
-              // 继续mj_step2的剩余步骤
-              mj_sensorAcc(m_, d_);
-              mj_checkAcc(m_, d_);
-              
-              // 比较前向和逆向解（如果启用）
-              if (m_->opt.enableflags & mjENBL_FWDINV) {
-                mj_compareFwdInv(m_, d_);
-              }
-              
-              // 时间积分（使用Euler积分，因为mj_step1/mj_step2只支持Euler）
-              if (m_->opt.integrator == mjINT_IMPLICIT || m_->opt.integrator == mjINT_IMPLICITFAST) {
-                mj_implicit(m_, d_);
+              // 根据防护功能是否启用，选择不同的步进方式
+              if (protection_enabled_) {
+                // 防护功能启用：使用mj_step1和mj_step2分离，以便在中间应用防护
+                // mj_step1: 计算位置、速度，调用控制回调
+                mj_step1(m_, d_);
+                
+                // 在mj_step1之后，mj_step2之前，施加推力（确保在UI系统清空外力之后）
+                ApplyPerturbationForces();
+                
+                // mj_step2: 计算执行器力、加速度、约束力，并进行时间积分
+                // 注意：我们需要手动调用mj_step2的内部步骤，以便在mj_fwdConstraint之后应用防护
+                mj_fwdActuation(m_, d_);
+                mj_fwdAcceleration(m_, d_);
+                mj_fwdConstraint(m_, d_);
+                
+                // 在约束求解之后，应用防护到接触力
+                ApplyProtectionToContactForces();
+                
+                // 继续mj_step2的剩余步骤
+                mj_sensorAcc(m_, d_);
+                mj_checkAcc(m_, d_);
+                
+                // 比较前向和逆向解（如果启用）
+                if (m_->opt.enableflags & mjENBL_FWDINV) {
+                  mj_compareFwdInv(m_, d_);
+                }
+                
+                // 时间积分（使用Euler积分，因为mj_step1/mj_step2只支持Euler）
+                if (m_->opt.integrator == mjINT_IMPLICIT || m_->opt.integrator == mjINT_IMPLICITFAST) {
+                  mj_implicit(m_, d_);
+                } else {
+                  mj_Euler(m_, d_);
+                }
               } else {
-                mj_Euler(m_, d_);
+                // 防护功能禁用：使用标准的mj_step，性能更好
+                mj_step1(m_, d_);
+                ApplyPerturbationForces();
+                mj_step2(m_, d_);
               }
               
               // 计算关节反力

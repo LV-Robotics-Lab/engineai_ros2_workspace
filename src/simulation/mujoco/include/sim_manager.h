@@ -184,7 +184,7 @@ bool IsContactVisualizationEnabled();
   // 防护护具相关成员变量
   std::unique_ptr<ForceInterpolation> force_interpolator_;  // 力插值计算器
   double protection_thickness_ = 12.0;  // 防护材料厚度 (mm)，默认12mm
-  bool protection_enabled_ = false;  // 是否启用防护功能，默认启用
+  bool protection_enabled_ = true;  // 是否启用防护功能，默认启用
   
   // 排除防护的接触对列表（body1_name, body2_name）
   // 例如：排除 "LINK_ANKLE_PITCH_L" 和 "world" 之间的接触

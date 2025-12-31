@@ -459,3 +459,7 @@ cd /home/wang22/engineai/engineai_ros2_workspace && source install/setup.bash &&
 
 ## 在另一个终端启动RViz
 cd /home/wang22/engineai/engineai_ros2_workspace/src/simulation/mujoco/assets/resource/robot/pm_v2/urdf && rviz2 -d robot.rviz
+
+# 查看urdf collision
+# 使用外部URDF文件，自动启动RViz
+ros2 launch launch_urdf_only.launch.py urdf_file:=/home/wang22/engineai/engineai_rl_workspace/engineai_gym/engineai_gym/resources/robots/biped/pm01/urdf/serial_pm_v2_primitive.urdf
