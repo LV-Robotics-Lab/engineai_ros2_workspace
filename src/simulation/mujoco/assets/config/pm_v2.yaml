@@ -8,14 +8,16 @@ actuator:
 
 # 碰撞模型配置 - 定义碰撞检测的几何体类型
 collision_model:
-  use_simplified_geometry: true  # 碰撞检测几何体类型选择
-  # true = 使用简化几何体（如球体、圆柱体、立方体，计算速度快但精度较低）
-  # false = 使用真实mesh（高精度网格模型，计算精度高但速度较慢）
-  
-  # XML文件选择配置
+  collision_model_type: simplified  # 碰撞检测几何体类型选择
+  # simplified = 使用简化几何体（如球体、圆柱体、立方体，计算速度快但精度较低）
+  # mesh = 使用真实mesh（高精度网格模型，计算精度高但速度较慢）
+  # mjlab = 使用mjlab碰撞模型（高精度网格模型，计算精度高但速度较慢）
+  # XML主配置文件选择配置
   xml_files:
-    simplified: serial_pm_v2_simplified.xml  # 简化几何体版本
-    mesh: serial_pm_v2_mesh.xml              # 真实mesh版本
+    simplified: pm_v2_simplified.xml  # 简化几何体版本的主配置文件
+    mesh: pm_v2_mesh.xml              # 真实mesh版本的主配置文件
+    mjlab: pm_v2_mjlab.xml            # mjlab版本的主配置文件
+    default: pm_v2.xml                # 默认版本的主配置文件
 
 # 接触力可视化配置 - 用于在仿真界面中显示接触力
 contact_visualization:
@@ -33,8 +35,8 @@ model_param:
 
 # 干扰力配置 - 定义默认的推力大小
 perturbation:
-  default_force_magnitude: 0.0    # 默认推力大小（牛顿），系统会自动按前后左右方向分配
-  default_torque_magnitude: 5.0     # 默认扭矩大小（牛·米）
+  default_force_magnitude: 200.0    # 默认推力大小（牛顿），系统会自动按前后左右方向分配
+  default_torque_magnitude: 0.0     # 默认扭矩大小（牛·米）
   force_step: 20.0                  # 推力调整步长（牛顿），用于+/-键调整推力大小
   torque_step: 5.0                  # 扭矩调整步长（牛·米），用于+/-键调整推力大小
   force_duration: 0.5               # 推力持续时间（秒），按下键盘后推力持续的时间

@@ -33,7 +33,7 @@ class ConfigLoader {
   bool IsContactVisualizationEnabled() const { return contact_visualization_enabled_; }
 
   // 碰撞模型配置
-  bool UseSimplifiedGeometry() const { return use_simplified_geometry_; }
+  std::string GetCollisionModelType() const { return collision_model_type_; }
   std::string GetCollisionModelCondition() const;
   std::string GetXmlFilenameByCollisionType() const;  // 根据碰撞类型获取对应的XML文件名
 
@@ -90,9 +90,11 @@ class ConfigLoader {
   bool contact_visualization_enabled_ = true;
 
   // 碰撞模型配置
-  bool use_simplified_geometry_ = false;
+  std::string collision_model_type_ = "simplified";  // 碰撞模型类型："simplified", "mesh", "mjlab", 或 "default"
   std::string simplified_xml_filename_;  // 简化几何体XML文件名
   std::string mesh_xml_filename_;        // 真实mesh XML文件名
+  std::string mjlab_xml_filename_;       // mjlab XML文件名
+  std::string default_xml_filename_;      // 默认XML文件名
 
   // 干扰力配置
   double default_force_magnitude_ = 20.0;    // 默认推力大小

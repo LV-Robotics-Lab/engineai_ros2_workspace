@@ -269,7 +269,7 @@ class RlBasicRunnerCHR : public rclcpp::Node {
       obs.segment(offset, param_->num_include_obs_steps) = mlp_net_observation_.row(i);
       offset += param_->num_include_obs_steps;
     }
-    RCLCPP_DEBUG(get_logger(), "CalculateMotorCommand: Observation data filled, size: %ld", 
+    RCLCPP_DEBUG(get_logger(), "CalculateMotorCommand: Observation data filled, size: %d", 
                  param_->num_observations * param_->num_include_obs_steps);
     
     // Scale commands and append clock signal and commands

@@ -5,7 +5,7 @@
 
 <mujoco model="global_model">
     <!-- 机器人模型文件 -->
-    <!-- 注意：实际的文件选择由 SimManager 根据 pm_v2.yaml 中的 use_simplified_geometry 参数决定 -->
+    <!-- 注意：实际的文件选择由 SimManager 根据 pm_v2.yaml 中的 collision_model_type 参数决定 -->
     <!-- SimManager 会动态修改 serial_links.xml 的内容来实现选择 -->
     <include file="robot/pm_v2/xml/serial_pm_v2.xml"/>
     

@@ -1,6 +1,6 @@
 <mujoco model="engineai_robotics_mesh">
     <compiler angle="radian" discardvisual="false" autolimits="true" eulerseq="zyx"/>
-    <option timestep="0.001" tolerance="1e-10"/>
+    <option timestep="0.002" tolerance="1e-10"/>
 
     <!-- 添加可视化设置 -->
     <visual>

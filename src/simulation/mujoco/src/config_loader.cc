@@ -54,9 +54,16 @@ bool ConfigLoader::LoadConfig() {
     if (config["collision_model"]) {
       YAML::Node collision_model = config["collision_model"];
       
-      // 是否使用简化几何体进行碰撞检测
-      if (collision_model["use_simplified_geometry"]) {
-        use_simplified_geometry_ = collision_model["use_simplified_geometry"].as<bool>();
+      // 碰撞模型类型选择：simplified, mesh, mjlab, 或 default
+      if (collision_model["collision_model_type"]) {
+        collision_model_type_ = collision_model["collision_model_type"].as<std::string>();
+        // 验证值是否有效
+        if (collision_model_type_ != "simplified" && collision_model_type_ != "mesh" && 
+            collision_model_type_ != "mjlab" && collision_model_type_ != "default") {
+          std::cerr << "Warning: Invalid collision_model_type: " << collision_model_type_ 
+                    << ". Using default: simplified" << std::endl;
+          collision_model_type_ = "simplified";
+        }
       }
       
       // 加载XML文件配置
@@ -67,6 +74,12 @@ bool ConfigLoader::LoadConfig() {
         }
         if (xml_files["mesh"]) {
           mesh_xml_filename_ = xml_files["mesh"].as<std::string>();
+        }
+        if (xml_files["mjlab"]) {
+          mjlab_xml_filename_ = xml_files["mjlab"].as<std::string>();
+        }
+        if (xml_files["default"]) {
+          default_xml_filename_ = xml_files["default"].as<std::string>();
         }
       }
     }
@@ -202,26 +215,55 @@ std::string ConfigLoader::GetResourceDir() const {
 /**
  * @brief 获取碰撞模型条件字符串
  * @return 碰撞模型类型字符串
- * @details 根据use_simplified_geometry_的值返回"simplified"或"mesh"
+ * @details 直接返回collision_model_type_的值（"simplified", "mesh", "mjlab", 或 "default"）
  *          - simplified: 使用简化几何体进行碰撞检测
  *          - mesh: 使用原始网格进行碰撞检测
+ *          - mjlab: 使用mjlab碰撞模型
+ *          - default: 使用默认碰撞模型
  */
 std::string ConfigLoader::GetCollisionModelCondition() const {
-  return use_simplified_geometry_ ? "simplified" : "mesh";
+  return collision_model_type_;
 }
 
 /**
  * @brief 根据碰撞类型获取对应的XML文件名
  * @return XML文件名
- * @details 根据use_simplified_geometry_的值返回对应的XML文件名
- *          - true: 返回简化几何体XML文件名
- *          - false: 返回真实mesh XML文件名
+ * @details 根据collision_model_type_的值返回对应的XML文件名
+ *          - "simplified": 返回简化几何体XML文件名（从YAML配置读取，如果未配置则使用默认值）
+ *          - "mesh": 返回真实mesh XML文件名（从YAML配置读取，如果未配置则使用默认值）
+ *          - "mjlab": 返回mjlab XML文件名（从YAML配置读取，如果未配置则使用默认值）
+ *          - "default": 返回默认XML文件名（从YAML配置读取，如果未配置则使用默认值）
  */
 std::string ConfigLoader::GetXmlFilenameByCollisionType() const {
-  if (use_simplified_geometry_) {
-    return "pm_v2_simplified.xml";  // 简化几何体版本的主配置文件
+  if (collision_model_type_ == "simplified") {
+    // 如果YAML中配置了简化几何体XML文件名，则使用配置的值，否则使用默认值
+    if (!simplified_xml_filename_.empty()) {
+      return simplified_xml_filename_;
+    }
+    return "pm_v2_simplified.xml";  // 默认值：简化几何体版本的主配置文件
+  } else if (collision_model_type_ == "mesh") {
+    // 如果YAML中配置了mesh XML文件名，则使用配置的值，否则使用默认值
+    if (!mesh_xml_filename_.empty()) {
+      return mesh_xml_filename_;
+    }
+    return "pm_v2_mesh.xml";        // 默认值：Mesh版本的主配置文件
+  } else if (collision_model_type_ == "mjlab") {
+    // 如果YAML中配置了mjlab XML文件名，则使用配置的值，否则使用默认值
+    if (!mjlab_xml_filename_.empty()) {
+      return mjlab_xml_filename_;
+    }
+    return "pm_v2_mjlab.xml";       // 默认值：mjlab版本的主配置文件
+  } else if (collision_model_type_ == "default") {
+    // 如果YAML中配置了默认XML文件名，则使用配置的值，否则使用默认值
+    if (!default_xml_filename_.empty()) {
+      return default_xml_filename_;
+    }
+    return "pm_v2.xml";             // 默认值：默认版本的主配置文件
   } else {
-    return "pm_v2_mesh.xml";        // Mesh版本的主配置文件
+    // 未知类型，使用默认的简化版本
+    std::cerr << "Warning: Unknown collision_model_type: " << collision_model_type_ 
+              << ". Using default: pm_v2_simplified.xml" << std::endl;
+    return "pm_v2_simplified.xml";
   }
 }
 
