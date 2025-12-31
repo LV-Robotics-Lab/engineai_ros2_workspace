@@ -120,6 +120,7 @@ ros2 launch mujoco_simulator mujoco_simulator.launch.py export_contact:=true sav
 ## XZL policy from engineai, 先开RL控制器，再开mujoco
 source install/setup.bash
 ros2 launch interface_example rl_basic_example_XZL.launch.py
+ros2 launch interface_example rl_basic_example_CHR.launch.py
 ## 通过修改 pm_v2.yaml 里 perturbation 组参数来改变推力大小； src/simulation/mujoco/assets/config/pm_v2.yaml
 ## 通过修改 rl_basic_param_XZL.yaml 里 initial_velocity 组参数来改变初始速度
 

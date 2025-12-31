@@ -1,0 +1,124 @@
+# mlp net parameters
+policy_file: "policies/2025-12-14_17-37-01.mnn"
+num_observations: 135
+num_commands: 3
+num_clock_signal: 2
+
+active_joint_names:
+  [
+    "J00_HIP_PITCH_L",
+    "J01_HIP_ROLL_L",
+    "J02_HIP_YAW_L",
+    "J03_KNEE_PITCH_L",
+    "J04_ANKLE_PITCH_L",
+    "J05_ANKLE_ROLL_L",
+    "J06_HIP_PITCH_R",
+    "J07_HIP_ROLL_R",
+    "J08_HIP_YAW_R",
+    "J09_KNEE_PITCH_R",
+    "J10_ANKLE_PITCH_R",
+    "J11_ANKLE_ROLL_R",
+    "J12_WAIST_YAW",
+    "J13_SHOULDER_PITCH_L",
+    "J14_SHOULDER_ROLL_L",
+    "J15_SHOULDER_YAW_L",
+    "J16_ELBOW_PITCH_L",
+    "J17_ELBOW_YAW_L",
+    "J18_SHOULDER_PITCH_R",
+    "J19_SHOULDER_ROLL_R",
+    "J20_SHOULDER_YAW_R",
+    "J21_ELBOW_PITCH_R",
+    "J22_ELBOW_YAW_R",
+    "J23_HEAD_YAW",
+  ]
+
+active_joint_idx:
+  [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22]
+
+num_include_obs_steps: 15
+
+mix: False
+# observation parameters
+observation_scale_linear_vel: 2.0
+observation_scale_angular_vel: 1.0
+observation_scale_dof_pos: 1.0
+observation_scale_dof_vel: 0.05
+observation_scale_quat: 1.0
+observation_clip: 100.0
+
+# gait parameters
+cycle_time: 0.8
+still_ratio: 0.1
+
+# joint control parameters
+action_clip: 100.0
+default_joint_q:
+  - [-0.06, 0.0, 0.0, 0.12, -0.06, 0.0]
+  - [-0.06, 0.0, 0.0, 0.12, -0.06, 0.0]
+  - [0.0]
+  - [0.0, 0.15, 0.0, -0.25, 0.0]
+  - [0.0, -0.15, 0.0, -0.25, 0.0]
+  - [0.0]
+
+joint_kp:
+  # 左腿: [HIP_PITCH(Q90), HIP_ROLL(Q90), HIP_YAW(Q25), KNEE_PITCH(Q90), ANKLE_PITCH(Q25-ANKLE), ANKLE_ROLL(Q25-ANKLE)]
+  - [178.84, 178.84, 26.45, 178.84, 26.45, 26.45]
+  # 右腿: [HIP_PITCH(Q90), HIP_ROLL(Q90), HIP_YAW(Q25), KNEE_PITCH(Q90), ANKLE_PITCH(Q25-ANKLE), ANKLE_ROLL(Q25-ANKLE)]
+  - [178.84, 178.84, 26.45, 178.84, 26.45, 26.45]
+  # 躯干: [WAIST_YAW(Q25)] - 如果存在
+  - [26.45]
+  # 左臂: [SHOULDER_PITCH(Q25), SHOULDER_ROLL(Q25), SHOULDER_YAW(Q25), ELBOW_PITCH(Q25), ELBOW_YAW(Q25)]
+  - [26.45, 26.45, 26.45, 26.45, 26.45]
+  # 右臂: [SHOULDER_PITCH(Q25), SHOULDER_ROLL(Q25), SHOULDER_YAW(Q25), ELBOW_PITCH(Q25), ELBOW_YAW(Q25)]
+  - [26.45, 26.45, 26.45, 26.45, 26.45]
+  # 头部: [HEAD_YAW(Q25)] - 如果存在
+  - [26.45]
+
+joint_kd:
+  # 左腿: [HIP_PITCH(Q90), HIP_ROLL(Q90), HIP_YAW(Q25), KNEE_PITCH(Q90), ANKLE_PITCH(Q25-ANKLE), ANKLE_ROLL(Q25-ANKLE)]
+  - [11.39, 11.39, 1.68, 11.39, 0.50, 0.50]
+  # 右腿: [HIP_PITCH(Q90), HIP_ROLL(Q90), HIP_YAW(Q25), KNEE_PITCH(Q90), ANKLE_PITCH(Q25-ANKLE), ANKLE_ROLL(Q25-ANKLE)]
+  - [11.39, 11.39, 1.68, 11.39, 0.50, 0.50]
+  # 躯干: [WAIST_YAW(Q25)] - 如果存在
+  - [1.68]
+  # 左臂: [SHOULDER_PITCH(Q25), SHOULDER_ROLL(Q25), SHOULDER_YAW(Q25), ELBOW_PITCH(Q25), ELBOW_YAW(Q25)]
+  - [1.68, 1.68, 1.68, 1.68, 1.68]
+  # 右臂: [SHOULDER_PITCH(Q25), SHOULDER_ROLL(Q25), SHOULDER_YAW(Q25), ELBOW_PITCH(Q25), ELBOW_YAW(Q25)]
+  - [1.68, 1.68, 1.68, 1.68, 1.68]
+  # 头部: [HEAD_YAW(Q25)] - 如果存在
+  - [1.68]
+
+action_scale:
+  # 左腿: [HIP_PITCH(Q90), HIP_ROLL(Q90), HIP_YAW(Q25), KNEE_PITCH(Q90), ANKLE_PITCH(Q25), ANKLE_ROLL(Q25)]
+  - [0.2293, 0.2293, 0.4915, 0.2293, 0.4915, 0.4915]
+  # 右腿: [HIP_PITCH(Q90), HIP_ROLL(Q90), HIP_YAW(Q25), KNEE_PITCH(Q90), ANKLE_PITCH(Q25), ANKLE_ROLL(Q25)]
+  - [0.2293, 0.2293, 0.4915, 0.2293, 0.4915, 0.4915]
+  # 躯干: [WAIST_YAW(Q25)] - 如果存在
+  - [0.4915]
+  # 左臂: [SHOULDER_PITCH(Q25), SHOULDER_ROLL(Q25), SHOULDER_YAW(Q25), ELBOW_PITCH(Q25), ELBOW_YAW(Q25)]
+  - [0.4915, 0.4915, 0.4915, 0.4915, 0.4915]
+  # 右臂: [SHOULDER_PITCH(Q25), SHOULDER_ROLL(Q25), SHOULDER_YAW(Q25), ELBOW_PITCH(Q25), ELBOW_YAW(Q25)]
+  - [0.4915, 0.4915, 0.4915, 0.4915, 0.4915]
+  # 头部: [HEAD_YAW(Q25)] - 如果存在
+  - [0.4915]
+
+control_dt: 0.01
+
+# sim to real fine tune parameters
+enable_remote_command_lpf: false
+remote_command_sampling_frequency: 50.0
+remote_command_cut_off_frequency: 0.1
+transition_time: 0.5
+command_scale: [1.5, 0.5, 2.0]
+command_scale_negative: [-1.0, -0.5, -2.0]
+command_bias: [0.0, 0.0, 0.0]
+linear_vel_delta_bias: 0.001
+angular_vel_delta_bias: 0.001
+imu_install_delta_bias: 0.001
+imu_install_bias: [0, 0.015, 0]
+
+# 初始速度配置 - 定义机器人的初始运动状态
+initial_velocity:
+  linear: [0.0, 0.0, 0.0]    # 初始线速度 [x, y, z] (m/s) - 设置为0停止前进
+  angular: [0.0, 0.0, 0.0]   # 初始角速度 [x, y, z] (rad/s)
+

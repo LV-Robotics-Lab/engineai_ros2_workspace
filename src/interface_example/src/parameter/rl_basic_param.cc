@@ -11,14 +11,23 @@ RlBasicParam::RlBasicParam(const std::string& config_file) {
   num_actions = active_joint_names.size();
 
   // Initialize observation scale vector with correct size
+  // New observation structure (135 dims): 
+  // command(48) + motion_anchor_pos_b(3) + motion_anchor_ori_b(6) + 
+  // base_lin_vel(3) + base_ang_vel(3) + joint_pos(24) + joint_vel(24) + actions(24)
   observation_scale = Eigen::VectorXd::Zero(num_observations);
-
+  
+  int num_joints = 24;  // Total number of joints (not just active)
+  
   observation_scale <<
-      Eigen::VectorXd::Constant(num_actions, observation_scale_dof_pos),  // joint position - joint default position
-      Eigen::VectorXd::Constant(num_actions, observation_scale_dof_vel),  // joint velocity
-      Eigen::VectorXd::Ones(num_actions),                                 // last joint action
-      Eigen::Vector3d::Constant(observation_scale_angular_vel),           // base angular velocity
-      Eigen::Vector3d::Constant(observation_scale_quat);                  // base euler angle xyz
+      Eigen::VectorXd::Constant(num_joints, observation_scale_dof_pos),  // command: joint_pos (24)
+      Eigen::VectorXd::Constant(num_joints, observation_scale_dof_vel),  // command: joint_vel (24)
+      Eigen::Vector3d::Ones(),                                            // motion_anchor_pos_b (3)
+      Eigen::VectorXd::Constant(6, 1.0),                                  // motion_anchor_ori_b (6)
+      Eigen::Vector3d::Constant(observation_scale_linear_vel),            // base_lin_vel (3)
+      Eigen::Vector3d::Constant(observation_scale_angular_vel),         // base_ang_vel (3)
+      Eigen::VectorXd::Constant(num_joints, observation_scale_dof_pos),  // joint_pos (24)
+      Eigen::VectorXd::Constant(num_joints, observation_scale_dof_vel),  // joint_vel (24)
+      Eigen::VectorXd::Ones(num_joints);                                  // actions (24)
   obs_commands_scale = Eigen::VectorXd::Zero(num_commands);
   obs_commands_scale << Eigen::Vector2d::Constant(observation_scale_linear_vel),  // linear velocity command
       observation_scale_angular_vel;                                          // angular velocity command

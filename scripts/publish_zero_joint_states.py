@@ -59,7 +59,7 @@ def main(args=None):
     finally:
         node.destroy_node()
         try:
-            rclpy.shutdown()
+        rclpy.shutdown()
         except Exception:
             # 如果已经 shutdown，忽略错误
             pass
