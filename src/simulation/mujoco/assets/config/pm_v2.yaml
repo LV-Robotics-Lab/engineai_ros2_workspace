@@ -8,7 +8,7 @@ actuator:
 
 # 碰撞模型配置 - 定义碰撞检测的几何体类型
 collision_model:
-  collision_model_type: simplified  # 碰撞检测几何体类型选择
+  collision_model_type: mesh  # 碰撞检测几何体类型选择
   # simplified = 使用简化几何体（如球体、圆柱体、立方体，计算速度快但精度较低）
   # mesh = 使用真实mesh（高精度网格模型，计算精度高但速度较慢）
   # mjlab = 使用mjlab碰撞模型（高精度网格模型，计算精度高但速度较慢）
@@ -35,7 +35,7 @@ model_param:
 
 # 干扰力配置 - 定义默认的推力大小
 perturbation:
-  default_force_magnitude: 200.0    # 默认推力大小（牛顿），系统会自动按前后左右方向分配
+  default_force_magnitude: 00.0    # 默认推力大小（牛顿），系统会自动按前后左右方向分配
   default_torque_magnitude: 0.0     # 默认扭矩大小（牛·米）
   force_step: 20.0                  # 推力调整步长（牛顿），用于+/-键调整推力大小
   torque_step: 5.0                  # 扭矩调整步长（牛·米），用于+/-键调整推力大小

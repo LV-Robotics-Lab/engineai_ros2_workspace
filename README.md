@@ -110,6 +110,7 @@ cd /home/wang22/engineai/engineai_ros2_workspace && conda activate engineai_ros2
 ./scripts/build_nodes_4090.sh sim
 source install/setup.bash 
 # ros2 launch mujoco_simulator mujoco_simulator.launch.py
+# 修改 sim_manager.h protection_enabled_ 启用护具功能（减少冲击力）
 ros2 launch mujoco_simulator mujoco_simulator.launch.py export_contact:=true save_contact_csv:=true save_perturbation_csv:=true save_joint_forces_csv:=true 
 
 # # 推倒采样仿真器 - 支持交互式干扰力控制
