@@ -1,0 +1,246 @@
+# 使用未来帧参考数据的广播体操配置示例
+# observation_type: mimic_future - 返回当前+未来10帧的参考关节位置和速度
+
+motion_states:
+  # 旋风踢 1.0scale
+  # dance_1:
+  #   observation_type: "mimic_future"
+  #   data_path: "rl_dance/trajectories/dance_base1.csv"
+  #   policy_path: "rl_dance/policies/spinkick/best_kick_ori.mnn"
+  #   traj_frame: [0, -1]
+  #   residual_control: false
+  #   csv_dt: 0.02
+  #   remote_control_key: ["START", "A"]  # 按键组合：START + B
+  #   enable: true
+  #   auto_transition: "dance_2"
+  #   proprioception_obs_with_yaw: false
+  #   use_quat_error: true
+  #   use_gravity_error: false
+  # 韦伯斯特空翻 0.85scale
+  dance_1:
+  #优先用wbst_500_addl2 40000begin_wbst_450
+    observation_type: "mimic_future"  # 新增类型：当前+未来10帧参考数据
+    # data_path: "rl_dance/trajectories/dance2.csv"
+    # data_path: "rl_dance/trajectories/kf_robot_0.8_320.csv"
+    data_path: "rl_dance/trajectories/fall1/toLeft_1_converted_50fps.csv"
+    # data_path: "rl_dance/trajectories/kf_robot1.csv"
+    # policy_path: "rl_dance/policies/wbst/robot_44000.mnn"
+    # policy_path: "rl_dance/policies/40000begin_wbst_450/model_60000.mnn"
+    policy_path: "rl_dance/policies/fall/toLeft_2.mnn"
+    # policy_path: "rl_dance/policies/new_kf_addrand/model_70000.mnn"
+    # policy_path: "rl_dance/policies/wbst/kf3_85.mnn"
+    # data_path: "rl_dance/trajectories/wbst_best.csv"
+    # policy_path: "rl_dance/policies/wbst/wbst_best85.mnn"
+    traj_frame: [0, 250]  # 播放完整轨迹
+    residual_control: false  # 不使用残差控制dance2221
+    csv_dt: 0.02 #0.00833  # 120Hz采样率
+    remote_control_key: ["START", "B"]  # 按键组合：START + A
+    enable: true
+    auto_transition: false
+    proprioception_obs_with_yaw: false
+    use_quat_error: true
+    use_gravity_error: false
+
+
+  # # 第二节广播体操
+  # radio_gymnastics_2:
+  #   observation_type: "mimic_future"
+  #   data_path: "pm_v2/rl_mimic_radio_gymnastics/trajectories/radio_gymnastics_section2.csv"
+  #   policy_path: "pm_v2/rl_mimic_radio_gymnastics/policies/section2_future_frames.mnn"
+  #   traj_frame: [0, -1]
+  #   residual_control: false
+  #   csv_dt: 0.00833
+  #   remote_control_key: ["B"]
+  #   enable: true
+  #   auto_transition: "false"  # 完成后退出
+  #   proprioception_obs_with_yaw: false
+
+# 观测配置
+observations:
+  num_single_observations: 78
+  
+  # 各观测类型的配置
+  observation_type:
+    # mimic_future 类型配置
+    mimic_future:
+      goal_length: 480  # current(24*2=48) + future_9_frames(9*24*2=432) = 480
+      goal_history_steps: 1  # 不需要goal历史
+      num_include_obs_steps: 5  # 本体感知历史步数，与Python的history_length=5一致
+      goal_scale: 1.0
+    
+    # 保留原有的mimic类型配置（向后兼容）
+    mimic:
+      goal_length: 24
+      goal_history_steps: 1
+      num_include_obs_steps: 5
+      goal_scale: 1.0
+    
+    # 其他观测类型...
+    rl_locomotion:
+      goal_length: 5
+      goal_history_steps: 1
+      num_include_obs_steps: 5
+      goal_scale: 1.0
+
+  # 观测scale配置
+  observation_scale:
+    observation_scale_linear_vel: 1.0  # 未在 policy 观测中使用
+    observation_scale_angular_vel: 1.0  # base_ang_vel scale = 1.0
+    observation_scale_dof_pos: 1.0  # joint_pos scale = 1.0
+    observation_scale_dof_vel: 0.05  # joint_vel scale = 0.05 (实际是 1/20)
+    observation_scale_quat: 1.0  # projected_gravity scale = 1.0
+    observation_scale_actions: 1.0  # actions scale = 1.0
+    observation_scale_command: 1.0  # command 不缩放
+    observation_scale_future_frames: 1.0  # future_frames 不缩放
+
+# 其他参数保持不变...
+active_joint_names:
+  - "J00_HIP_PITCH_L"
+  - "J01_HIP_ROLL_L"
+  - "J02_HIP_YAW_L"
+  - "J03_KNEE_PITCH_L"
+  - "J04_ANKLE_PITCH_L"
+  - "J05_ANKLE_ROLL_L"
+  - "J06_HIP_PITCH_R"
+  - "J07_HIP_ROLL_R"
+  - "J08_HIP_YAW_R"
+  - "J09_KNEE_PITCH_R"
+  - "J10_ANKLE_PITCH_R"
+  - "J11_ANKLE_ROLL_R"
+  - "J12_WAIST_YAW"
+  - "J13_SHOULDER_PITCH_L"
+  - "J14_SHOULDER_ROLL_L"
+  - "J15_SHOULDER_YAW_L"
+  - "J16_ELBOW_PITCH_L"
+  - "J17_ELBOW_YAW_L"
+  - "J18_SHOULDER_PITCH_R"
+  - "J19_SHOULDER_ROLL_R"
+  - "J20_SHOULDER_YAW_R"
+  - "J21_ELBOW_PITCH_R"
+  - "J22_ELBOW_YAW_R"
+  - "J23_HEAD_YAW"
+
+default_joint_q:
+  - [-0.06, 0.0, 0.0, 0.12, -0.06, 0.0]  # 左腿
+  - [-0.06, 0.0, 0.0, 0.12, -0.06, 0.0]  # 右腿
+  - [0.0]  # 腰部
+  - [0.0, 0.15, 0.0, -0.25, 0.0]  # 左臂
+  - [0.0, -0.15, 0.0, -0.25, 0.0]  # 右臂
+  - [0.0]  # 头部
+
+joint_kp:
+  - [178.8, 178.8, 26.5, 178.8, 26.5, 26.5]
+  - [178.8, 178.8, 26.5, 178.8, 26.5, 26.5]
+  - [26.5]
+  - [26.5, 26.5, 26.5, 26.5, 26.5]
+  - [26.5, 26.5, 26.5, 26.5, 26.5]
+  - [26.5]
+
+joint_kd:
+  - [11.4, 11.4, 1.7, 11.4, 0.5, 0.5]
+  - [11.4, 11.4, 1.7, 11.4, 0.5, 0.5]
+  - [1.7]
+  - [1.7, 1.7, 1.7, 1.7, 1.7]
+  - [1.7, 1.7, 1.7, 1.7, 1.7]
+  - [1.7]
+# 1.0
+action_scale:
+  - [0.229, 0.229, 0.491, 0.229, 0.418, 0.418]
+  - [0.229, 0.229, 0.491, 0.229, 0.418, 0.418]
+  - [0.491]
+  - [0.491, 0.491, 0.491, 0.491, 0.491]
+  - [0.491, 0.491, 0.491, 0.491, 0.491]
+  - [0.491]
+  # - [0.195, 0.195, 0.418, 0.195, 0.418, 0.418]
+  # - [0.195, 0.195, 0.418, 0.195, 0.418, 0.418]
+  # - [0.418]
+  # - [0.418, 0.418, 0.418, 0.418, 0.418]
+  # - [0.418, 0.418, 0.418, 0.418, 0.418]
+  # - [0.418]
+# 0.85 
+action_scale85:
+  # - [0.229, 0.229, 0.491, 0.229, 0.491, 0.491]
+  # - [0.229, 0.229, 0.491, 0.229, 0.491, 0.491]
+  # - [0.491]
+  # - [0.491, 0.491, 0.491, 0.491, 0.491]
+  # - [0.491, 0.491, 0.491, 0.491, 0.491]
+  # - [0.491]
+  - [0.195, 0.195, 0.418, 0.195, 0.418, 0.418]
+  - [0.195, 0.195, 0.418, 0.195, 0.418, 0.418]
+  - [0.418]
+  - [0.418, 0.418, 0.418, 0.418, 0.418]
+  - [0.418, 0.418, 0.418, 0.418, 0.418]
+  - [0.418]
+# 0.9 
+# action_scale:
+#   - [0.206, 0.206, 0.442, 0.206, 0.442, 0.442]
+#   - [0.206, 0.206, 0.442, 0.206, 0.442, 0.442]
+#   - [0.442]
+#   - [0.442, 0.442, 0.442, 0.442, 0.442]
+#   - [0.442, 0.442, 0.442, 0.442, 0.442]
+#   - [0.442]
+
+# 关节速度掩码 (踝关节不使用速度控制)
+qd_mask:
+  - [1.0, 1.0, 1.0, 1.0, 0, 0]  # 左腿
+  - [1.0, 1.0, 1.0, 1.0, 0, 0]  # 右腿
+  - [1.0]  # 腰部
+  - [1.0, 1.0, 1.0, 1.0, 1.0]  # 左臂
+  - [1.0, 1.0, 1.0, 1.0, 1.0]  # 右臂
+  - [1.0]  # 头部
+
+action_clip: 1000.0
+observation_clip: 20000.0
+transition_time: 0.01
+
+# IMU 和线速度偏置参数
+imu_install_delta_bias: 0.0
+linear_vel_delta_bias: 0.0
+
+# 命令处理参数
+remote_command_sampling_frequency: 50.0
+remote_command_cut_off_frequency: 5.0
+enable_remote_command_lpf: true
+command_scale: [1.0, 1.0, 1.0]
+command_bias: [0.0, 0.0, 0.0]
+
+# 扭矩限制
+torque_limit: True
+max_torque_joint:
+  - [164, 164, 52, 164, 52, 52]
+  - [164, 164, 52, 164, 52, 52]
+  - [52]
+  - [52, 52, 52, 52, 52]
+  - [52, 52, 52, 52, 52]
+  - [52]
+# max_torque_joint:
+#   - [147.6, 147.6, 46.8, 147.6, 46.8, 46.8]
+#   - [147.6, 147.6, 46.8, 147.6, 46.8, 46.8]
+#   - [46.8]
+#   - [46.8, 46.8, 46.8, 46.8, 46.8]
+#   - [46.8, 46.8, 46.8, 46.8, 46.8]
+#   - [46.8]
+# max_torque_joint:
+#   - [139.4, 139.4, 44.2, 139.4, 44.2, 44.2]
+#   - [139.4, 139.4, 44.2, 139.4, 44.2, 44.2]
+#   - [44.2]
+#   - [44.2, 44.2, 44.2, 44.2, 44.2]
+#   - [44.2, 44.2, 44.2, 44.2, 44.2]
+#   - [44.2]
+
+max_lower_body_torque: 550.0
+
+# 稳定性检测参数
+ang_vel_threshold: 0.4
+gravity_dev_threshold: 0.15
+stability_smoothing_threshold: 0.6
+stability_history_length: 10
+
+# 速度阈值
+lin_vel_set_zero_threshold: 0.3
+ang_vel_set_zero_threshold: 0.314
+
+# 步态相位参数
+unstable_cycle_time_scale: 0.5
+default_dynamic_cycle_time: 0.8
+
