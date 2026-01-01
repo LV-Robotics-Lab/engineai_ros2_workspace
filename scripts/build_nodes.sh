@@ -74,6 +74,14 @@ fi
 # Create build directory if it doesn't exist
 mkdir -p "$root_dir/build"
 
+# Source ROS2 environment first
+if [ -f /opt/ros/humble/setup.bash ]; then
+    echo "Sourcing ROS2 Humble environment..."
+    source /opt/ros/humble/setup.bash
+else
+    echo "Warning: ROS2 Humble setup.bash not found at /opt/ros/humble/setup.bash"
+fi
+
 # Activate conda environment if it exists
 if [ -f ~/miniconda3/etc/profile.d/conda.sh ]; then
     echo "Activating conda environment..."
@@ -94,6 +102,9 @@ if [ -f ~/miniconda3/etc/profile.d/conda.sh ]; then
     export PYTHONPATH="/opt/ros/humble/lib/python3.10/site-packages:/opt/ros/humble/local/lib/python3.10/dist-packages:$PYTHONPATH"
     export PYTHONPATH="/usr/lib/python3/dist-packages:$PYTHONPATH"
 fi
+
+# Set PKG_CONFIG_PATH to ensure pkg-config can find system packages like LCM
+export PKG_CONFIG_PATH="/usr/lib/x86_64-linux-gnu/pkgconfig:/usr/lib/pkgconfig:/usr/share/pkgconfig:${PKG_CONFIG_PATH}"
 
 # Create .colcon_ignore file to exclude problematic numpy directories
 if [ -f ~/miniconda3/etc/profile.d/conda.sh ]; then

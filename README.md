@@ -53,6 +53,10 @@ Both computing units are maintained as open platforms by EngineAI.
 sudo apt update
 sudo apt install rsync sshpass openssh-client libglfw3-dev libxinerama-dev libxcursor-dev
 sudo apt install ros-dev-tools ros-humble-rmw-cyclonedds-cpp ros-humble-ros-base
+sudo apt install -y liblcm-dev
+sudo apt install -y libglib2.0-dev
+conda create -n engineai_ros2 python=3.10
+
 ```
 
 <!-- #### LCM (Lightweight Communications and Marshalling) Installation
@@ -63,6 +67,7 @@ sudo apt --fix-broken install
 sudo apt install build-essential libglib2.0-dev cmake
 sudo apt install openssl libssl-dev -y
 sudo apt update && sudo apt install -y libpcre3-dev libglib2.0-dev pkg-config
+
 
 # Or install from source for latest version
 git clone https://github.com/lcm-proj/lcm.git
