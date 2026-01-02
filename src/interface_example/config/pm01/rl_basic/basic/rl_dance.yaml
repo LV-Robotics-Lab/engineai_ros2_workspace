@@ -1,5 +1,6 @@
 # 使用未来帧参考数据的广播体操配置示例
 # observation_type: mimic_future - 返回当前+未来10帧的参考关节位置和速度
+periods: 0.02
 
 motion_states:
   # 旋风踢 1.0scale
@@ -231,16 +232,16 @@ max_torque_joint:
 max_lower_body_torque: 550.0
 
 # 稳定性检测参数
-ang_vel_threshold: 0.4
-gravity_dev_threshold: 0.15
-stability_smoothing_threshold: 0.6
-stability_history_length: 10
+ang_vel_threshold: 0.4 # 角速度阈值（rad/s），超过此值认为机器人不稳定。
+gravity_dev_threshold: 0.15 # 重力投影偏差阈值，检测机器人是否倾斜过多。
+stability_smoothing_threshold: 0.6 # 稳定性平滑阈值，用于历史稳定性判断的阈值。
+stability_history_length: 10 # 稳定性历史长度，用于平滑稳定性判断。
 
 # 速度阈值
-lin_vel_set_zero_threshold: 0.3
-ang_vel_set_zero_threshold: 0.314
+lin_vel_set_zero_threshold: 0.3 # 线速度置零阈值，小于此值设为0，避免微小抖动。
+ang_vel_set_zero_threshold: 0.314 # 角速度置零阈值（约18°/s），类似线速度。
 
 # 步态相位参数
-unstable_cycle_time_scale: 0.5
-default_dynamic_cycle_time: 0.8
+unstable_cycle_time_scale: 0.5 # 不稳定时的周期缩放因子，调整步态周期。
+default_dynamic_cycle_time: 0.8 # 默认动态步态周期时间（秒）。
 
