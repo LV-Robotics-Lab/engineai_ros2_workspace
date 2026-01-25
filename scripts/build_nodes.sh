@@ -86,6 +86,21 @@ fi
 if [ -f ~/miniconda3/etc/profile.d/conda.sh ]; then
     echo "Activating conda environment..."
     conda activate engineai_ros2
+    
+    # Check and install glog if needed (required for rl_basic_example_CHR)
+    if [[ " ${NODES[@]} " =~ " interface_example " ]]; then
+        if ! conda list | grep -q "^glog "; then
+            echo "glog not found. Installing glog via conda..."
+            conda install -y -c conda-forge glog
+            if [ $? -ne 0 ]; then
+                echo "Warning: Failed to install glog. rl_basic_example_CHR may not build."
+            else
+                echo "glog installed successfully."
+            fi
+        else
+            echo "glog is already installed."
+        fi
+    fi
     # Ensure conda environment Python is used
     export PATH="$CONDA_PREFIX/bin:$PATH"
     echo "Using Python: $(which python3)"

@@ -56,6 +56,9 @@ sudo apt install ros-dev-tools ros-humble-rmw-cyclonedds-cpp ros-humble-ros-base
 sudo apt install -y liblcm-dev
 sudo apt install -y libglib2.0-dev
 conda create -n engineai_ros2 python=3.10
+conda activate engineai_ros2
+# Install glog (required for rl_basic_example_CHR)
+conda install -y -c conda-forge glog
 
 ```
 

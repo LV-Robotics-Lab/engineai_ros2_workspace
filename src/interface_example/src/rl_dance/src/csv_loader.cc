@@ -3,7 +3,9 @@
 #define GLOG_NO_ABBREVIATED_SEVERITIES
 #endif
 
-// 先定义宏，再包含头文件
+// glog 需要先包含 export.h 来定义 GLOG_EXPORT
+#define GLOG_USE_GLOG_EXPORT
+#include <glog/export.h>
 #include <glog/logging.h>
 #include "rl_dance/csv_loader.h"
 #include <algorithm>

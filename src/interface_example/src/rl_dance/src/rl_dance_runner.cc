@@ -1,5 +1,8 @@
 #include "rl_dance/rl_dance_runner.h"
 
+// glog 需要先包含 export.h 来定义 GLOG_EXPORT
+#define GLOG_USE_GLOG_EXPORT
+#include <glog/export.h>
 #include <glog/logging.h>
 #include <fstream>
 #include <iostream>
