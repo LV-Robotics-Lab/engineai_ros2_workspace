@@ -2,7 +2,12 @@
 #include <Eigen/Dense>
 #include <string>
 #include <vector>
-#include "rl_dance_param/rl_dance_param.h"
+
+// 前向声明，避免包含 rl_dance_param.h（它需要 basic_param）
+namespace data {
+  class RlDanceMotionStateProfile;
+  class RlDanceParam;
+}
 
 namespace rl_dance {
 

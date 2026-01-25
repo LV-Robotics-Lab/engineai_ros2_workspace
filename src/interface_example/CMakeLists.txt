@@ -9,12 +9,18 @@ endif()
 
 list(APPEND ENGINEAI_ROBOTICS_THIRD_PARTY /opt/engineai_robotics_third_party)
 list(APPEND CMAKE_PREFIX_PATH ${ENGINEAI_ROBOTICS_THIRD_PARTY})
+# Add conda environment to find glog
+if(DEFINED ENV{CONDA_PREFIX})
+  list(APPEND CMAKE_PREFIX_PATH $ENV{CONDA_PREFIX})
+endif()
 
 find_package(ament_cmake REQUIRED)
 find_package(rclcpp REQUIRED)
 find_package(interface_protocol REQUIRED)
 find_package(yaml-cpp REQUIRED)
 find_package(Eigen3 REQUIRED)
+# Find glog for csv_loader
+find_package(glog REQUIRED)
 
 include_directories(
   include 
@@ -52,6 +58,11 @@ file(GLOB_RECURSE rl_basic_example_src_files
   src/components/*.cc
   src/math/*.cc
   src/math/*.cpp
+)
+
+# Add csv_loader.cc for rl_basic_example_CHR (but not LoadProfileTrajectory which needs RlDanceParam)
+set(rl_dance_csv_loader_src
+  src/rl_dance/src/csv_loader.cc
 )
 
 add_executable(rl_basic_example
@@ -100,22 +111,44 @@ ament_target_dependencies(rl_basic_example_XZL
 )
 
 # Add rl_basic_example_CHR executable
+# Note: We don't link rl_dance library (it requires basic_param), 
+# but we can use csv_loader header-only functions
 add_executable(rl_basic_example_CHR
   src/rl_basic_example_CHR.cc
   ${rl_basic_example_src_files}
+  ${rl_dance_csv_loader_src}
 )
 
 target_include_directories(rl_basic_example_CHR
   PUBLIC 
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src>
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src/rl_dance/include>
     ${ENGINEAI_ROBOTICS_THIRD_PARTY}/include
 )
+# Add conda glog include if available
+if(DEFINED ENV{CONDA_PREFIX})
+  target_include_directories(rl_basic_example_CHR PUBLIC $ENV{CONDA_PREFIX}/include)
+endif()
+# Define glog macro to fix include issues
+target_compile_definitions(rl_basic_example_CHR PRIVATE GLOG_NO_ABBREVIATED_SEVERITIES)
 
 target_link_libraries(rl_basic_example_CHR
   yaml-cpp::yaml-cpp
   Eigen3::Eigen
   ${ENGINEAI_ROBOTICS_THIRD_PARTY}/lib/libMNN.so
+  glog::glog  # Required for csv_loader.cc
+  # Note: We don't link rl_dance library (it requires basic_param)
+  # csv_loader functions are used as header-only
 )
+
+# Set rpath to find glog from conda environment at runtime
+if(DEFINED ENV{CONDA_PREFIX})
+  set_target_properties(rl_basic_example_CHR PROPERTIES
+    BUILD_WITH_INSTALL_RPATH TRUE
+    INSTALL_RPATH_USE_LINK_PATH TRUE
+    INSTALL_RPATH "$ENV{CONDA_PREFIX}/lib:${ENGINEAI_ROBOTICS_THIRD_PARTY}/lib"
+  )
+endif()
 
 ament_target_dependencies(rl_basic_example_CHR
   rclcpp

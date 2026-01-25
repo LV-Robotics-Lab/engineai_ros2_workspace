@@ -1,13 +1,20 @@
-#include "rl_dance/csv_loader.h"
+// 必须在包含 glog 之前定义这个宏
+#ifndef GLOG_NO_ABBREVIATED_SEVERITIES
+#define GLOG_NO_ABBREVIATED_SEVERITIES
+#endif
+
+// 先定义宏，再包含头文件
 #include <glog/logging.h>
+#include "rl_dance/csv_loader.h"
 #include <algorithm>
 #include <fstream>
 #include <map>
 #include <sstream>
 #include <stdexcept>
-#include "parameter/global_config_initializer.h"
-#include "rl_dance_param/rl_dance_param.h"
-#include "tool/string_join.h"
+// 暂时注释掉，避免 basic_param 依赖
+// #include "parameter/global_config_initializer.h"
+// #include "rl_dance_param/rl_dance_param.h"
+// #include "tool/string_join.h"
 
 namespace rl_dance {
 
@@ -515,6 +522,9 @@ Eigen::MatrixXd CsvLoader::LoadAndInterpolateJointTrajectoryWithVelAndQuat(const
   return interp_traj;
 }
 
+// LoadProfileTrajectory 暂时注释掉，因为它需要 RlDanceParam（需要 basic_param）
+// 如果需要使用，需要先解决 basic_param 依赖问题
+/*
 Eigen::MatrixXd CsvLoader::LoadProfileTrajectory(const data::RlDanceMotionStateProfile& profile,
                                                  const data::RlDanceParam& param, double runner_period) {
   // 拼接csv路径
@@ -542,5 +552,6 @@ Eigen::MatrixXd CsvLoader::LoadProfileTrajectory(const data::RlDanceMotionStateP
     return interp_traj;
   }
 }
+*/
 
 }  // namespace rl_dance

@@ -27,8 +27,12 @@ def generate_launch_description():
 
     # Append dynamic library path
     ENGINEAI_ROBOTICS_THIRD_PARTY = "/opt/engineai_robotics_third_party"
-    os.environ['LD_LIBRARY_PATH'] = os.path.join(
-        ENGINEAI_ROBOTICS_THIRD_PARTY, 'lib') + ':' + os.environ.get('LD_LIBRARY_PATH', '')
+    conda_prefix = os.environ.get('CONDA_PREFIX', '')
+    ld_library_path = os.path.join(ENGINEAI_ROBOTICS_THIRD_PARTY, 'lib')
+    if conda_prefix:
+        conda_lib = os.path.join(conda_prefix, 'lib')
+        ld_library_path = conda_lib + ':' + ld_library_path
+    os.environ['LD_LIBRARY_PATH'] = ld_library_path + ':' + os.environ.get('LD_LIBRARY_PATH', '')
 
     # Create node - using rl_basic_example_CHR
     hardware_node = Node(

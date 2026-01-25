@@ -31,6 +31,7 @@
 #include "joint_forces_eigen.hpp"
 #include "rclcpp/rclcpp.hpp"
 #include <mujoco/mujoco.h>
+#include <std_msgs/msg/empty.hpp>
 
 
 // 常量定义
@@ -250,6 +251,8 @@ bool RosInterface::Initialize() {
   // contact visulization
   contact_marker_pub_ = node_->create_publisher<visualization_msgs::msg::MarkerArray>("/mujoco/contact_markers", 10);
 
+  // MuJoCo重置完成发布者
+  mujoco_reset_pub_ = node_->create_publisher<std_msgs::msg::Empty>("/mujoco/reset_complete", 10);
 
   // 如果启用接触力导出，创建接触力发布者
   if (export_contact_) {
@@ -1397,6 +1400,11 @@ void RosInterface::PublishContactForces(const mjModel* m, mjData* d) {
             auto& sim_manager = SimManager::GetInstance();
             sim_manager.ResetAutoSampling();
             RCLCPP_INFO(node_->get_logger(), "已重置auto_sampling状态，推力将在auto_delay时间后重新施加");
+            
+            // 发布重置完成消息
+            std_msgs::msg::Empty reset_msg;
+            mujoco_reset_pub_->publish(reset_msg);
+            RCLCPP_INFO(node_->get_logger(), "已发布MuJoCo重置完成消息");
           }
           
           mujoco_reset_done = true;

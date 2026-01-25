@@ -31,47 +31,126 @@ void RlBasicParam::LoadFromYaml(const std::string& config_file) {
     std::cout << "Loading MLP net parameters..." << std::endl;
     // mix = config["mix"].as<bool>();
     // Load MLP net parameters
-    policy_file = config["policy_file"].as<std::string>();
+    // policy_file is optional - may be in motion_states instead
+    if (config["policy_file"]) {
+      policy_file = config["policy_file"].as<std::string>();
+    } else {
+      policy_file = "";  // Will be set from motion_states in InitializeDanceParam
+    }
     std::cout << "policy_file: " << policy_file << std::endl;
-    num_observations = config["num_observations"].as<int>();
+    
+    // num_observations is optional - use default if not present
+    if (config["num_observations"]) {
+      num_observations = config["num_observations"].as<int>();
+    } else {
+      num_observations = 42;  // Default value
+    }
     std::cout << "num_observations: " << num_observations << std::endl;
+    
     active_joint_names = config["active_joint_names"].as<std::vector<std::string>>();
     std::cout << "active_joint_names loaded, size: " << active_joint_names.size() << std::endl;
-    active_joint_idx = LoadIntVectorFromYaml(config["active_joint_idx"]);
+    
+    // active_joint_idx is optional - generate from active_joint_names if not present
+    if (config["active_joint_idx"]) {
+      active_joint_idx = LoadIntVectorFromYaml(config["active_joint_idx"]);
+    } else {
+      // Generate indices from 0 to active_joint_names.size()-1
+      active_joint_idx = Eigen::VectorXi::LinSpaced(active_joint_names.size(), 0, active_joint_names.size() - 1);
+    }
     std::cout << "active_joint_idx loaded, size: " << active_joint_idx.size() << std::endl;
-    num_include_obs_steps = config["num_include_obs_steps"].as<int>();
+    
+    // num_include_obs_steps - check both top-level and nested in observations.observation_type
+    if (config["num_include_obs_steps"]) {
+      num_include_obs_steps = config["num_include_obs_steps"].as<int>();
+    } else if (config["observations"] && config["observations"]["observation_type"]) {
+      // Try to get from first observation_type entry
+      bool found = false;
+      for (const auto& obs_type : config["observations"]["observation_type"]) {
+        if (obs_type.second["num_include_obs_steps"]) {
+          num_include_obs_steps = obs_type.second["num_include_obs_steps"].as<int>();
+          found = true;
+          break;
+        }
+      }
+      if (!found) {
+        num_include_obs_steps = 5;  // Default value
+      }
+    } else {
+      num_include_obs_steps = 5;  // Default value
+    }
     std::cout << "num_include_obs_steps: " << num_include_obs_steps << std::endl;
 
-    // Load observation parameters
-    observation_scale_linear_vel = config["observation_scale_linear_vel"].as<double>();
-    observation_scale_angular_vel = config["observation_scale_angular_vel"].as<double>();
-    observation_scale_dof_pos = config["observation_scale_dof_pos"].as<double>();
-    observation_scale_dof_vel = config["observation_scale_dof_vel"].as<double>();
-    observation_scale_quat = config["observation_scale_quat"].as<double>();
-    observation_clip = config["observation_clip"].as<double>();
+    // Load observation parameters - check both top-level and nested in observations.observation_scale
+    if (config["observation_scale_linear_vel"]) {
+      observation_scale_linear_vel = config["observation_scale_linear_vel"].as<double>();
+    } else if (config["observations"] && config["observations"]["observation_scale"] && config["observations"]["observation_scale"]["observation_scale_linear_vel"]) {
+      observation_scale_linear_vel = config["observations"]["observation_scale"]["observation_scale_linear_vel"].as<double>();
+    } else {
+      observation_scale_linear_vel = 2.0;
+    }
     
-    // Load remote command parameters
-    remote_command_sampling_frequency = config["remote_command_sampling_frequency"].as<double>();
-    remote_command_cut_off_frequency = config["remote_command_cut_off_frequency"].as<double>();
+    if (config["observation_scale_angular_vel"]) {
+      observation_scale_angular_vel = config["observation_scale_angular_vel"].as<double>();
+    } else if (config["observations"] && config["observations"]["observation_scale"] && config["observations"]["observation_scale"]["observation_scale_angular_vel"]) {
+      observation_scale_angular_vel = config["observations"]["observation_scale"]["observation_scale_angular_vel"].as<double>();
+    } else {
+      observation_scale_angular_vel = 1.0;
+    }
+    
+    if (config["observation_scale_dof_pos"]) {
+      observation_scale_dof_pos = config["observation_scale_dof_pos"].as<double>();
+    } else if (config["observations"] && config["observations"]["observation_scale"] && config["observations"]["observation_scale"]["observation_scale_dof_pos"]) {
+      observation_scale_dof_pos = config["observations"]["observation_scale"]["observation_scale_dof_pos"].as<double>();
+    } else {
+      observation_scale_dof_pos = 1.0;
+    }
+    
+    if (config["observation_scale_dof_vel"]) {
+      observation_scale_dof_vel = config["observation_scale_dof_vel"].as<double>();
+    } else if (config["observations"] && config["observations"]["observation_scale"] && config["observations"]["observation_scale"]["observation_scale_dof_vel"]) {
+      observation_scale_dof_vel = config["observations"]["observation_scale"]["observation_scale_dof_vel"].as<double>();
+    } else {
+      observation_scale_dof_vel = 0.05;
+    }
+    
+    if (config["observation_scale_quat"]) {
+      observation_scale_quat = config["observation_scale_quat"].as<double>();
+    } else if (config["observations"] && config["observations"]["observation_scale"] && config["observations"]["observation_scale"]["observation_scale_quat"]) {
+      observation_scale_quat = config["observations"]["observation_scale"]["observation_scale_quat"].as<double>();
+    } else {
+      observation_scale_quat = 1.0;
+    }
+    
+    observation_clip = config["observation_clip"] ? config["observation_clip"].as<double>() : 100.0;
+    
+    // Load remote command parameters (with defaults)
+    remote_command_sampling_frequency = config["remote_command_sampling_frequency"] ? config["remote_command_sampling_frequency"].as<double>() : 50.0;
+    remote_command_cut_off_frequency = config["remote_command_cut_off_frequency"] ? config["remote_command_cut_off_frequency"].as<double>() : 0.1;
 
-    // Load gait parameters
-    cycle_time = config["cycle_time"].as<double>();
-    transition_time = config["transition_time"].as<double>();
-    // Load joint control parameters
-    action_clip = config["action_clip"].as<double>();
-    default_joint_q = LoadVectorArrayFromYaml(config["default_joint_q"]);
-    joint_kp = LoadVectorArrayFromYaml(config["joint_kp"]);
-    joint_kd = LoadVectorArrayFromYaml(config["joint_kd"]);
-    action_scale = LoadVectorArrayFromYaml(config["action_scale"]);
-    control_dt = config["control_dt"].as<double>();
-    imu_install_delta_bias = config["imu_install_delta_bias"].as<double>();
-    imu_install_bias = LoadVectorFromYaml(config["imu_install_bias"]);
-    // Load command scale
-    auto command_scale_node = config["command_scale"];
-    command_scale = Eigen::Vector3d(command_scale_node[0].as<double>(), command_scale_node[1].as<double>(),
-                                    command_scale_node[2].as<double>());
-    num_commands = config["num_commands"].as<int>();
-    num_clock_signal = config["num_clock_signal"].as<int>();
+    // Load gait parameters (with defaults)
+    cycle_time = config["cycle_time"] ? config["cycle_time"].as<double>() : 0.8;
+    transition_time = config["transition_time"] ? config["transition_time"].as<double>() : 0.5;
+    
+    // Load joint control parameters (with defaults)
+    action_clip = config["action_clip"] ? config["action_clip"].as<double>() : 100.0;
+    default_joint_q = config["default_joint_q"] ? LoadVectorArrayFromYaml(config["default_joint_q"]) : std::vector<Eigen::VectorXd>();
+    joint_kp = config["joint_kp"] ? LoadVectorArrayFromYaml(config["joint_kp"]) : std::vector<Eigen::VectorXd>();
+    joint_kd = config["joint_kd"] ? LoadVectorArrayFromYaml(config["joint_kd"]) : std::vector<Eigen::VectorXd>();
+    action_scale = config["action_scale"] ? LoadVectorArrayFromYaml(config["action_scale"]) : std::vector<Eigen::VectorXd>();
+    control_dt = config["control_dt"] ? config["control_dt"].as<double>() : 0.01;
+    imu_install_delta_bias = config["imu_install_delta_bias"] ? config["imu_install_delta_bias"].as<double>() : 0.0;
+    imu_install_bias = config["imu_install_bias"] ? LoadVectorFromYaml(config["imu_install_bias"]) : Eigen::Vector3d::Zero();
+    
+    // Load command scale (with defaults)
+    if (config["command_scale"]) {
+      auto command_scale_node = config["command_scale"];
+      command_scale = Eigen::Vector3d(command_scale_node[0].as<double>(), command_scale_node[1].as<double>(),
+                                      command_scale_node[2].as<double>());
+    } else {
+      command_scale = Eigen::Vector3d(1.0, 1.0, 1.0);
+    }
+    num_commands = config["num_commands"] ? config["num_commands"].as<int>() : 3;
+    num_clock_signal = config["num_clock_signal"] ? config["num_clock_signal"].as<int>() : 2;
     
     // Load initial velocity parameters
     if (config["initial_velocity"]) {

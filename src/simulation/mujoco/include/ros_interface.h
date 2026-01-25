@@ -16,6 +16,7 @@
 #include "rclcpp/rclcpp.hpp"
 #include <mujoco/mujoco.h>
 #include <std_msgs/msg/float32_multi_array.hpp>
+#include <std_msgs/msg/empty.hpp>
 #include <visualization_msgs/msg/marker_array.hpp>
 
 // Forward declarations
@@ -63,6 +64,7 @@ class RosInterface {
   rclcpp::Publisher<interface_protocol::msg::ContactForce>::SharedPtr contact_force_pub_;
   rclcpp::Publisher<std_msgs::msg::Float32MultiArray>::SharedPtr contact_pub_;
   rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr contact_marker_pub_;
+  rclcpp::Publisher<std_msgs::msg::Empty>::SharedPtr mujoco_reset_pub_;
   
   // Subscribers
   rclcpp::Subscription<interface_protocol::msg::JointCommand>::SharedPtr joint_cmd_sub_;
