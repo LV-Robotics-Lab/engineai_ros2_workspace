@@ -416,7 +416,7 @@ class RlBasicRunnerCHR : public rclcpp::Node {
     }
   }
   
-  void LoadCsvTrajectory(const std::string& workspace_root) {
+  void LoadCsvTrajectory(const std::string& /* workspace_root */) {
     if (csv_data_path_.empty()) return;
     
     std::string full_csv_path;
