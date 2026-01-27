@@ -365,21 +365,34 @@ bool RosInterface::Initialize() {
 
   // 初始化关节反力CSV文件
   if (save_joint_forces_csv_) {
+    std::stringstream ss_joint_forces;
+    std::string ext = (csv_format_ == "binary") ? ".bin" : ".csv";
+    ss_joint_forces << csv_dir << "/joint_forces_data_" << std::put_time(std::localtime(&time_t), "%Y%m%d_%H%M%S") << ext;
+    joint_forces_csv_file_path_ = ss_joint_forces.str();
+    
     std::lock_guard<std::mutex> lock(joint_forces_csv_mutex_);
-    joint_forces_csv_file_.open(joint_forces_csv_file_path_, std::ios::out);
+    if (csv_format_ == "binary") {
+      joint_forces_csv_file_.open(joint_forces_csv_file_path_, std::ios::out | std::ios::binary);
+    } else {
+      joint_forces_csv_file_.open(joint_forces_csv_file_path_, std::ios::out);
+    }
     if (joint_forces_csv_file_.is_open()) {
-      // 写入关节反力CSV头部
-      joint_forces_csv_file_ << "timestamp,joint_id,joint_name,body_id,body_name,"
-                             << "child_Mx,child_My,child_Mz,child_Fx,child_Fy,child_Fz,"
-                             << "parent_Mx,parent_My,parent_Mz,parent_Fx,parent_Fy,parent_Fz,"
-                             << "axis_x,axis_y,axis_z,"
-                             << "F_axial_mag,F_shear_mag,M_torsion_mag,M_bend_mag,M_eq,"
-                             << "F_axial_x,F_axial_y,F_axial_z,"
-                             << "F_shear_x,F_shear_y,F_shear_z,"
-                             << "M_torsion_x,M_torsion_y,M_torsion_z,"
-                             << "M_bend_x,M_bend_y,M_bend_z\n";
-      joint_forces_csv_file_.flush();
-      RCLCPP_INFO(node_->get_logger(), "Joint forces data will be saved to: %s", joint_forces_csv_file_path_.c_str());
+      if (csv_format_ == "csv") {
+        // 写入关节反力CSV头部
+        joint_forces_csv_file_ << "timestamp,joint_id,joint_name,body_id,body_name,"
+                               << "child_Mx,child_My,child_Mz,child_Fx,child_Fy,child_Fz,"
+                               << "parent_Mx,parent_My,parent_Mz,parent_Fx,parent_Fy,parent_Fz,"
+                               << "axis_x,axis_y,axis_z,"
+                               << "F_axial_mag,F_shear_mag,M_torsion_mag,M_bend_mag,M_eq,"
+                               << "F_axial_x,F_axial_y,F_axial_z,"
+                               << "F_shear_x,F_shear_y,F_shear_z,"
+                               << "M_torsion_x,M_torsion_y,M_torsion_z,"
+                               << "M_bend_x,M_bend_y,M_bend_z\n";
+        joint_forces_csv_file_.flush();
+      }
+      // 二进制格式不需要头部，直接写入数据
+      RCLCPP_INFO(node_->get_logger(), "Joint forces data will be saved to: %s (format: %s)", 
+                  joint_forces_csv_file_path_.c_str(), csv_format_.c_str());
     } else {
       RCLCPP_ERROR(node_->get_logger(), "Failed to open joint forces CSV file: %s", joint_forces_csv_file_path_.c_str());
       save_joint_forces_csv_ = false;
@@ -1896,53 +1909,118 @@ void RosInterface::SaveJointForcesToCSV(const mjModel* m, mjData* d) {
       decomposed.M_eq = 0.0;
     }
     
-    // 写入CSV行
-    joint_forces_csv_file_ << std::fixed << std::setprecision(6)
-                           << sim_time << ","
-                           << j << ","
-                           << "\"" << joint_name << "\","
-                           << body_id << ","
-                           << "\"" << body_name << "\","
-                           // 子body坐标系下的反力
-                           << child_wrench.M.x() << ","
-                           << child_wrench.M.y() << ","
-                           << child_wrench.M.z() << ","
-                           << child_wrench.F.x() << ","
-                           << child_wrench.F.y() << ","
-                           << child_wrench.F.z() << ","
-                           // 父body坐标系下的反力
-                           << parent_wrench.M.x() << ","
-                           << parent_wrench.M.y() << ","
-                           << parent_wrench.M.z() << ","
-                           << parent_wrench.F.x() << ","
-                           << parent_wrench.F.y() << ","
-                           << parent_wrench.F.z() << ","
-                           // 关节轴向量
-                           << axis.x() << ","
-                           << axis.y() << ","
-                           << axis.z() << ","
-                           // 载荷分解的标量值
-                           << decomposed.F_axial_mag << ","
-                           << decomposed.F_shear_mag << ","
-                           << decomposed.M_torsion_mag << ","
-                           << decomposed.M_bend_mag << ","
-                           << decomposed.M_eq << ","  // 综合破坏载荷
-                           // 轴向力向量
-                           << decomposed.F_axial.x() << ","
-                           << decomposed.F_axial.y() << ","
-                           << decomposed.F_axial.z() << ","
-                           // 剪切力向量
-                           << decomposed.F_shear.x() << ","
-                           << decomposed.F_shear.y() << ","
-                           << decomposed.F_shear.z() << ","
-                           // 扭矩向量
-                           << decomposed.M_torsion.x() << ","
-                           << decomposed.M_torsion.y() << ","
-                           << decomposed.M_torsion.z() << ","
-                           // 弯矩向量
-                           << decomposed.M_bend.x() << ","
-                           << decomposed.M_bend.y() << ","
-                           << decomposed.M_bend.z() << "\n";
+    // 根据格式选择写入方式
+    if (csv_format_ == "binary") {
+      // 二进制格式写入
+      joint_forces_csv_file_.write(reinterpret_cast<const char*>(&sim_time), sizeof(double));
+      joint_forces_csv_file_.write(reinterpret_cast<const char*>(&j), sizeof(int));
+      
+      // 写入字符串
+      int32_t joint_name_len = joint_name.length();
+      joint_forces_csv_file_.write(reinterpret_cast<const char*>(&joint_name_len), sizeof(int32_t));
+      joint_forces_csv_file_.write(joint_name.c_str(), joint_name_len);
+      
+      joint_forces_csv_file_.write(reinterpret_cast<const char*>(&body_id), sizeof(int));
+      
+      int32_t body_name_len = body_name.length();
+      joint_forces_csv_file_.write(reinterpret_cast<const char*>(&body_name_len), sizeof(int32_t));
+      joint_forces_csv_file_.write(body_name.c_str(), body_name_len);
+      
+      // 写入子body坐标系下的反力
+      double child_M[3] = {child_wrench.M.x(), child_wrench.M.y(), child_wrench.M.z()};
+      double child_F[3] = {child_wrench.F.x(), child_wrench.F.y(), child_wrench.F.z()};
+      joint_forces_csv_file_.write(reinterpret_cast<const char*>(child_M), 3 * sizeof(double));
+      joint_forces_csv_file_.write(reinterpret_cast<const char*>(child_F), 3 * sizeof(double));
+      
+      // 写入父body坐标系下的反力
+      double parent_M[3] = {parent_wrench.M.x(), parent_wrench.M.y(), parent_wrench.M.z()};
+      double parent_F[3] = {parent_wrench.F.x(), parent_wrench.F.y(), parent_wrench.F.z()};
+      joint_forces_csv_file_.write(reinterpret_cast<const char*>(parent_M), 3 * sizeof(double));
+      joint_forces_csv_file_.write(reinterpret_cast<const char*>(parent_F), 3 * sizeof(double));
+      
+      // 写入关节轴向量
+      double axis_vec[3] = {axis.x(), axis.y(), axis.z()};
+      joint_forces_csv_file_.write(reinterpret_cast<const char*>(axis_vec), 3 * sizeof(double));
+      
+      // 写入载荷分解结果
+      joint_forces_csv_file_.write(reinterpret_cast<const char*>(&decomposed.F_axial_mag), sizeof(double));
+      joint_forces_csv_file_.write(reinterpret_cast<const char*>(&decomposed.F_shear_mag), sizeof(double));
+      joint_forces_csv_file_.write(reinterpret_cast<const char*>(&decomposed.M_torsion_mag), sizeof(double));
+      joint_forces_csv_file_.write(reinterpret_cast<const char*>(&decomposed.M_bend_mag), sizeof(double));
+      joint_forces_csv_file_.write(reinterpret_cast<const char*>(&decomposed.M_eq), sizeof(double));
+      
+      // 写入轴向力向量
+      double F_axial[3] = {decomposed.F_axial.x(), decomposed.F_axial.y(), decomposed.F_axial.z()};
+      joint_forces_csv_file_.write(reinterpret_cast<const char*>(F_axial), 3 * sizeof(double));
+      
+      // 写入剪切力向量
+      double F_shear[3] = {decomposed.F_shear.x(), decomposed.F_shear.y(), decomposed.F_shear.z()};
+      joint_forces_csv_file_.write(reinterpret_cast<const char*>(F_shear), 3 * sizeof(double));
+      
+      // 写入扭转力矩向量
+      double M_torsion[3] = {decomposed.M_torsion.x(), decomposed.M_torsion.y(), decomposed.M_torsion.z()};
+      joint_forces_csv_file_.write(reinterpret_cast<const char*>(M_torsion), 3 * sizeof(double));
+      
+      // 写入弯曲力矩向量
+      double M_bend[3] = {decomposed.M_bend.x(), decomposed.M_bend.y(), decomposed.M_bend.z()};
+      joint_forces_csv_file_.write(reinterpret_cast<const char*>(M_bend), 3 * sizeof(double));
+      
+      // 每N条记录flush一次
+      static int flush_counter = 0;
+      flush_counter++;
+      if (flush_counter >= 100) {
+        joint_forces_csv_file_.flush();
+        flush_counter = 0;
+      }
+    } else {
+      // CSV格式写入
+      joint_forces_csv_file_ << std::fixed << std::setprecision(6)
+                             << sim_time << ","
+                             << j << ","
+                             << "\"" << joint_name << "\","
+                             << body_id << ","
+                             << "\"" << body_name << "\","
+                             // 子body坐标系下的反力
+                             << child_wrench.M.x() << ","
+                             << child_wrench.M.y() << ","
+                             << child_wrench.M.z() << ","
+                             << child_wrench.F.x() << ","
+                             << child_wrench.F.y() << ","
+                             << child_wrench.F.z() << ","
+                             // 父body坐标系下的反力
+                             << parent_wrench.M.x() << ","
+                             << parent_wrench.M.y() << ","
+                             << parent_wrench.M.z() << ","
+                             << parent_wrench.F.x() << ","
+                             << parent_wrench.F.y() << ","
+                             << parent_wrench.F.z() << ","
+                             // 关节轴向量
+                             << axis.x() << ","
+                             << axis.y() << ","
+                             << axis.z() << ","
+                             // 载荷分解的标量值
+                             << decomposed.F_axial_mag << ","
+                             << decomposed.F_shear_mag << ","
+                             << decomposed.M_torsion_mag << ","
+                             << decomposed.M_bend_mag << ","
+                             << decomposed.M_eq << ","  // 综合破坏载荷
+                             // 轴向力向量
+                             << decomposed.F_axial.x() << ","
+                             << decomposed.F_axial.y() << ","
+                             << decomposed.F_axial.z() << ","
+                             // 剪切力向量
+                             << decomposed.F_shear.x() << ","
+                             << decomposed.F_shear.y() << ","
+                             << decomposed.F_shear.z() << ","
+                             // 扭矩向量
+                             << decomposed.M_torsion.x() << ","
+                             << decomposed.M_torsion.y() << ","
+                             << decomposed.M_torsion.z() << ","
+                             // 弯矩向量
+                             << decomposed.M_bend.x() << ","
+                             << decomposed.M_bend.y() << ","
+                             << decomposed.M_bend.z() << "\n";
+    }
   }
   
   // 刷新CSV文件缓冲区

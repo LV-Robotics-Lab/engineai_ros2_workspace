@@ -703,29 +703,29 @@ class RlBasicRunnerCHR : public rclcpp::Node {
     auto joint_state = message_handler_->GetLatestJointState();
     if (!joint_state) return;
 
-    // 基于俯仰角切换：在 walking 模式下，如果俯仰角大于 0.5 rad，切换到 mimic 模式
-    // if (is_walking_mode_ && mujoco_reset_received_) {
-    //   double current_pitch = GetCurrentPitchAngleWalking();
-    //   if (current_pitch > 0.5) {
-    //     is_walking_mode_ = false;
-    //     mlp_net_ = mlp_net_mimic_.get();
-    //     RCLCPP_INFO(get_logger(), "Switching from walking to mimic mode at time: %.2f (pitch: %.4f rad > 0.5 rad)", 
-    //                 time_, current_pitch);
+    // 基于俯仰角切换：在 walking 模式下，如果俯仰角大于 0.5 rad，切换到 mimic 模式（主动摔倒）
+    if (is_walking_mode_ && mujoco_reset_received_) {
+      double current_pitch = GetCurrentPitchAngleWalking();
+      if (current_pitch > 0.5) {
+        is_walking_mode_ = false;
+        mlp_net_ = mlp_net_mimic_.get();
+        RCLCPP_INFO(get_logger(), "Switching from walking to mimic mode at time: %.2f (pitch: %.4f rad > 0.5 rad)", 
+                    time_, current_pitch);
         
-    //     // 匹配 IMU 俯仰角度并设置 trajectory_index_
-    //     if (observation_type_ == "mimic_future" && current_traj_ != nullptr) {
-    //       // 切换到 mimic 模式后，使用 mimic 模式的 IMU bias 重新计算俯仰角
-    //       double mimic_pitch = GetCurrentPitchAngle();
-    //       size_t matched_idx = FindMatchingTrajectoryIndex(mimic_pitch);
-    //       trajectory_index_ = matched_idx;
-    //       RCLCPP_INFO(get_logger(), "Matched pitch angle (%.4f rad) and set trajectory_index_ to %zu", mimic_pitch, trajectory_index_);
-    //     } else {
-    //       RCLCPP_WARN(get_logger(), "Cannot match pitch: observation_type=%s, current_traj_=%s", 
-    //                   observation_type_.c_str(), current_traj_ ? "valid" : "null");
-    //       trajectory_index_ = 0;
-    //     }
-    //   }
-    // }
+        // 匹配 IMU 俯仰角度并设置 trajectory_index_
+        if (observation_type_ == "mimic_future" && current_traj_ != nullptr) {
+          // 切换到 mimic 模式后，使用 mimic 模式的 IMU bias 重新计算俯仰角
+          double mimic_pitch = GetCurrentPitchAngle();
+          size_t matched_idx = FindMatchingTrajectoryIndex(mimic_pitch);
+          trajectory_index_ = matched_idx;
+          RCLCPP_INFO(get_logger(), "Matched pitch angle (%.4f rad) and set trajectory_index_ to %zu", mimic_pitch, trajectory_index_);
+        } else {
+          RCLCPP_WARN(get_logger(), "Cannot match pitch: observation_type=%s, current_traj_=%s", 
+                      observation_type_.c_str(), current_traj_ ? "valid" : "null");
+          trajectory_index_ = 0;
+        }
+      }
+    }
 
     UpdateState(joint_state);
     if (is_walking_mode_) {
