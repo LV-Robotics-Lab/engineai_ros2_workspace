@@ -122,6 +122,18 @@ class RosInterface {
   std::ofstream joint_forces_csv_file_;
   std::mutex joint_forces_csv_mutex_;
 
+  // Sensor vibration CSV logging parameters (持续记录，不依赖接触力)
+  bool save_sensor_vibration_csv_ = false;
+  std::string sensor_vibration_csv_file_path_;
+  std::ofstream sensor_vibration_csv_file_;
+  std::mutex sensor_vibration_csv_mutex_;
+
+  // Joint state CSV logging parameters (持续记录关节位置、速度、力矩)
+  bool save_joint_state_csv_ = false;
+  std::string joint_state_csv_file_path_;
+  std::ofstream joint_state_csv_file_;
+  std::mutex joint_state_csv_mutex_;
+
   // 异步写入数据结构
   struct ContactDataRow {
     double sim_time;
@@ -140,9 +152,6 @@ class RosInterface {
     double base_link_angvel[3];
     double collision_link_pos[3];
     double collision_link_quat[4];
-    std::vector<double> joint_angles;
-    std::vector<double> joint_accelerations;  // 关节加速度
-    std::vector<double> actuator_forces;     // 电机输出扭矩
   };
 
   struct PerturbationDataRow {
@@ -192,6 +201,12 @@ class RosInterface {
   
   // 刷新剩余数据
   void FlushRemainingData();
+  
+  // 传感器震动数据记录函数
+  void SaveSensorVibrationToCSV(const mjModel* m, mjData* d);
+  
+  // 关节状态数据记录函数（持续记录位置、速度、力矩）
+  void SaveJointStateToCSV(const mjModel* m, mjData* d);
 
   // Mutex for thread safety
   mutable std::mutex mtx_;

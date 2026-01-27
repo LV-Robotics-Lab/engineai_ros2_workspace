@@ -364,6 +364,19 @@ class RlBasicRunnerCHR : public rclcpp::Node {
     walking_observation_clip_ = config_walking_["observation_clip"] ? config_walking_["observation_clip"].as<double>() : 100.0;
     walking_transition_time_ = config_walking_["transition_time"] ? config_walking_["transition_time"].as<double>() : 0.5;
     
+    // 加载 walking 模式的 joint_kp 和 joint_kd（从 XZL 配置）
+    if (config_walking_["joint_kp"]) {
+      walking_joint_kp_ = math::ConcatenateVectors(LoadVectorArrayFromYaml(config_walking_["joint_kp"]));
+    } else {
+      walking_joint_kp_ = joint_kp_;  // 回退到 CHR 配置
+    }
+    
+    if (config_walking_["joint_kd"]) {
+      walking_joint_kd_ = math::ConcatenateVectors(LoadVectorArrayFromYaml(config_walking_["joint_kd"]));
+    } else {
+      walking_joint_kd_ = joint_kd_;  // 回退到 CHR 配置
+    }
+    
     if (config_walking_["imu_install_delta_bias"]) {
       if (config_walking_["imu_install_delta_bias"].IsScalar()) {
         double bias_val = config_walking_["imu_install_delta_bias"].as<double>();
@@ -691,28 +704,28 @@ class RlBasicRunnerCHR : public rclcpp::Node {
     if (!joint_state) return;
 
     // 基于俯仰角切换：在 walking 模式下，如果俯仰角大于 0.5 rad，切换到 mimic 模式
-    if (is_walking_mode_ && mujoco_reset_received_) {
-      double current_pitch = GetCurrentPitchAngleWalking();
-      if (current_pitch > 0.5) {
-        is_walking_mode_ = false;
-        mlp_net_ = mlp_net_mimic_.get();
-        RCLCPP_INFO(get_logger(), "Switching from walking to mimic mode at time: %.2f (pitch: %.4f rad > 0.5 rad)", 
-                    time_, current_pitch);
+    // if (is_walking_mode_ && mujoco_reset_received_) {
+    //   double current_pitch = GetCurrentPitchAngleWalking();
+    //   if (current_pitch > 0.5) {
+    //     is_walking_mode_ = false;
+    //     mlp_net_ = mlp_net_mimic_.get();
+    //     RCLCPP_INFO(get_logger(), "Switching from walking to mimic mode at time: %.2f (pitch: %.4f rad > 0.5 rad)", 
+    //                 time_, current_pitch);
         
-        // 匹配 IMU 俯仰角度并设置 trajectory_index_
-        if (observation_type_ == "mimic_future" && current_traj_ != nullptr) {
-          // 切换到 mimic 模式后，使用 mimic 模式的 IMU bias 重新计算俯仰角
-          double mimic_pitch = GetCurrentPitchAngle();
-          size_t matched_idx = FindMatchingTrajectoryIndex(mimic_pitch);
-          trajectory_index_ = matched_idx;
-          RCLCPP_INFO(get_logger(), "Matched pitch angle (%.4f rad) and set trajectory_index_ to %zu", mimic_pitch, trajectory_index_);
-        } else {
-          RCLCPP_WARN(get_logger(), "Cannot match pitch: observation_type=%s, current_traj_=%s", 
-                      observation_type_.c_str(), current_traj_ ? "valid" : "null");
-          trajectory_index_ = 0;
-        }
-      }
-    }
+    //     // 匹配 IMU 俯仰角度并设置 trajectory_index_
+    //     if (observation_type_ == "mimic_future" && current_traj_ != nullptr) {
+    //       // 切换到 mimic 模式后，使用 mimic 模式的 IMU bias 重新计算俯仰角
+    //       double mimic_pitch = GetCurrentPitchAngle();
+    //       size_t matched_idx = FindMatchingTrajectoryIndex(mimic_pitch);
+    //       trajectory_index_ = matched_idx;
+    //       RCLCPP_INFO(get_logger(), "Matched pitch angle (%.4f rad) and set trajectory_index_ to %zu", mimic_pitch, trajectory_index_);
+    //     } else {
+    //       RCLCPP_WARN(get_logger(), "Cannot match pitch: observation_type=%s, current_traj_=%s", 
+    //                   observation_type_.c_str(), current_traj_ ? "valid" : "null");
+    //       trajectory_index_ = 0;
+    //     }
+    //   }
+    // }
 
     UpdateState(joint_state);
     if (is_walking_mode_) {
@@ -1187,8 +1200,16 @@ class RlBasicRunnerCHR : public rclcpp::Node {
     joint_command_->velocity = std::vector<double>(q_des_.size(), 0.0);
     joint_command_->feed_forward_torque = std::vector<double>(q_des_.size(), 0.0);
     joint_command_->torque = std::vector<double>(q_des_.size(), 0.0);
-    joint_command_->stiffness = std::vector<double>(joint_kp_.data(), joint_kp_.data() + joint_kp_.size());
-    joint_command_->damping = std::vector<double>(joint_kd_.data(), joint_kd_.data() + joint_kd_.size());
+    
+    // 根据模式选择正确的 kp/kd 参数
+    if (is_walking_mode_) {
+      joint_command_->stiffness = std::vector<double>(walking_joint_kp_.data(), walking_joint_kp_.data() + walking_joint_kp_.size());
+      joint_command_->damping = std::vector<double>(walking_joint_kd_.data(), walking_joint_kd_.data() + walking_joint_kd_.size());
+    } else {
+      joint_command_->stiffness = std::vector<double>(joint_kp_.data(), joint_kp_.data() + joint_kp_.size());
+      joint_command_->damping = std::vector<double>(joint_kd_.data(), joint_kd_.data() + joint_kd_.size());
+    }
+    
     joint_command_->parallel_parser_type = interface_protocol::msg::ParallelParserType::RL_PARSER;
     // Send command through message handler
     message_handler_->PublishJointCommand(*joint_command_);
@@ -1279,6 +1300,8 @@ class RlBasicRunnerCHR : public rclcpp::Node {
   double walking_observation_clip_;
   double walking_transition_time_;
   Eigen::Vector3d walking_imu_install_bias_;
+  Eigen::VectorXd walking_joint_kp_;   // walking 模式的 kp（从 XZL 配置加载）
+  Eigen::VectorXd walking_joint_kd_;   // walking 模式的 kd（从 XZL 配置加载）
   Eigen::VectorXd mlp_net_action_walking_;
   Eigen::VectorXd q_real_;
   Eigen::VectorXd qd_real_;

@@ -123,6 +123,13 @@ RosInterface::~RosInterface() {
     joint_forces_csv_file_.close();
     RCLCPP_INFO(node_->get_logger(), "Joint forces data saved to: %s", joint_forces_csv_file_path_.c_str());
   }
+
+  // 关闭传感器震动CSV文件
+  if (sensor_vibration_csv_file_.is_open()) {
+    std::lock_guard<std::mutex> lock(sensor_vibration_csv_mutex_);
+    sensor_vibration_csv_file_.close();
+    RCLCPP_INFO(node_->get_logger(), "Sensor vibration data saved to: %s", sensor_vibration_csv_file_path_.c_str());
+  }
   
   // 报告队列统计信息
   if (contact_queue_dropped_ > 0) {
@@ -155,6 +162,8 @@ bool RosInterface::Initialize() {
   node_->declare_parameter("save_contact_csv", false);
   node_->declare_parameter("save_perturbation_csv", false);
   node_->declare_parameter("save_joint_forces_csv", false);
+  node_->declare_parameter("save_sensor_vibration_csv", false);
+  node_->declare_parameter("save_joint_state_csv", false);
   node_->declare_parameter("csv_file_path", "");
   node_->declare_parameter("csv_save_frequency", 1);  // 每帧都保存
   node_->declare_parameter("csv_format", "csv");  // 格式：csv 或 binary
@@ -162,9 +171,17 @@ bool RosInterface::Initialize() {
   save_contact_csv_ = node_->get_parameter("save_contact_csv").as_bool();
   save_perturbation_csv_ = node_->get_parameter("save_perturbation_csv").as_bool();
   save_joint_forces_csv_ = node_->get_parameter("save_joint_forces_csv").as_bool();
+  save_sensor_vibration_csv_ = node_->get_parameter("save_sensor_vibration_csv").as_bool();
+  save_joint_state_csv_ = node_->get_parameter("save_joint_state_csv").as_bool();
   csv_file_path_ = node_->get_parameter("csv_file_path").as_string();
   csv_save_frequency_ = node_->get_parameter("csv_save_frequency").as_int();
   csv_format_ = node_->get_parameter("csv_format").as_string();
+  
+  // 如果启用CSV保存，自动启用接触力导出（CSV保存需要接触力数据）
+  if (save_contact_csv_ && !export_contact_) {
+    export_contact_ = true;
+    RCLCPP_INFO(node_->get_logger(), "Auto-enabled export_contact because save_contact_csv is enabled");
+  }
   
   // 验证格式参数
   if (csv_format_ != "csv" && csv_format_ != "binary") {
@@ -172,6 +189,9 @@ bool RosInterface::Initialize() {
     csv_format_ = "csv";
   }
 
+  // 获取关节数量（必须在初始化CSV文件之前获取，因为CSV头部需要用到这个值）
+  num_total_joints_ = config_loader_->GetNumTotalJoints();
+  
   // 确定CSV文件保存的目录
   std::string csv_dir;
   auto now = std::chrono::system_clock::now();
@@ -211,8 +231,73 @@ bool RosInterface::Initialize() {
     joint_forces_csv_file_path_ = ss_joint.str();
   }
 
-  // 获取关节数量（无论是否保存CSV都需要这个值）
-  num_total_joints_ = config_loader_->GetNumTotalJoints();
+  // 初始化传感器震动CSV文件（持续记录，不依赖接触力）
+  if (save_sensor_vibration_csv_) {
+    std::stringstream ss_vibration;
+    std::string ext = (csv_format_ == "binary") ? ".bin" : ".csv";
+    ss_vibration << csv_dir << "/sensor_vibration_data_" << std::put_time(std::localtime(&time_t), "%Y%m%d_%H%M%S") << ext;
+    sensor_vibration_csv_file_path_ = ss_vibration.str();
+    
+    std::lock_guard<std::mutex> lock(sensor_vibration_csv_mutex_);
+    if (csv_format_ == "binary") {
+      sensor_vibration_csv_file_.open(sensor_vibration_csv_file_path_, std::ios::out | std::ios::binary);
+    } else {
+      sensor_vibration_csv_file_.open(sensor_vibration_csv_file_path_, std::ios::out);
+    }
+    if (sensor_vibration_csv_file_.is_open()) {
+      if (csv_format_ == "csv") {
+        // 写入CSV头部
+        sensor_vibration_csv_file_ << "timestamp,"
+                                   << "base_link_lin_acc_x,base_link_lin_acc_y,base_link_lin_acc_z,"
+                                   << "base_link_ang_acc_x,base_link_ang_acc_y,base_link_ang_acc_z,"
+                                   << "head_lin_acc_x,head_lin_acc_y,head_lin_acc_z,"
+                                   << "head_ang_acc_x,head_ang_acc_y,head_ang_acc_z\n";
+        sensor_vibration_csv_file_.flush();
+      }
+      RCLCPP_INFO(node_->get_logger(), "Sensor vibration data will be saved to: %s (format: %s)", 
+                  sensor_vibration_csv_file_path_.c_str(), csv_format_.c_str());
+    } else {
+      RCLCPP_ERROR(node_->get_logger(), "Failed to open sensor vibration CSV file: %s", sensor_vibration_csv_file_path_.c_str());
+      save_sensor_vibration_csv_ = false;
+    }
+  }
+
+  // 初始化关节状态CSV文件（持续记录位置、速度、力矩）
+  if (save_joint_state_csv_) {
+    std::stringstream ss_joint_state;
+    std::string ext = (csv_format_ == "binary") ? ".bin" : ".csv";
+    ss_joint_state << csv_dir << "/joint_state_data_" << std::put_time(std::localtime(&time_t), "%Y%m%d_%H%M%S") << ext;
+    joint_state_csv_file_path_ = ss_joint_state.str();
+    
+    std::lock_guard<std::mutex> lock(joint_state_csv_mutex_);
+    if (csv_format_ == "binary") {
+      joint_state_csv_file_.open(joint_state_csv_file_path_, std::ios::out | std::ios::binary);
+    } else {
+      joint_state_csv_file_.open(joint_state_csv_file_path_, std::ios::out);
+    }
+    if (joint_state_csv_file_.is_open()) {
+      if (csv_format_ == "csv") {
+        // 写入CSV头部
+        joint_state_csv_file_ << "timestamp";
+        for (int i = 0; i < num_total_joints_; i++) {
+          joint_state_csv_file_ << ",joint_" << i << "_position";
+        }
+        for (int i = 0; i < num_total_joints_; i++) {
+          joint_state_csv_file_ << ",joint_" << i << "_velocity";
+        }
+        for (int i = 0; i < num_total_joints_; i++) {
+          joint_state_csv_file_ << ",actuator_" << i << "_force";
+        }
+        joint_state_csv_file_ << "\n";
+        joint_state_csv_file_.flush();
+      }
+      RCLCPP_INFO(node_->get_logger(), "Joint state data will be saved to: %s (format: %s)", 
+                  joint_state_csv_file_path_.c_str(), csv_format_.c_str());
+    } else {
+      RCLCPP_ERROR(node_->get_logger(), "Failed to open joint state CSV file: %s", joint_state_csv_file_path_.c_str());
+      save_joint_state_csv_ = false;
+    }
+  }
   
   // 初始化接触力文件
   if (save_contact_csv_) {
@@ -226,22 +311,8 @@ bool RosInterface::Initialize() {
     if (csv_file_.is_open()) {
       if (csv_format_ == "csv") {
         // 写入CSV头部
-        csv_file_ << "timestamp,contact_id,body1_name,body2_name,pos_x,pos_y,pos_z,robot_frame_x,robot_frame_y,robot_frame_z,force_x,force_y,force_z,force_magnitude,force_normal,torque_x,torque_y,torque_z,base_link_x,base_link_y,base_link_z,base_link_qw,base_link_qx,base_link_qy,base_link_qz,base_link_vel_x,base_link_vel_y,base_link_vel_z,base_link_angvel_x,base_link_angvel_y,base_link_angvel_z,collision_link_x,collision_link_y,collision_link_z,collision_link_qw,collision_link_qx,collision_link_qy,collision_link_qz";
-        
-        // 添加关节角度列名
-        for (int i = 0; i < num_total_joints_; i++) {
-          csv_file_ << ",joint_" << i << "_angle";
-        }
-        // 添加关节加速度列名
-        for (int i = 0; i < num_total_joints_; i++) {
-          csv_file_ << ",joint_" << i << "_acceleration";
-        }
-        // 添加电机输出扭矩列名
-        for (int i = 0; i < num_total_joints_; i++) {
-          csv_file_ << ",actuator_" << i << "_force";
-        }
-        
-        csv_file_ << "\n";
+        // 写入CSV头部（移除关节角度、关节加速度和电机扭矩，已移到独立的 joint_state_data.csv）
+        csv_file_ << "timestamp,contact_id,body1_name,body2_name,pos_x,pos_y,pos_z,robot_frame_x,robot_frame_y,robot_frame_z,force_x,force_y,force_z,force_magnitude,force_normal,torque_x,torque_y,torque_z,base_link_x,base_link_y,base_link_z,base_link_qw,base_link_qx,base_link_qy,base_link_qz,base_link_vel_x,base_link_vel_y,base_link_vel_z,base_link_angvel_x,base_link_angvel_y,base_link_angvel_z,collision_link_x,collision_link_y,collision_link_z,collision_link_qw,collision_link_qx,collision_link_qy,collision_link_qz\n";
         csv_file_.flush();
       } else {
         // 二进制格式：写入文件头（包含关节数量等信息）
@@ -498,6 +569,16 @@ void RosInterface::UpdateSimState(const mjModel* m, mjData* d) {
   // 保存关节反力到CSV
   if (save_joint_forces_csv_) {
     SaveJointForcesToCSV(m, d);
+  }
+
+  // 保存传感器震动数据到CSV（持续记录，不依赖接触力）
+  if (save_sensor_vibration_csv_) {
+    SaveSensorVibrationToCSV(m, d);
+  }
+
+  // 保存关节状态数据到CSV（持续记录位置、速度、力矩）
+  if (save_joint_state_csv_) {
+    SaveJointStateToCSV(m, d);
   }
 }
 
@@ -1610,41 +1691,8 @@ void RosInterface::PublishContactForces(const mjModel* m, mjData* d) {
             row.collision_link_quat[2] = (*csv_collision_link_quat_y)[i];
             row.collision_link_quat[3] = (*csv_collision_link_quat_z)[i];
             
-            // 添加关节角度参数
-            row.joint_angles.resize(num_total_joints_);
-            if (is_floating_base_) {
-              // 浮动基座：跳过前7个元素（基座位置和姿态）
-              for (int j = 0; j < num_total_joints_; j++) {
-                row.joint_angles[j] = d->qpos[j + kNumFloatingBaseJoints];
-              }
-            } else {
-              // 非浮动基座：直接从qpos读取
-              for (int j = 0; j < num_total_joints_; j++) {
-                row.joint_angles[j] = d->qpos[j];
-              }
-            }
-            
-            // 添加关节加速度参数
-            row.joint_accelerations.resize(num_total_joints_);
-            if (is_floating_base_) {
-              // 浮动基座：跳过前6个元素（基座加速度：线加速度3 + 角加速度3）
-              for (int j = 0; j < num_total_joints_; j++) {
-                row.joint_accelerations[j] = d->qacc[j + kDofFloatingBase];
-              }
-            } else {
-              // 非浮动基座：直接从qacc读取
-              for (int j = 0; j < num_total_joints_; j++) {
-                row.joint_accelerations[j] = d->qacc[j];
-              }
-            }
-            
-            // 添加电机输出扭矩参数
-            row.actuator_forces.resize(num_total_joints_);
-            for (int j = 0; j < num_total_joints_; j++) {
-              row.actuator_forces[j] = d->actuator_force[j];
-            }
-            
             // 将数据加入队列（非阻塞，异步写入）
+            // 注意：关节角度、关节加速度和电机扭矩已移到独立的 joint_state_data.csv 文件中
             EnqueueContactData(row);
           }
         }
@@ -2006,20 +2054,8 @@ void RosInterface::ContactWriterThread() {
                     << row.collision_link_quat[0] << ","
                     << row.collision_link_quat[1] << ","
                     << row.collision_link_quat[2] << ","
-                    << row.collision_link_quat[3];
-          
-          for (size_t j = 0; j < row.joint_angles.size(); ++j) {
-            csv_file_ << "," << row.joint_angles[j];
-          }
-          // 添加关节加速度
-          for (size_t j = 0; j < row.joint_accelerations.size(); ++j) {
-            csv_file_ << "," << row.joint_accelerations[j];
-          }
-          // 添加电机输出扭矩
-          for (size_t j = 0; j < row.actuator_forces.size(); ++j) {
-            csv_file_ << "," << row.actuator_forces[j];
-          }
-          csv_file_ << "\n";
+                    << row.collision_link_quat[3] << "\n";
+          // 注意：关节角度、关节加速度和电机扭矩已移到独立的 joint_state_data.csv 文件中
         }
         
         // 每N条记录flush一次，而不是每条都flush
@@ -2133,21 +2169,7 @@ void RosInterface::WriteContactDataBinary(const ContactDataRow& row) {
   csv_file_.write(reinterpret_cast<const char*>(row.base_link_angvel), 3 * sizeof(double));
   csv_file_.write(reinterpret_cast<const char*>(row.collision_link_pos), 3 * sizeof(double));
   csv_file_.write(reinterpret_cast<const char*>(row.collision_link_quat), 4 * sizeof(double));
-  
-  // 写入关节角度
-  int32_t num_joints = row.joint_angles.size();
-  csv_file_.write(reinterpret_cast<const char*>(&num_joints), sizeof(int32_t));
-  csv_file_.write(reinterpret_cast<const char*>(row.joint_angles.data()), num_joints * sizeof(double));
-  
-  // 写入关节加速度
-  int32_t num_accs = row.joint_accelerations.size();
-  csv_file_.write(reinterpret_cast<const char*>(&num_accs), sizeof(int32_t));
-  csv_file_.write(reinterpret_cast<const char*>(row.joint_accelerations.data()), num_accs * sizeof(double));
-  
-  // 写入电机输出扭矩
-  int32_t num_actuators = row.actuator_forces.size();
-  csv_file_.write(reinterpret_cast<const char*>(&num_actuators), sizeof(int32_t));
-  csv_file_.write(reinterpret_cast<const char*>(row.actuator_forces.data()), num_actuators * sizeof(double));
+  // 注意：关节角度、关节加速度和电机扭矩已移到独立的 joint_state_data.csv 文件中
 }
 
 void RosInterface::WritePerturbationDataBinary(const PerturbationDataRow& row) {
@@ -2224,20 +2246,8 @@ void RosInterface::FlushRemainingData() {
                     << row.collision_link_quat[0] << ","
                     << row.collision_link_quat[1] << ","
                     << row.collision_link_quat[2] << ","
-                    << row.collision_link_quat[3];
-          
-          for (size_t j = 0; j < row.joint_angles.size(); ++j) {
-            csv_file_ << "," << row.joint_angles[j];
-          }
-          // 添加关节加速度
-          for (size_t j = 0; j < row.joint_accelerations.size(); ++j) {
-            csv_file_ << "," << row.joint_accelerations[j];
-          }
-          // 添加电机输出扭矩
-          for (size_t j = 0; j < row.actuator_forces.size(); ++j) {
-            csv_file_ << "," << row.actuator_forces[j];
-          }
-          csv_file_ << "\n";
+                    << row.collision_link_quat[3] << "\n";
+          // 注意：关节角度、关节加速度和电机扭矩已移到独立的 joint_state_data.csv 文件中
         }
       }
     }
@@ -2286,6 +2296,228 @@ void RosInterface::FlushRemainingData() {
     }
     if (perturbation_csv_file_.is_open()) {
       perturbation_csv_file_.flush();
+    }
+  }
+}
+
+/**
+ * @brief 保存传感器震动数据到CSV文件（持续记录，不依赖接触力）
+ * @param m MuJoCo模型指针
+ * @param d MuJoCo数据指针
+ * @details 记录 base_link 和 head 的加速度，用于传感器震动分析
+ */
+void RosInterface::SaveSensorVibrationToCSV(const mjModel* m, mjData* d) {
+  if (!m || !d) return;
+  
+  static int frame_counter = 0;
+  frame_counter++;
+  
+  // 根据配置的频率决定是否保存
+  if (frame_counter % csv_save_frequency_ != 0) {
+    return;
+  }
+  
+  // 获取 base_link 的加速度（IMU震动分析）
+  int base_link_id = -1;
+  for (int j = 0; j < m->nbody; j++) {
+    if (std::string(m->names + m->name_bodyadr[j]) == "LINK_BASE") {
+      base_link_id = j;
+      break;
+    }
+  }
+  
+  double base_link_lin_acc[3] = {0, 0, 0};
+  double base_link_ang_acc[3] = {0, 0, 0};
+  if (base_link_id >= 0) {
+    // cacc格式：[angacc_x, angacc_y, angacc_z, linacc_x, linacc_y, linacc_z]
+    base_link_ang_acc[0] = d->cacc[base_link_id*6 + 0];  // 角加速度x
+    base_link_ang_acc[1] = d->cacc[base_link_id*6 + 1];  // 角加速度y
+    base_link_ang_acc[2] = d->cacc[base_link_id*6 + 2];  // 角加速度z
+    base_link_lin_acc[0] = d->cacc[base_link_id*6 + 3];   // 线加速度x
+    base_link_lin_acc[1] = d->cacc[base_link_id*6 + 4];   // 线加速度y
+    base_link_lin_acc[2] = d->cacc[base_link_id*6 + 5];   // 线加速度z
+  }
+  
+  // 获取 head 的加速度（头部传感器震动分析）
+  int head_id = -1;
+  for (int j = 0; j < m->nbody; j++) {
+    if (std::string(m->names + m->name_bodyadr[j]) == "LINK_HEAD_YAW") {
+      head_id = j;
+      break;
+    }
+  }
+  
+  double head_lin_acc[3] = {0, 0, 0};
+  double head_ang_acc[3] = {0, 0, 0};
+  if (head_id >= 0) {
+    // cacc格式：[angacc_x, angacc_y, angacc_z, linacc_x, linacc_y, linacc_z]
+    head_ang_acc[0] = d->cacc[head_id*6 + 0];  // 角加速度x
+    head_ang_acc[1] = d->cacc[head_id*6 + 1];  // 角加速度y
+    head_ang_acc[2] = d->cacc[head_id*6 + 2];  // 角加速度z
+    head_lin_acc[0] = d->cacc[head_id*6 + 3];   // 线加速度x
+    head_lin_acc[1] = d->cacc[head_id*6 + 4];   // 线加速度y
+    head_lin_acc[2] = d->cacc[head_id*6 + 5];   // 线加速度z
+  }
+  
+  std::lock_guard<std::mutex> lock(sensor_vibration_csv_mutex_);
+  
+  if (!sensor_vibration_csv_file_.is_open()) {
+    return;
+  }
+  
+  if (csv_format_ == "binary") {
+    // 二进制格式写入
+    double sim_time = d->time;
+    sensor_vibration_csv_file_.write(reinterpret_cast<const char*>(&sim_time), sizeof(double));
+    sensor_vibration_csv_file_.write(reinterpret_cast<const char*>(base_link_lin_acc), 3 * sizeof(double));
+    sensor_vibration_csv_file_.write(reinterpret_cast<const char*>(base_link_ang_acc), 3 * sizeof(double));
+    sensor_vibration_csv_file_.write(reinterpret_cast<const char*>(head_lin_acc), 3 * sizeof(double));
+    sensor_vibration_csv_file_.write(reinterpret_cast<const char*>(head_ang_acc), 3 * sizeof(double));
+    
+    // 每N条记录flush一次
+    static int flush_counter = 0;
+    flush_counter++;
+    if (flush_counter >= 100) {
+      sensor_vibration_csv_file_.flush();
+      flush_counter = 0;
+    }
+  } else {
+    // CSV格式写入
+    sensor_vibration_csv_file_ << std::fixed << std::setprecision(6)
+                               << d->time << ","
+                               << base_link_lin_acc[0] << "," << base_link_lin_acc[1] << "," << base_link_lin_acc[2] << ","
+                               << base_link_ang_acc[0] << "," << base_link_ang_acc[1] << "," << base_link_ang_acc[2] << ","
+                               << head_lin_acc[0] << "," << head_lin_acc[1] << "," << head_lin_acc[2] << ","
+                               << head_ang_acc[0] << "," << head_ang_acc[1] << "," << head_ang_acc[2] << "\n";
+    
+    // 每N条记录flush一次
+    static int flush_counter = 0;
+    flush_counter++;
+    if (flush_counter >= 100) {
+      sensor_vibration_csv_file_.flush();
+      flush_counter = 0;
+    }
+  }
+}
+
+/**
+ * @brief 保存关节状态数据到CSV文件（持续记录位置、速度、力矩）
+ * @param m MuJoCo模型指针
+ * @param d MuJoCo数据指针
+ * @details 记录所有关节的位置、速度和电机输出力矩，通过时间戳可以与其他CSV文件关联
+ */
+void RosInterface::SaveJointStateToCSV(const mjModel* m, mjData* d) {
+  if (!m || !d) return;
+  
+  static int frame_counter = 0;
+  frame_counter++;
+  
+  // 根据配置的频率决定是否保存
+  if (frame_counter % csv_save_frequency_ != 0) {
+    return;
+  }
+  
+  std::lock_guard<std::mutex> lock(joint_state_csv_mutex_);
+  
+  if (!joint_state_csv_file_.is_open()) {
+    return;
+  }
+  
+  if (csv_format_ == "binary") {
+    // 二进制格式写入
+    double sim_time = d->time;
+    joint_state_csv_file_.write(reinterpret_cast<const char*>(&sim_time), sizeof(double));
+    
+    // 写入关节位置
+    int32_t num_joints = num_total_joints_;
+    joint_state_csv_file_.write(reinterpret_cast<const char*>(&num_joints), sizeof(int32_t));
+    if (is_floating_base_) {
+      // 浮动基座：跳过前7个元素（基座位置和四元数）
+      for (int j = 0; j < num_total_joints_; j++) {
+        double pos = d->qpos[j + kNumFloatingBaseJoints];
+        joint_state_csv_file_.write(reinterpret_cast<const char*>(&pos), sizeof(double));
+      }
+    } else {
+      // 非浮动基座：直接从qpos读取
+      for (int j = 0; j < num_total_joints_; j++) {
+        double pos = d->qpos[j];
+        joint_state_csv_file_.write(reinterpret_cast<const char*>(&pos), sizeof(double));
+      }
+    }
+    
+    // 写入关节速度
+    joint_state_csv_file_.write(reinterpret_cast<const char*>(&num_joints), sizeof(int32_t));
+    if (is_floating_base_) {
+      // 浮动基座：跳过前6个元素（基座线速度和角速度）
+      for (int j = 0; j < num_total_joints_; j++) {
+        double vel = d->qvel[j + kDofFloatingBase];
+        joint_state_csv_file_.write(reinterpret_cast<const char*>(&vel), sizeof(double));
+      }
+    } else {
+      // 非浮动基座：直接从qvel读取
+      for (int j = 0; j < num_total_joints_; j++) {
+        double vel = d->qvel[j];
+        joint_state_csv_file_.write(reinterpret_cast<const char*>(&vel), sizeof(double));
+      }
+    }
+    
+    // 写入电机输出力矩
+    joint_state_csv_file_.write(reinterpret_cast<const char*>(&num_joints), sizeof(int32_t));
+    for (int j = 0; j < num_total_joints_; j++) {
+      double force = d->actuator_force[j];
+      joint_state_csv_file_.write(reinterpret_cast<const char*>(&force), sizeof(double));
+    }
+    
+    // 每N条记录flush一次
+    static int flush_counter = 0;
+    flush_counter++;
+    if (flush_counter >= 100) {
+      joint_state_csv_file_.flush();
+      flush_counter = 0;
+    }
+  } else {
+    // CSV格式写入
+    joint_state_csv_file_ << std::fixed << std::setprecision(6) << d->time;
+    
+    // 写入关节位置
+    if (is_floating_base_) {
+      // 浮动基座：跳过前7个元素（基座位置和四元数）
+      for (int j = 0; j < num_total_joints_; j++) {
+        joint_state_csv_file_ << "," << d->qpos[j + kNumFloatingBaseJoints];
+      }
+    } else {
+      // 非浮动基座：直接从qpos读取
+      for (int j = 0; j < num_total_joints_; j++) {
+        joint_state_csv_file_ << "," << d->qpos[j];
+      }
+    }
+    
+    // 写入关节速度
+    if (is_floating_base_) {
+      // 浮动基座：跳过前6个元素（基座线速度和角速度）
+      for (int j = 0; j < num_total_joints_; j++) {
+        joint_state_csv_file_ << "," << d->qvel[j + kDofFloatingBase];
+      }
+    } else {
+      // 非浮动基座：直接从qvel读取
+      for (int j = 0; j < num_total_joints_; j++) {
+        joint_state_csv_file_ << "," << d->qvel[j];
+      }
+    }
+    
+    // 写入电机输出力矩
+    for (int j = 0; j < num_total_joints_; j++) {
+      joint_state_csv_file_ << "," << d->actuator_force[j];
+    }
+    
+    joint_state_csv_file_ << "\n";
+    
+    // 每N条记录flush一次
+    static int flush_counter = 0;
+    flush_counter++;
+    if (flush_counter >= 100) {
+      joint_state_csv_file_.flush();
+      flush_counter = 0;
     }
   }
 }
