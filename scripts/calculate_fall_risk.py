@@ -665,6 +665,98 @@ def extract_collision_timestamps(
     return collision_times
 
 
+def extract_collision_nearjointlimit_timestamps(
+    time_collision: np.ndarray,
+    joint_state_df: pd.DataFrame,
+    joint_range_percentile: float = 0.01
+) -> np.ndarray:
+    """
+    从 extract_collision_timestamps 的帧中选择关节位置接近 1% 和 99% 关节范围的时间戳
+    
+    参数:
+        time_collision: 碰撞时间戳数组（从 extract_collision_timestamps 获取）
+        joint_state_df: 关节状态数据 DataFrame，应包含列：
+            - timestamp: 时间戳
+            - joint_*_position: 各关节位置（列名格式为 joint_<index>_position）
+        joint_range_percentile: 关节范围百分位，默认 0.01（即 1% 和 99%）
+    
+    返回:
+        time_collision_near_jointlimit: 接近关节限制的碰撞时间戳数组（已排序且去重）
+    """
+    if len(time_collision) == 0 or joint_state_df.empty:
+        return np.array([])
+    
+    # 检查必要的列
+    if 'timestamp' not in joint_state_df.columns:
+        print(f"警告: joint_state_df 缺少 'timestamp' 列")
+        return np.array([])
+    
+    # 提取所有关节位置列
+    joint_pos_cols = [col for col in joint_state_df.columns if col.startswith('joint_') and col.endswith('_position')]
+    
+    if len(joint_pos_cols) == 0:
+        print(f"警告: joint_state_df 中未找到关节位置列（格式应为 joint_*_position）")
+        return np.array([])
+    
+    # 对于每个关节，计算整个 episode 的范围
+    joint_ranges = {}
+    for col in joint_pos_cols:
+        joint_positions = joint_state_df[col].values
+        valid_positions = joint_positions[np.isfinite(joint_positions)]
+        if len(valid_positions) > 0:
+            pos_min = np.min(valid_positions)
+            pos_max = np.max(valid_positions)
+            pos_range = pos_max - pos_min
+            if pos_range > 0:
+                joint_ranges[col] = {
+                    'min': pos_min,
+                    'max': pos_max,
+                    'range': pos_range,
+                    'lower_threshold': pos_min + joint_range_percentile * pos_range,  # 1% 位置
+                    'upper_threshold': pos_max - joint_range_percentile * pos_range   # 99% 位置
+                }
+    
+    if len(joint_ranges) == 0:
+        print(f"警告: 无法计算关节范围")
+        return np.array([])
+    
+    # 获取 joint_state_df 的时间戳
+    timestamps = joint_state_df['timestamp'].to_numpy(dtype=float)
+    
+    # 对于每个碰撞时间戳，检查是否有任何关节接近限制
+    time_collision_near_jointlimit = []
+    tolerance = 0.001  # 1ms 容差
+    
+    for t_collision in time_collision:
+        # 找到时间戳在容差范围内的数据
+        time_mask = np.abs(timestamps - t_collision) <= tolerance
+        if not np.any(time_mask):
+            continue
+        
+        # 获取该时间戳的关节位置
+        idx = np.where(time_mask)[0][0]
+        
+        # 检查是否有任何关节接近限制（1% 或 99%）
+        near_limit = False
+        for col, range_info in joint_ranges.items():
+            joint_pos = joint_state_df.iloc[idx][col]
+            if np.isfinite(joint_pos):
+                # 检查是否接近下限（1%）或上限（99%）
+                if (joint_pos <= range_info['lower_threshold']) or (joint_pos >= range_info['upper_threshold']):
+                    near_limit = True
+                    break
+        
+        if near_limit:
+            time_collision_near_jointlimit.append(t_collision)
+    
+    # 去重并排序
+    if len(time_collision_near_jointlimit) > 0:
+        time_collision_near_jointlimit = np.unique(time_collision_near_jointlimit)
+        time_collision_near_jointlimit = np.sort(time_collision_near_jointlimit)
+    
+    return np.array(time_collision_near_jointlimit)
+
+
 def calculate_acceleration_risk(
     sensor_vibration_df: pd.DataFrame,
     time_collision: np.ndarray,
@@ -1400,12 +1492,17 @@ def save_frame_by_frame_risk_data(
     return df
 
 
-def plot_risk_curves(frame_by_frame_df: pd.DataFrame, output_path: Optional[str] = None):
+def plot_motor_torque_risk_curves(frame_by_frame_df: pd.DataFrame, output_path: Optional[str] = None):
     """
-    绘制风险曲线
+    绘制电机扭矩风险曲线
     
     参数:
-        frame_by_frame_df: 逐帧风险数据 DataFrame
+        frame_by_frame_df: 逐帧电机扭矩风险数据 DataFrame，应包含列：
+            - timestamp: 时间戳
+            - joint_name: 关节名称
+            - r_peak: 峰值扭矩风险
+            - r_regen: 再生功率风险
+            - r_joint: 关节总风险
         output_path: 图片保存路径（可选）
     """
     if frame_by_frame_df.empty:
@@ -1473,7 +1570,7 @@ def plot_risk_curves(frame_by_frame_df: pd.DataFrame, output_path: Optional[str]
     
     if output_path:
         plt.savefig(output_path, dpi=150, bbox_inches='tight')
-        print(f"风险曲线图已保存到: {output_path}")
+        print(f"电机扭矩风险曲线图已保存到: {output_path}")
     else:
         plt.show()
     
@@ -1632,20 +1729,261 @@ def plot_contact_force_risk_curves(frame_by_frame_df: pd.DataFrame, output_path:
     plt.close()
 
 
-def calculate_joint_wrench_risk(joint_forces_df: pd.DataFrame) -> float:
+def plot_joint_wrench_risk_curves(frame_by_frame_df: pd.DataFrame, output_path: Optional[str] = None):
+    """
+    绘制关节力/力矩风险曲线
+    
+    参数:
+        frame_by_frame_df: 逐帧关节力风险数据 DataFrame，应包含列：
+            - timestamp: 时间戳
+            - joint_name: 关节名称
+            - F_axial_mag: 轴向力大小
+            - F_shear_mag: 剪切力大小
+            - M_torsion_mag: 扭转力矩大小
+            - M_bend_mag: 弯曲力矩大小
+            - r1, r2, r3, r4: 各风险项
+            - r_j_joint: 合成风险值
+        output_path: 图片保存路径（可选）
+    """
+    if frame_by_frame_df.empty:
+        print("警告: 关节力风险逐帧数据为空，无法绘图")
+        return
+    
+    # 按关节分组
+    joints = frame_by_frame_df['joint_name'].unique()
+    n_joints = len(joints)
+    
+    if n_joints == 0:
+        return
+    
+    # 创建子图：第一个子图显示总 risk，后面每个关节一个子图
+    fig, axes = plt.subplots(n_joints + 1, 1, figsize=(14, 4 * (n_joints + 1)), sharex=True)
+    if n_joints == 0:
+        axes = [axes]
+    else:
+        axes = axes.flatten() if hasattr(axes, 'flatten') else [axes]
+    
+    # 第一个子图：总 risk（所有关节的 r_j_joint 总和）
+    frame_by_frame_df_sorted = frame_by_frame_df.sort_values('timestamp')
+    total_risk_by_time = frame_by_frame_df_sorted.groupby('timestamp')['r_j_joint'].sum().reset_index()
+    total_risk_by_time = total_risk_by_time.sort_values('timestamp')
+    
+    # 获取所有时间戳的最小值和最大值，用于设置 x 轴范围
+    min_timestamp = frame_by_frame_df_sorted['timestamp'].min()
+    max_timestamp = frame_by_frame_df_sorted['timestamp'].max()
+    timestamp_range = max_timestamp - min_timestamp
+    x_margin = max(0.01, timestamp_range * 0.02)  # 2% 边距，至少 0.01 秒
+    
+    ax_total = axes[0]
+    ax_total.plot(total_risk_by_time['timestamp'], total_risk_by_time['r_j_joint'], 
+                  'k-', label='Total Joint Wrench Risk (sum of r_j_joint)', linewidth=2)
+    ax_total.set_xlim(min_timestamp - x_margin, max_timestamp + x_margin)
+    ax_total.set_ylabel('Total Risk', fontsize=10)
+    ax_total.legend(loc='upper right')
+    ax_total.grid(True, alpha=0.3)
+    ax_total.set_title('Total Joint Wrench Risk Over Time', fontsize=12)
+    
+    # 每个关节的子图
+    for i, joint_name in enumerate(joints):
+        joint_data = frame_by_frame_df[frame_by_frame_df['joint_name'] == joint_name].copy()
+        joint_data = joint_data.sort_values('timestamp')
+        
+        ax = axes[i + 1]
+        # 绘制各风险项（不显示 r_j_joint）
+        ax.plot(joint_data['timestamp'], joint_data['r1'], 'r-', label='r1 (F_axial)', linewidth=1.5, alpha=0.7)
+        ax.plot(joint_data['timestamp'], joint_data['r2'], 'b-', label='r2 (F_shear)', linewidth=1.5, alpha=0.7)
+        ax.plot(joint_data['timestamp'], joint_data['r3'], 'g-', label='r3 (M_torsion)', linewidth=1.5, alpha=0.7)
+        ax.plot(joint_data['timestamp'], joint_data['r4'], 'm-', label='r4 (M_bend)', linewidth=1.5, alpha=0.7)
+        
+        ax.set_xlim(min_timestamp - x_margin, max_timestamp + x_margin)
+        ax.set_ylabel(f'{joint_name} Risk', fontsize=10)
+        ax.legend(loc='upper right', fontsize=8)
+        ax.grid(True, alpha=0.3)
+        ax.set_title(f'{joint_name} Joint Wrench Risk Over Time', fontsize=12)
+    
+    axes[-1].set_xlabel('Time (s) - Absolute Timestamp', fontsize=10)
+    plt.tight_layout()
+    
+    if output_path:
+        plt.savefig(output_path, dpi=150, bbox_inches='tight')
+        print(f"关节力风险曲线图已保存到: {output_path}")
+    else:
+        plt.show()
+    
+    plt.close()
+
+
+def calculate_joint_wrench_risk(
+    joint_forces_df: pd.DataFrame,
+    time_collision: np.ndarray,
+    time_collision_near_jointlimit: np.ndarray,
+    dt: float = 0.002,
+    F_axial_thr: float = 1000.0,
+    F_shear_thr: float = 1000.0,
+    M_torsion_thr: float = 100.0,
+    M_bend_thr: float = 1000.0,
+    w1: float = 1.0,
+    w2: float = 1.0,
+    w3: float = 0.01,
+    w4: float = 0.01,
+    save_frame_by_frame_path: Optional[str] = None
+) -> Tuple[float, pd.DataFrame]:
     """
     计算关节力/力矩相关的risk
     
-    待实现：根据用户提供的计算方法
+    风险定义为：
+    - r1(t) = gate(collision) * ReLU((F_axial_mag(t) - F_axial_thr) / F_axial_thr) * dt
+    - r2(t) = gate(collision) * ReLU((F_shear_mag(t) - F_shear_thr) / F_shear_thr) * dt
+    - r3(t) = gate(collision near jointlimit) * ReLU((M_torsion_mag(t) - M_torsion_thr) / M_torsion_thr) * dt
+    - r4(t) = gate(collision) * ReLU((M_bend_mag(t) - M_bend_thr) / M_bend_thr) * dt
+    
+    合成 joint-wrench risk：
+    - r_j_joint(t) = (w1*r1(t) + w2*r2(t) + w3*r3(t) + w4*r4(t))
+    - 先算每个 link 的 r_j_joint，把整个 episode 的 timestamp 求和
+    - 再把所有 link 加起来，得到 r_joint
+    
+    参数:
+        joint_forces_df: 关节力数据 DataFrame，应包含列：
+            - timestamp: 时间戳
+            - joint_name: 关节名称
+            - F_axial_mag: 轴向力大小
+            - F_shear_mag: 剪切力大小
+            - M_torsion_mag: 扭转力矩大小
+            - M_bend_mag: 弯曲力矩大小
+        time_collision: 碰撞时间戳数组（从 extract_collision_timestamps 获取）
+        time_collision_near_jointlimit: 接近关节限制的碰撞时间戳数组（从 extract_collision_nearjointlimit_timestamps 获取）
+        dt: 采样时间间隔（秒），默认 0.002
+        F_axial_thr: 轴向力阈值，默认 1000.0
+        F_shear_thr: 剪切力阈值，默认 1000.0
+        M_torsion_thr: 扭转力矩阈值，默认 100.0
+        M_bend_thr: 弯曲力矩阈值，默认 100.0
+        w1, w2, w3, w4: 各风险项的权重，默认均为 1.0
+        save_frame_by_frame_path: 如果指定，保存逐帧数据到 CSV
+    
+    返回:
+        r_joint: float，总关节力风险
+        breakdown: pd.DataFrame，按 link/joint 的风险明细
     """
-    if joint_forces_df.empty:
-        return 0.0
+    if joint_forces_df.empty or len(time_collision) == 0:
+        empty_breakdown = pd.DataFrame(columns=["joint_name", "R_j_joint"])
+        return 0.0, empty_breakdown
     
-    # TODO: 实现具体的risk计算逻辑
-    # 示例：基于关节力的简单计算
-    risk = 0.0
+    # 检查必要的列
+    required_cols = ['timestamp', 'joint_name', 'F_axial_mag', 'F_shear_mag', 'M_torsion_mag', 'M_bend_mag']
+    missing_cols = [col for col in required_cols if col not in joint_forces_df.columns]
+    if missing_cols:
+        print(f"警告: joint_forces_df 缺少必要的列: {missing_cols}")
+        empty_breakdown = pd.DataFrame(columns=["joint_name", "R_j_joint"])
+        return 0.0, empty_breakdown
     
-    return risk
+    # 验证 dt 值
+    if dt <= 0 or not np.isfinite(dt):
+        print(f"警告: 无效的 dt 值: {dt}，使用默认值 0.002")
+        dt = 0.002
+    
+    # 获取时间戳
+    timestamps = joint_forces_df['timestamp'].to_numpy(dtype=float)
+    tolerance = 0.001  # 1ms 容差
+    
+    # 创建碰撞时间戳的掩码
+    collision_mask = np.zeros(len(joint_forces_df), dtype=bool)
+    for t_collision in time_collision:
+        time_mask = np.abs(timestamps - t_collision) <= tolerance
+        collision_mask = collision_mask | time_mask
+    
+    # 创建接近关节限制的碰撞时间戳掩码
+    collision_near_jointlimit_mask = np.zeros(len(joint_forces_df), dtype=bool)
+    if len(time_collision_near_jointlimit) > 0:
+        for t_collision_near in time_collision_near_jointlimit:
+            time_mask = np.abs(timestamps - t_collision_near) <= tolerance
+            collision_near_jointlimit_mask = collision_near_jointlimit_mask | time_mask
+    
+    # 计算各风险项
+    joint_forces_df = joint_forces_df.copy()
+    
+    # r1(t) = gate(collision) * ReLU((F_axial_mag(t) - F_axial_thr) / F_axial_thr) * dt
+    r1 = np.where(
+        collision_mask,
+        relu((joint_forces_df['F_axial_mag'].values - F_axial_thr) / F_axial_thr) * dt,
+        0.0
+    )
+    
+    # r2(t) = gate(collision) * ReLU((F_shear_mag(t) - F_shear_thr) / F_shear_thr) * dt
+    r2 = np.where(
+        collision_mask,
+        relu((joint_forces_df['F_shear_mag'].values - F_shear_thr) / F_shear_thr) * dt,
+        0.0
+    )
+    
+    # r3(t) = gate(collision near jointlimit) * ReLU((M_torsion_mag(t) - M_torsion_thr) / M_torsion_thr) * dt
+    r3 = np.where(
+        collision_near_jointlimit_mask,
+        relu((joint_forces_df['M_torsion_mag'].values - M_torsion_thr) / M_torsion_thr) * dt,
+        0.0
+    )
+    
+    # r4(t) = gate(collision) * ReLU((M_bend_mag(t) - M_bend_thr) / M_bend_thr) * dt
+    r4 = np.where(
+        collision_mask,
+        relu((joint_forces_df['M_bend_mag'].values - M_bend_thr) / M_bend_thr) * dt,
+        0.0
+    )
+    
+    # r_j_joint(t) = (w1*r1(t) + w2*r2(t) + w3*r3(t) + w4*r4(t))
+    r_j_joint = w1 * r1 + w2 * r2 + w3 * r3 + w4 * r4
+    
+    # 添加 r_j_joint 列到 DataFrame
+    joint_forces_df['r_j_joint'] = r_j_joint
+    
+    # 保存逐帧数据（如果指定了路径）
+    if save_frame_by_frame_path is not None:
+        try:
+            frame_data = []
+            for idx, row in joint_forces_df.iterrows():
+                if r_j_joint[idx] > 0:  # 只保存有风险的数据
+                    frame_data.append({
+                        'timestamp': round(float(row['timestamp']), 4),
+                        'joint_name': str(row['joint_name']),
+                        'F_axial_mag': round(float(row['F_axial_mag']), 4),
+                        'F_shear_mag': round(float(row['F_shear_mag']), 4),
+                        'M_torsion_mag': round(float(row['M_torsion_mag']), 4),
+                        'M_bend_mag': round(float(row['M_bend_mag']), 4),
+                        'r1': round(float(r1[idx]), 4),
+                        'r2': round(float(r2[idx]), 4),
+                        'r3': round(float(r3[idx]), 4),
+                        'r4': round(float(r4[idx]), 4),
+                        'r_j_joint': round(float(r_j_joint[idx]), 4),
+                    })
+            
+            if frame_data:
+                frame_df = pd.DataFrame(frame_data)
+                frame_df = frame_df.sort_values('timestamp').reset_index(drop=True)
+                frame_df.to_csv(save_frame_by_frame_path, index=False, float_format='%.4f')
+                print(f"joint wrench 逐帧风险数据已保存到: {save_frame_by_frame_path} ({len(frame_df)} 条记录)")
+            else:
+                empty_df = pd.DataFrame(columns=['timestamp', 'joint_name', 'F_axial_mag', 'F_shear_mag', 'M_torsion_mag', 'M_bend_mag', 'r1', 'r2', 'r3', 'r4', 'r_j_joint'])
+                empty_df.to_csv(save_frame_by_frame_path, index=False, float_format='%.4f')
+                print(f"joint wrench 逐帧风险数据已保存到: {save_frame_by_frame_path} (无超阈值数据)")
+        except Exception as e:
+            print(f"警告: 保存 joint wrench 逐帧风险数据到 '{save_frame_by_frame_path}' 失败: {e}")
+    
+    # 按 joint_name 分组求和得到 R_j_joint（每个 link 的整个 episode 求和）
+    joint_risks = joint_forces_df.groupby('joint_name')['r_j_joint'].sum().reset_index()
+    joint_risks.columns = ['joint_name', 'R_j_joint']
+    
+    # 四舍五入到4位小数
+    joint_risks['R_j_joint'] = joint_risks['R_j_joint'].round(4)
+    
+    # 按 R_j_joint 降序排序
+    joint_risks = joint_risks.sort_values('R_j_joint', ascending=False).reset_index(drop=True)
+    
+    # 计算总风险 r_joint（所有 link 加起来）
+    r_joint = float(joint_risks['R_j_joint'].sum())
+    if not np.isfinite(r_joint):
+        r_joint = 0.0
+    r_joint = round(r_joint, 4)
+    
+    return r_joint, joint_risks
 
 
 def calculate_perturbation_risk(perturbation_df: pd.DataFrame) -> float:
@@ -1707,14 +2045,22 @@ def calculate_total_fall_risk(
     # force_threshold 由 extract_collision_timestamps 函数管理默认值
     time_collision = extract_collision_timestamps(contact_df)
     
+    # 提取接近关节限制的碰撞时间戳
+    time_collision_near_jointlimit = extract_collision_nearjointlimit_timestamps(
+        time_collision=time_collision,
+        joint_state_df=joint_state_df
+    )
+    
     # 准备保存路径
     acceleration_frame_by_frame_path = None
     motor_frame_by_frame_path = None
     contact_force_frame_by_frame_path = None
+    joint_wrench_frame_by_frame_path = None
     if output_base:
         acceleration_frame_by_frame_path = f"{output_base}_acceleration_risk.csv"
         motor_frame_by_frame_path = f"{output_base}_motor_risk.csv"
         contact_force_frame_by_frame_path = f"{output_base}_contact_force_risk.csv"
+        joint_wrench_frame_by_frame_path = f"{output_base}_joint_wrench_risk.csv"
     
     # 计算各个子risk
     # 使用 time_collision 来筛选碰撞时间窗口内的接触力
@@ -1734,7 +2080,12 @@ def calculate_total_fall_risk(
         joint_state_df,
         save_frame_by_frame_path=motor_frame_by_frame_path
     )
-    joint_wrench_risk = calculate_joint_wrench_risk(joint_forces_df)
+    joint_wrench_risk, joint_wrench_breakdown = calculate_joint_wrench_risk(
+        joint_forces_df,
+        time_collision=time_collision,
+        time_collision_near_jointlimit=time_collision_near_jointlimit,
+        save_frame_by_frame_path=joint_wrench_frame_by_frame_path
+    )
     perturbation_risk = calculate_perturbation_risk(perturbation_df) if perturbation_df is not None else 0.0
     
     
@@ -1761,6 +2112,8 @@ def calculate_total_fall_risk(
         breakdowns['motor_torque'] = motor_breakdown
     if not contact_breakdown.empty:
         breakdowns['contact_force'] = contact_breakdown
+    if not joint_wrench_breakdown.empty:
+        breakdowns['joint_wrench'] = joint_wrench_breakdown
     
     return {
         'contact_force_risk': contact_risk,
@@ -1972,7 +2325,7 @@ def main():
                 motor_risk_df = pd.read_csv(motor_risk_path)
                 if not motor_risk_df.empty:
                     plot_output_path = f"{output_base}_motor_risk_curves.png"
-                    plot_risk_curves(motor_risk_df, plot_output_path)
+                    plot_motor_torque_risk_curves(motor_risk_df, plot_output_path)
                 else:
                     print("motor_risk 数据为空，跳过绘图")
             except Exception as e:
@@ -1999,6 +2352,20 @@ def main():
                     plot_contact_force_risk_curves(contact_force_risk_df, plot_output_path)
                 except Exception as e:
                     print(f"警告: 绘制 contact_force_risk 曲线失败: {e}")
+        
+        # joint_wrench_risk 绘图
+        if args.plot:
+            joint_wrench_risk_path = f"{output_base}_joint_wrench_risk.csv"
+            if os.path.exists(joint_wrench_risk_path):
+                try:
+                    joint_wrench_risk_df = pd.read_csv(joint_wrench_risk_path)
+                    if not joint_wrench_risk_df.empty:
+                        plot_output_path = f"{output_base}_joint_wrench_risk_curves.png"
+                        plot_joint_wrench_risk_curves(joint_wrench_risk_df, plot_output_path)
+                    else:
+                        print("joint_wrench_risk 数据为空，跳过绘图")
+                except Exception as e:
+                    print(f"警告: 绘制 joint_wrench_risk 曲线失败: {e}")
 
 
 if __name__ == '__main__':
