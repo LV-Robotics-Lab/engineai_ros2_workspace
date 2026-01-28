@@ -677,7 +677,7 @@ def calculate_acceleration_risk(
     计算加速度风险指标 risk_acc（仅使用 torso 与 head）
     
     风险定义为：
-    risk_acc = sum_{b in {torso, head}} ∫[0 to 20ms] ReLU(||a_b(t)|| - a_thr) dt
+    risk_acc = sum_{b in {torso, head}} ∫[0 to 20ms] ReLU((||a_b(t)|| - a_thr) / a_thr) dt
     
     参数:
         sensor_vibration_df: 传感器振动数据 DataFrame，应包含列：
@@ -791,9 +791,10 @@ def calculate_acceleration_risk(
         head_acc_window = head_acc_mag[indices]
         window_timestamps = timestamps[indices]
         
-        # 计算 ReLU(||a|| - a_thr)
-        torso_risk = relu(torso_acc_window - a_thr)
-        head_risk = relu(head_acc_window - a_thr)
+        # 计算 ReLU((||a|| - a_thr) / a_thr)
+        # 归一化风险值，表示超过阈值的相对比例
+        torso_risk = relu((torso_acc_window - a_thr) / a_thr)
+        head_risk = relu((head_acc_window - a_thr) / a_thr)
         
         # 保存逐帧数据
         if save_frame_by_frame_path is not None:
@@ -872,7 +873,7 @@ def calculate_motor_torque_risk(
     wp: float = 1.0,
     wr: float = 1.0,
     tau_max_const: float = 52.0,  # 注意：const 模式下会根据关节类型自动选择 164.0 或 52.0
-    P0_const: float = 1000.0,
+    P0_const: float = 500.0,
     q_tau: float = 0.9,
     q_p: float = 0.9,
     eps: float = 1e-8,
@@ -1276,13 +1277,24 @@ def plot_risk_curves(frame_by_frame_df: pd.DataFrame, output_path: Optional[str]
         axes = axes.flatten() if hasattr(axes, 'flatten') else [axes]
     
     # 第一个子图：总 risk（所有关节的 r_joint 总和）
+    # 使用绝对时间戳（不进行归一化）
     frame_by_frame_df_sorted = frame_by_frame_df.sort_values('timestamp')
     total_risk_by_time = frame_by_frame_df_sorted.groupby('timestamp')['r_joint'].sum().reset_index()
     total_risk_by_time = total_risk_by_time.sort_values('timestamp')
     
+    # 获取所有时间戳的最小值和最大值，用于设置 x 轴范围
+    min_timestamp = frame_by_frame_df_sorted['timestamp'].min()
+    max_timestamp = frame_by_frame_df_sorted['timestamp'].max()
+    # 添加一些边距
+    timestamp_range = max_timestamp - min_timestamp
+    x_margin = max(0.01, timestamp_range * 0.02)  # 2% 边距，至少 0.01 秒
+    
     ax_total = axes[0]
+    # 直接使用绝对时间戳，不进行任何偏移或归一化
     ax_total.plot(total_risk_by_time['timestamp'], total_risk_by_time['r_joint'], 
                   'k-', label='Total Motor Risk (sum of r_joint)', linewidth=2)
+    # 设置 x 轴范围从数据的最小时间戳开始
+    ax_total.set_xlim(min_timestamp - x_margin, max_timestamp + x_margin)
     ax_total.set_ylabel('Total Risk', fontsize=10)
     ax_total.legend(loc='upper right')
     ax_total.grid(True, alpha=0.3)
@@ -1294,16 +1306,19 @@ def plot_risk_curves(frame_by_frame_df: pd.DataFrame, output_path: Optional[str]
         joint_data = joint_data.sort_values('timestamp')
         
         ax = axes[i + 1]
+        # 直接使用绝对时间戳，不进行任何偏移或归一化
         ax.plot(joint_data['timestamp'], joint_data['r_peak'], 'r-', label='r_peak', linewidth=1.5)
         ax.plot(joint_data['timestamp'], joint_data['r_regen'], 'b-', label='r_regen', linewidth=1.5)
         ax.plot(joint_data['timestamp'], joint_data['r_joint'], 'g-', label='r_joint', linewidth=2)
+        # 设置 x 轴范围从数据的最小时间戳开始
+        ax.set_xlim(min_timestamp - x_margin, max_timestamp + x_margin)
         
         ax.set_ylabel(f'Joint {joint_name} Risk', fontsize=10)
         ax.legend(loc='upper right')
         ax.grid(True, alpha=0.3)
         ax.set_title(f'Joint {joint_name} Risk Over Time', fontsize=12)
     
-    axes[-1].set_xlabel('Time (s)', fontsize=10)
+    axes[-1].set_xlabel('Time (s) - Absolute Timestamp', fontsize=10)
     plt.tight_layout()
     
     if output_path:
