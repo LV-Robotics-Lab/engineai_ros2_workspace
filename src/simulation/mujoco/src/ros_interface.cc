@@ -1017,9 +1017,38 @@ void RosInterface::PublishContactForces(const mjModel* m, mjData* d) {
     const char* body1_name = mj_id2name(m, mjOBJ_BODY, body1_id);
     const char* body2_name = mj_id2name(m, mjOBJ_BODY, body2_id);
     
-    // 如果body没有名称，使用ID作为名称
-    std::string name1 = body1_name ? body1_name : "body" + std::to_string(body1_id);
-    std::string name2 = body2_name ? body2_name : "body" + std::to_string(body2_id);
+    // 如果body没有名称，根据body_id和geom名称判断
+    std::string name1, name2;
+    
+    // 处理body1名称
+    if (body1_name) {
+      name1 = body1_name;
+    } else if (body1_id == 0) {
+      // 对于world body (body_id = 0)，根据geom名称区分terrain和ground
+      const char* geom1_name = mj_id2name(m, mjOBJ_GEOM, contact.geom[0]);
+      if (geom1_name && std::string(geom1_name) == "floor") {
+        name1 = "world";  // ground的geom名称是"floor"
+      } else {
+        name1 = "terrain";  // terrain的geom没有名称或名称不是"floor"
+      }
+    } else {
+      name1 = "body" + std::to_string(body1_id);
+    }
+    
+    // 处理body2名称
+    if (body2_name) {
+      name2 = body2_name;
+    } else if (body2_id == 0) {
+      // 对于world body (body_id = 0)，根据geom名称区分terrain和ground
+      const char* geom2_name = mj_id2name(m, mjOBJ_GEOM, contact.geom[1]);
+      if (geom2_name && std::string(geom2_name) == "floor") {
+        name2 = "world";  // ground的geom名称是"floor"
+      } else {
+        name2 = "terrain";  // terrain的geom没有名称或名称不是"floor"
+      }
+    } else {
+      name2 = "body" + std::to_string(body2_id);
+    }
     
     // 存储到消息和CSV变量中
     contact_msg->contact_names[i] = name1 + "_" + name2;

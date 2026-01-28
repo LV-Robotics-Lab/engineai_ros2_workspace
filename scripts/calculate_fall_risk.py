@@ -850,20 +850,170 @@ def calculate_acceleration_risk(
     return float(total_risk)
 
 
-def calculate_contact_force_risk(contact_df: pd.DataFrame) -> float:
+def calculate_contact_force_risk(
+    contact_df: pd.DataFrame,
+    time_collision: np.ndarray,
+    f_thr: float = 1000.0,
+    dt: float = 0.002,
+    save_frame_by_frame_path: Optional[str] = None
+) -> Tuple[float, pd.DataFrame]:
     """
-    计算接触力相关的risk
+    计算接触力风险指标 risk_force
     
-    待实现：根据用户提供的计算方法
+    风险定义为：
+    仅在碰撞时间戳（time_collision）时计算（force 只在碰撞时产生，不需要时间窗口）
+    每行计算 r_link = ReLU(||f(t)|| - f_thr) / f_thr
+    每个 link 求和得到 R_link = sum_t r_link(t) * dt（episode 级积分，必须乘采样间隔 dt）
+    所有 link 的 R_link 求和得到 R_force = sum_link R_link
+    
+    参数:
+        contact_df: 接触力数据 DataFrame，应包含列：
+            - timestamp: 时间戳
+            - body1_name: 第一个物体名称
+            - body2_name: 第二个物体名称
+            - force_magnitude: 力的大小
+        time_collision: 碰撞时间戳数组（从 extract_collision_timestamps 获取）
+        f_thr: 力阈值（N），默认 1000.0
+        dt: 采样时间间隔（秒），默认 0.002。用于 episode 级时间积分
+        save_frame_by_frame_path: 如果指定，保存逐帧数据到 CSV
+    
+    返回:
+        R_force: float，总接触力风险（已乘以 dt）
+        breakdown: pd.DataFrame，按 link 的风险明细（已乘以 dt）
     """
+    if contact_df.empty or len(time_collision) == 0:
+        empty_breakdown = pd.DataFrame(columns=["link_name", "R_link"])
+        return 0.0, empty_breakdown
+    
+    # 验证 dt 值
+    if dt <= 0 or not np.isfinite(dt):
+        print(f"警告: 无效的 dt 值: {dt}，使用默认值 0.002")
+        dt = 0.002
+    
+    # 检查必要的列
+    required_cols = ['timestamp', 'body1_name', 'body2_name', 'force_magnitude']
+    missing_cols = [col for col in required_cols if col not in contact_df.columns]
+    if missing_cols:
+        print(f"警告: contact_df 缺少必要的列: {missing_cols}")
+        empty_breakdown = pd.DataFrame(columns=["link_name", "R_link"])
+        return 0.0, empty_breakdown
+    
+    # 判断哪个是机器人的 link（通常以 "LINK_" 开头，或者不是 "world"）
+    def get_robot_link(body1: str, body2: str) -> Optional[str]:
+        """判断哪个是机器人的 link，返回 link 名称，如果都不是则返回 None"""
+        body1_str = str(body1).strip()
+        body2_str = str(body2).strip()
+        
+        # 判断 body1 是否是机器人 link
+        is_body1_robot = (
+            body1_str.startswith("LINK_") or
+            (body1_str.lower() != "world" and body1_str.lower() != "ground" and body1_str != "")
+        )
+        
+        # 判断 body2 是否是机器人 link
+        is_body2_robot = (
+            body2_str.startswith("LINK_") or
+            (body2_str.lower() != "world" and body2_str.lower() != "ground" and body2_str != "")
+        )
+        
+        # 优先返回以 LINK_ 开头的
+        if body1_str.startswith("LINK_"):
+            return body1_str
+        elif body2_str.startswith("LINK_"):
+            return body2_str
+        elif is_body1_robot and not is_body2_robot:
+            return body1_str
+        elif is_body2_robot and not is_body1_robot:
+            return body2_str
+        elif is_body1_robot and is_body2_robot:
+            # 如果两个都是机器人 link，返回 body2（通常是碰撞的 link）
+            return body2_str
+        else:
+            return None
+    
+    # 计算每行的风险值
+    contact_df = contact_df.copy()
+    contact_df['robot_link'] = contact_df.apply(
+        lambda row: get_robot_link(row['body1_name'], row['body2_name']),
+        axis=1
+    )
+    
+    # 过滤掉没有机器人 link 的行
+    contact_df = contact_df[contact_df['robot_link'].notna()].copy()
+    
     if contact_df.empty:
-        return 0.0
+        empty_breakdown = pd.DataFrame(columns=["link_name", "R_link"])
+        return 0.0, empty_breakdown
     
-    # TODO: 实现具体的risk计算逻辑
-    # 示例：基于force_magnitude的简单计算
-    risk = 0.0
+    # 获取时间戳
+    timestamps = contact_df['timestamp'].to_numpy(dtype=float)
     
-    return risk
+    # 直接使用 time_collision 中的时间戳筛选数据（force 只在碰撞时产生，不需要时间窗口）
+    # 由于时间戳可能有微小误差，使用一个很小的容差（1ms）来匹配
+    tolerance = 0.001  # 1ms 容差
+    
+    # 筛选出时间戳在 time_collision 中的数据
+    mask = np.zeros(len(contact_df), dtype=bool)
+    for t_collision in time_collision:
+        # 找到时间戳在容差范围内的数据
+        time_mask = np.abs(timestamps - t_collision) <= tolerance
+        mask = mask | time_mask
+    
+    # 只保留在碰撞时间戳的数据
+    contact_df_collision = contact_df[mask].copy()
+    
+    if contact_df_collision.empty:
+        empty_breakdown = pd.DataFrame(columns=["link_name", "R_link"])
+        return 0.0, empty_breakdown
+    
+    # 计算每行的风险值 r_link = ReLU(||f(t)|| - f_thr) / f_thr
+    contact_df_collision['r_link'] = relu((contact_df_collision['force_magnitude'] - f_thr) / f_thr)
+    
+    # 保存逐帧数据（如果指定了路径）
+    if save_frame_by_frame_path is not None:
+        try:
+            frame_data = []
+            for _, row in contact_df_collision.iterrows():
+                if row['r_link'] > 0:  # 只保存有风险的数据
+                    frame_data.append({
+                        'timestamp': round(float(row['timestamp']), 4),
+                        'link_name': str(row['robot_link']),
+                        'force_magnitude': round(float(row['force_magnitude']), 4),
+                        'r_link': round(float(row['r_link']), 4),
+                    })
+            
+            if frame_data:
+                frame_df = pd.DataFrame(frame_data)
+                frame_df = frame_df.sort_values('timestamp').reset_index(drop=True)
+                frame_df.to_csv(save_frame_by_frame_path, index=False, float_format='%.4f')
+                print(f"contact force 逐帧风险数据已保存到: {save_frame_by_frame_path} ({len(frame_df)} 条记录)")
+            else:
+                empty_df = pd.DataFrame(columns=['timestamp', 'link_name', 'force_magnitude', 'r_link'])
+                empty_df.to_csv(save_frame_by_frame_path, index=False, float_format='%.4f')
+                print(f"contact force 逐帧风险数据已保存到: {save_frame_by_frame_path} (无超阈值数据)")
+        except Exception as e:
+            print(f"警告: 保存 contact force 逐帧风险数据到 '{save_frame_by_frame_path}' 失败: {e}")
+    
+    # 按 link 分组求和得到 R_link（episode 级积分，必须乘采样间隔 dt）
+    link_risks = contact_df_collision.groupby('robot_link')['r_link'].sum().reset_index()
+    link_risks.columns = ['link_name', 'R_link']
+    
+    # 乘以 dt 进行时间积分
+    link_risks['R_link'] = link_risks['R_link'] * dt
+    
+    # 四舍五入到4位小数
+    link_risks['R_link'] = link_risks['R_link'].round(4)
+    
+    # 按 R_link 降序排序
+    link_risks = link_risks.sort_values('R_link', ascending=False).reset_index(drop=True)
+    
+    # 计算总风险 R_force（已乘以 dt）
+    R_force = float(link_risks['R_link'].sum())
+    if not np.isfinite(R_force):
+        R_force = 0.0
+    R_force = round(R_force, 4)
+    
+    return R_force, link_risks
 
 
 def calculate_motor_torque_risk(
@@ -1405,6 +1555,83 @@ def plot_acceleration_risk_curves(frame_by_frame_df: pd.DataFrame, output_path: 
     plt.close()
 
 
+def plot_contact_force_risk_curves(frame_by_frame_df: pd.DataFrame, output_path: Optional[str] = None):
+    """
+    绘制接触力风险曲线
+    
+    参数:
+        frame_by_frame_df: 逐帧接触力风险数据 DataFrame，应包含列：
+            - timestamp: 时间戳
+            - link_name: link 名称
+            - force_magnitude: 力的大小
+            - r_link: 风险值
+        output_path: 图片保存路径（可选）
+    """
+    if frame_by_frame_df.empty:
+        print("警告: 接触力风险逐帧数据为空，无法绘图")
+        return
+    
+    # 按 link 分组
+    links = frame_by_frame_df['link_name'].unique()
+    n_links = len(links)
+    
+    if n_links == 0:
+        return
+    
+    # 创建子图：第一个子图显示总 risk，后面每个 link 一个子图
+    fig, axes = plt.subplots(n_links + 1, 1, figsize=(12, 4 * (n_links + 1)), sharex=True)
+    if n_links == 0:
+        axes = [axes]
+    else:
+        axes = axes.flatten() if hasattr(axes, 'flatten') else [axes]
+    
+    # 第一个子图：总 risk（所有 link 的 r_link 总和）
+    frame_by_frame_df_sorted = frame_by_frame_df.sort_values('timestamp')
+    total_risk_by_time = frame_by_frame_df_sorted.groupby('timestamp')['r_link'].sum().reset_index()
+    total_risk_by_time = total_risk_by_time.sort_values('timestamp')
+    
+    # 获取所有时间戳的最小值和最大值，用于设置 x 轴范围
+    min_timestamp = frame_by_frame_df_sorted['timestamp'].min()
+    max_timestamp = frame_by_frame_df_sorted['timestamp'].max()
+    timestamp_range = max_timestamp - min_timestamp
+    x_margin = max(0.01, timestamp_range * 0.02)  # 2% 边距，至少 0.01 秒
+    
+    ax_total = axes[0]
+    ax_total.plot(total_risk_by_time['timestamp'], total_risk_by_time['r_link'], 
+                  'k-', label='Total Contact Force Risk (sum of r_link)', linewidth=2)
+    ax_total.set_xlim(min_timestamp - x_margin, max_timestamp + x_margin)
+    ax_total.set_ylabel('Total Risk', fontsize=10)
+    ax_total.legend(loc='upper right')
+    ax_total.grid(True, alpha=0.3)
+    ax_total.set_title('Total Contact Force Risk Over Time', fontsize=12)
+    
+    # 每个 link 的子图
+    for i, link_name in enumerate(links):
+        link_data = frame_by_frame_df[frame_by_frame_df['link_name'] == link_name].copy()
+        link_data = link_data.sort_values('timestamp')
+        
+        ax = axes[i + 1]
+        ax.plot(link_data['timestamp'], link_data['force_magnitude'], 'b-', label='Force Magnitude', linewidth=1.5)
+        ax.plot(link_data['timestamp'], link_data['r_link'], 'r-', label='Risk Value', linewidth=2)
+        ax.set_xlim(min_timestamp - x_margin, max_timestamp + x_margin)
+        
+        ax.set_ylabel(f'{link_name} Risk', fontsize=10)
+        ax.legend(loc='upper right')
+        ax.grid(True, alpha=0.3)
+        ax.set_title(f'{link_name} Contact Force Risk Over Time', fontsize=12)
+    
+    axes[-1].set_xlabel('Time (s) - Absolute Timestamp', fontsize=10)
+    plt.tight_layout()
+    
+    if output_path:
+        plt.savefig(output_path, dpi=150, bbox_inches='tight')
+        print(f"接触力风险曲线图已保存到: {output_path}")
+    else:
+        plt.show()
+    
+    plt.close()
+
+
 def calculate_joint_wrench_risk(joint_forces_df: pd.DataFrame) -> float:
     """
     计算关节力/力矩相关的risk
@@ -1444,6 +1671,10 @@ def calculate_total_fall_risk(
     joint_forces_df: pd.DataFrame,
     perturbation_df: Optional[pd.DataFrame] = None,
     output_base: Optional[str] = None,
+    w_contact: float = 1.0,
+    w_acceleration: float = 0.001,
+    w_motor: float = 10.0,
+    w_joint_wrench: float = 1.0,
 ) -> Dict:
     """
     计算总的摔倒risk，包括各个子项
@@ -1455,6 +1686,10 @@ def calculate_total_fall_risk(
         joint_forces_df: 关节力数据
         perturbation_df: 扰动数据（可选）
         output_base: 输出文件路径前缀（可选）
+        w_contact: 接触力风险权重，默认 1.0
+        w_acceleration: 加速度风险权重，默认 1.0
+        w_motor: 电机扭矩风险权重，默认 1.0
+        w_joint_wrench: 关节力风险权重，默认 1.0
         
     注意:
         - force_threshold 由 extract_collision_timestamps 函数管理（默认 400.0）
@@ -1475,12 +1710,19 @@ def calculate_total_fall_risk(
     # 准备保存路径
     acceleration_frame_by_frame_path = None
     motor_frame_by_frame_path = None
+    contact_force_frame_by_frame_path = None
     if output_base:
         acceleration_frame_by_frame_path = f"{output_base}_acceleration_risk.csv"
         motor_frame_by_frame_path = f"{output_base}_motor_risk.csv"
+        contact_force_frame_by_frame_path = f"{output_base}_contact_force_risk.csv"
     
     # 计算各个子risk
-    contact_risk = calculate_contact_force_risk(contact_df)
+    # 使用 time_collision 来筛选碰撞时间窗口内的接触力
+    contact_risk, contact_breakdown = calculate_contact_force_risk(
+        contact_df,
+        time_collision=time_collision,
+        save_frame_by_frame_path=contact_force_frame_by_frame_path
+    )
     # a_thr 由 calculate_acceleration_risk 函数管理默认值
     acceleration_risk = calculate_acceleration_risk(
         sensor_vibration_df,
@@ -1495,21 +1737,30 @@ def calculate_total_fall_risk(
     joint_wrench_risk = calculate_joint_wrench_risk(joint_forces_df)
     perturbation_risk = calculate_perturbation_risk(perturbation_df) if perturbation_df is not None else 0.0
     
+    
+    # 求和得到总risk（基于四舍五入后的值，使用权重）
+    total_risk = (
+        w_contact * contact_risk +
+        w_acceleration * acceleration_risk +
+        w_motor * motor_torque_risk +
+        w_joint_wrench * joint_wrench_risk +
+        perturbation_risk  # perturbation_risk 保持权重为 1.0
+    )
+    total_risk = round(total_risk, 4)
+    
     # 所有risk四舍五入到4位小数（在计算时就保留4位）
     contact_risk = round(contact_risk, 4)
     acceleration_risk = round(acceleration_risk, 4)
     motor_torque_risk = round(motor_torque_risk, 4)
     joint_wrench_risk = round(joint_wrench_risk, 4)
     perturbation_risk = round(perturbation_risk, 4)
-    
-    # 求和得到总risk（基于四舍五入后的值）
-    total_risk = contact_risk + acceleration_risk + motor_torque_risk + joint_wrench_risk + perturbation_risk
-    total_risk = round(total_risk, 4)
-    
+
     # 收集所有breakdown
     breakdowns = {}
     if not motor_breakdown.empty:
         breakdowns['motor_torque'] = motor_breakdown
+    if not contact_breakdown.empty:
+        breakdowns['contact_force'] = contact_breakdown
     
     return {
         'contact_force_risk': contact_risk,
@@ -1737,6 +1988,17 @@ def main():
                     plot_acceleration_risk_curves(acceleration_risk_df, plot_output_path)
                 except Exception as e:
                     print(f"警告: 绘制 acceleration_risk 曲线失败: {e}")
+        
+        # contact_force_risk 绘图
+        if args.plot:
+            contact_force_risk_path = f"{output_base}_contact_force_risk.csv"
+            if os.path.exists(contact_force_risk_path):
+                try:
+                    contact_force_risk_df = pd.read_csv(contact_force_risk_path)
+                    plot_output_path = f"{output_base}_contact_force_risk_curves.png"
+                    plot_contact_force_risk_curves(contact_force_risk_df, plot_output_path)
+                except Exception as e:
+                    print(f"警告: 绘制 contact_force_risk 曲线失败: {e}")
 
 
 if __name__ == '__main__':
