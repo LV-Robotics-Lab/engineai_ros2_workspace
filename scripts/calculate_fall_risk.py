@@ -602,6 +602,253 @@ def extract_timestamp_from_filename(file_path: str) -> Optional[str]:
     return None
 
 
+def extract_collision_timestamps(
+    contact_df: pd.DataFrame,
+    force_threshold: float = 400.0
+) -> np.ndarray:
+    """
+    从 contact_data 中提取 non-foot impact 且 force 大于阈值的时间戳集合
+    
+    参数:
+        contact_df: 接触力数据 DataFrame，应包含列：
+            - timestamp: 时间戳
+            - body1_name: 第一个物体名称
+            - body2_name: 第二个物体名称
+            - force_magnitude: 力的大小
+        force_threshold: 力的阈值（N），默认 400.0
+    
+    返回:
+        time_collision: 满足条件的时间戳数组（已排序且去重）
+    """
+    if contact_df.empty:
+        return np.array([])
+    
+    # 检查必要的列
+    required_cols = ['timestamp', 'body1_name', 'body2_name', 'force_magnitude']
+    missing_cols = [col for col in required_cols if col not in contact_df.columns]
+    if missing_cols:
+        print(f"警告: contact_df 缺少必要的列: {missing_cols}")
+        return np.array([])
+    
+    # 定义 foot 相关的 link 名称（用于判断是否为 foot impact）
+    foot_keywords = ['foot', 'ankle', 'toe', 'heel', 'LINK_ANKLE', 'LINK_FOOT']
+    
+    # 判断是否为 non-foot impact
+    def is_non_foot_impact(body1: str, body2: str) -> bool:
+        """判断接触是否涉及 foot"""
+        body1_lower = str(body1).lower()
+        body2_lower = str(body2).lower()
+        
+        # 如果 body1 或 body2 包含 foot 关键词，则认为是 foot impact
+        for keyword in foot_keywords:
+            if keyword.lower() in body1_lower or keyword.lower() in body2_lower:
+                return False
+        return True
+    
+    # 筛选条件：non-foot impact 且 force > threshold
+    mask = (
+        contact_df.apply(
+            lambda row: is_non_foot_impact(row['body1_name'], row['body2_name']),
+            axis=1
+        ) &
+        (contact_df['force_magnitude'] > force_threshold)
+    )
+    
+    # 提取时间戳
+    collision_times = contact_df.loc[mask, 'timestamp'].values
+    
+    # 去重并排序
+    if len(collision_times) > 0:
+        collision_times = np.unique(collision_times)
+        collision_times = np.sort(collision_times)
+    
+    return collision_times
+
+
+def calculate_acceleration_risk(
+    sensor_vibration_df: pd.DataFrame,
+    time_collision: np.ndarray,
+    a_thr: float = 30.0,
+    dt: float = 0.002,
+    window_ms: float = 20.0,
+    save_frame_by_frame_path: Optional[str] = None
+) -> float:
+    """
+    计算加速度风险指标 risk_acc（仅使用 torso 与 head）
+    
+    风险定义为：
+    risk_acc = sum_{b in {torso, head}} ∫[0 to 20ms] ReLU(||a_b(t)|| - a_thr) dt
+    
+    参数:
+        sensor_vibration_df: 传感器振动数据 DataFrame，应包含列：
+            - timestamp: 时间戳
+            - base_link_lin_acc_x, base_link_lin_acc_y, base_link_lin_acc_z: torso 线加速度
+            - head_lin_acc_x, head_lin_acc_y, head_lin_acc_z: head 线加速度
+        time_collision: 碰撞时间戳数组（从 extract_collision_timestamps 获取）
+        a_thr: 加速度阈值，默认 0.0（仅统计超过阈值的部分）
+        dt: 采样时间间隔（秒）。如果为 None，则从 timestamp 列自动估计
+        window_ms: 评估时间窗（毫秒），默认 20.0 ms
+    
+    返回:
+        risk_acc: 加速度风险值
+    """
+    if sensor_vibration_df.empty or len(time_collision) == 0:
+        return 0.0
+    
+    # 检查必要的列
+    required_cols = [
+        'timestamp',
+        'base_link_lin_acc_x', 'base_link_lin_acc_y', 'base_link_lin_acc_z',
+        'head_lin_acc_x', 'head_lin_acc_y', 'head_lin_acc_z'
+    ]
+    missing_cols = [col for col in required_cols if col not in sensor_vibration_df.columns]
+    if missing_cols:
+        print(f"警告: sensor_vibration_df 缺少必要的列: {missing_cols}")
+        return 0.0
+    
+    # 验证 dt 值
+    if dt <= 0 or not np.isfinite(dt):
+        print(f"警告: 无效的 dt 值: {dt}，使用默认值 0.002")
+        dt = 0.002
+    
+    # 转换时间窗为秒
+    window_s = window_ms / 1000.0
+    
+    # 获取时间戳和加速度数据
+    timestamps = sensor_vibration_df['timestamp'].to_numpy(dtype=float)
+    
+    # torso (base_link) 加速度
+    torso_acc_x = sensor_vibration_df['base_link_lin_acc_x'].to_numpy(dtype=float)
+    torso_acc_y = sensor_vibration_df['base_link_lin_acc_y'].to_numpy(dtype=float)
+    torso_acc_z = sensor_vibration_df['base_link_lin_acc_z'].to_numpy(dtype=float)
+    torso_acc_mag = np.sqrt(torso_acc_x**2 + torso_acc_y**2 + torso_acc_z**2)
+    
+    # head 加速度
+    head_acc_x = sensor_vibration_df['head_lin_acc_x'].to_numpy(dtype=float)
+    head_acc_y = sensor_vibration_df['head_lin_acc_y'].to_numpy(dtype=float)
+    head_acc_z = sensor_vibration_df['head_lin_acc_z'].to_numpy(dtype=float)
+    head_acc_mag = np.sqrt(head_acc_x**2 + head_acc_y**2 + head_acc_z**2)
+    
+    # 初始化总风险
+    total_risk = 0.0
+    
+    # 用于保存逐帧数据的列表
+    frame_data = []
+    
+    # 合并并排序碰撞时间，处理相邻时间间隔小于 20ms 的情况
+    if len(time_collision) == 0:
+        # 如果没有碰撞，仍然尝试保存空的 CSV（如果指定了路径）
+        if save_frame_by_frame_path is not None:
+            empty_df = pd.DataFrame(columns=['timestamp', 'link_name', 'acc_magnitude', 'risk_value', 'cumulative_risk'])
+            try:
+                empty_df.to_csv(save_frame_by_frame_path, index=False, float_format='%.4f')
+                print(f"加速度风险逐帧数据已保存到: {save_frame_by_frame_path} (无数据)")
+            except Exception as e:
+                print(f"警告: 保存加速度风险逐帧数据到 '{save_frame_by_frame_path}' 失败: {e}")
+        return 0.0
+    
+    # 对碰撞时间进行分组，如果两个碰撞时间间隔小于 window_ms，则合并为一个时间窗口
+    # 如果两个碰撞时间相邻小于 20ms，窗口应该是从第一个时间到第二个时间 + 20ms
+    collision_groups = []
+    current_group = [time_collision[0]]
+    
+    for i in range(1, len(time_collision)):
+        if time_collision[i] - current_group[-1] < window_s:
+            # 如果间隔小于 window_ms，合并到当前组
+            current_group.append(time_collision[i])
+        else:
+            # 否则开始新组
+            collision_groups.append(current_group)
+            current_group = [time_collision[i]]
+    
+    # 添加最后一组
+    if current_group:
+        collision_groups.append(current_group)
+    
+    # 累计风险（用于计算累计值）
+    cumulative_risk = 0.0
+    
+    # 对每个碰撞组计算风险
+    for group in collision_groups:
+        # 使用组中最早的时间作为窗口起点
+        t_start = min(group)
+        # 如果组中有多个碰撞时间，窗口终点是最后一个时间 + window_ms
+        # 否则窗口终点是第一个时间 + window_ms
+        if len(group) > 1:
+            t_end = max(group) + window_s
+        else:
+            t_end = t_start + window_s
+        
+        # 找到时间窗口内的数据索引
+        mask = (timestamps >= t_start) & (timestamps <= t_end)
+        indices = np.where(mask)[0]
+        
+        if len(indices) == 0:
+            continue
+        
+        # 提取窗口内的加速度数据和时间戳
+        torso_acc_window = torso_acc_mag[indices]
+        head_acc_window = head_acc_mag[indices]
+        window_timestamps = timestamps[indices]
+        
+        # 计算 ReLU(||a|| - a_thr)
+        torso_risk = relu(torso_acc_window - a_thr)
+        head_risk = relu(head_acc_window - a_thr)
+        
+        # 保存逐帧数据
+        if save_frame_by_frame_path is not None:
+            for idx, t in enumerate(window_timestamps):
+                # torso 数据
+                if torso_risk[idx] > 0:
+                    cumulative_risk += torso_risk[idx] * dt
+                    frame_data.append({
+                        'timestamp': float(t),
+                        'link_name': 'torso',
+                        'acc_magnitude': float(torso_acc_window[idx]),
+                        'risk_value': float(torso_risk[idx]),
+                        'cumulative_risk': float(cumulative_risk)
+                    })
+                
+                # head 数据
+                if head_risk[idx] > 0:
+                    cumulative_risk += head_risk[idx] * dt
+                    frame_data.append({
+                        'timestamp': float(t),
+                        'link_name': 'head',
+                        'acc_magnitude': float(head_acc_window[idx]),
+                        'risk_value': float(head_risk[idx]),
+                        'cumulative_risk': float(cumulative_risk)
+                    })
+        
+        # 数值积分（使用矩形法，乘以 dt）
+        torso_integral = np.nansum(torso_risk) * dt
+        head_integral = np.nansum(head_risk) * dt
+        
+        # 累加风险
+        total_risk += torso_integral + head_integral
+    
+    # 确保结果不是 NaN
+    if not np.isfinite(total_risk):
+        total_risk = 0.0
+    
+    # 保存逐帧数据到 CSV
+    if save_frame_by_frame_path is not None:
+        try:
+            if frame_data:
+                frame_df = pd.DataFrame(frame_data)
+                frame_df = frame_df.sort_values('timestamp').reset_index(drop=True)
+                frame_df.to_csv(save_frame_by_frame_path, index=False, float_format='%.4f')
+                print(f"加速度风险逐帧数据已保存到: {save_frame_by_frame_path} ({len(frame_df)} 条记录)")
+            else:
+                empty_df = pd.DataFrame(columns=['timestamp', 'link_name', 'acc_magnitude', 'risk_value', 'cumulative_risk'])
+                empty_df.to_csv(save_frame_by_frame_path, index=False, float_format='%.4f')
+                print(f"加速度风险逐帧数据已保存到: {save_frame_by_frame_path} (无超阈值数据)")
+        except Exception as e:
+            print(f"警告: 保存加速度风险逐帧数据到 '{save_frame_by_frame_path}' 失败: {e}")
+    
+    return float(total_risk)
+
+
 def calculate_contact_force_risk(contact_df: pd.DataFrame) -> float:
     """
     计算接触力相关的risk
@@ -613,22 +860,6 @@ def calculate_contact_force_risk(contact_df: pd.DataFrame) -> float:
     
     # TODO: 实现具体的risk计算逻辑
     # 示例：基于force_magnitude的简单计算
-    risk = 0.0
-    
-    return risk
-
-
-def calculate_acceleration_risk(sensor_vibration_df: pd.DataFrame) -> float:
-    """
-    计算加速度相关的risk（base_link和head的加速度）
-    
-    待实现：根据用户提供的计算方法
-    """
-    if sensor_vibration_df.empty:
-        return 0.0
-    
-    # TODO: 实现具体的risk计算逻辑
-    # 示例：基于加速度幅值的简单计算
     risk = 0.0
     
     return risk
@@ -886,7 +1117,12 @@ def calculate_motor_torque_risk(
             )
             if not frame_by_frame_df.empty:
                 frame_by_frame_df.to_csv(save_frame_by_frame_path, index=False, float_format='%.4f')
-                print(f"逐帧风险数据已保存到: {save_frame_by_frame_path}")
+                print(f"motor torque 逐帧风险数据已保存到: {save_frame_by_frame_path} ({len(frame_by_frame_df)} 条记录)")
+            else:
+                # 即使没有超阈值数据，也保存一个空的 CSV 文件
+                empty_df = pd.DataFrame(columns=['timestamp', 'joint_name', 'r_peak', 'r_regen', 'r_joint', 'R_joint', 'tau_max', 'P0'])
+                empty_df.to_csv(save_frame_by_frame_path, index=False, float_format='%.4f')
+                print(f"motor torque 逐帧风险数据已保存到: {save_frame_by_frame_path} (无超阈值数据)")
         except Exception as e:
             print(f"警告: 保存逐帧风险数据到 '{save_frame_by_frame_path}' 失败: {e}")
 
@@ -1079,6 +1315,81 @@ def plot_risk_curves(frame_by_frame_df: pd.DataFrame, output_path: Optional[str]
     plt.close()
 
 
+def plot_acceleration_risk_curves(frame_by_frame_df: pd.DataFrame, output_path: Optional[str] = None):
+    """
+    绘制加速度风险曲线
+    
+    参数:
+        frame_by_frame_df: 逐帧加速度风险数据 DataFrame，应包含列：
+            - timestamp: 时间戳
+            - link_name: link 名称（torso 或 head）
+            - acc_magnitude: 加速度模长
+            - risk_value: 风险值
+            - cumulative_risk: 累计风险
+        output_path: 图片保存路径（可选）
+    """
+    if frame_by_frame_df.empty:
+        print("警告: 加速度风险逐帧数据为空，无法绘图")
+        return
+    
+    # 按 link 分组
+    links = frame_by_frame_df['link_name'].unique()
+    n_links = len(links)
+    
+    if n_links == 0:
+        return
+    
+    # 创建子图：第一个子图显示总 risk，后面每个 link 一个子图
+    fig, axes = plt.subplots(n_links + 1, 1, figsize=(12, 4 * (n_links + 1)), sharex=True)
+    if n_links == 0:
+        axes = [axes]
+    else:
+        axes = axes.flatten() if hasattr(axes, 'flatten') else [axes]
+    
+    # 第一个子图：总 risk（使用 cumulative_risk 的最大值）
+    frame_by_frame_df_sorted = frame_by_frame_df.sort_values('timestamp')
+    # 获取每个 link 的最大 cumulative_risk，然后求和
+    max_cumulative_by_link = frame_by_frame_df_sorted.groupby('link_name')['cumulative_risk'].max()
+    total_max_cumulative = max_cumulative_by_link.sum()
+    
+    # 绘制累计风险随时间的变化（取每个时刻的最大 cumulative_risk）
+    cumulative_by_time = frame_by_frame_df_sorted.groupby('timestamp')['cumulative_risk'].max().reset_index()
+    cumulative_by_time = cumulative_by_time.sort_values('timestamp')
+    
+    ax_total = axes[0]
+    ax_total.plot(cumulative_by_time['timestamp'], cumulative_by_time['cumulative_risk'], 
+                  'k-', label='Total Cumulative Risk', linewidth=2)
+    ax_total.set_ylabel('Cumulative Risk', fontsize=10)
+    ax_total.legend(loc='upper right')
+    ax_total.grid(True, alpha=0.3)
+    ax_total.set_title('Total Acceleration Risk Over Time', fontsize=12)
+    
+    # 每个 link 的子图
+    for i, link_name in enumerate(links):
+        link_data = frame_by_frame_df[frame_by_frame_df['link_name'] == link_name].copy()
+        link_data = link_data.sort_values('timestamp')
+        
+        ax = axes[i + 1]
+        ax.plot(link_data['timestamp'], link_data['acc_magnitude'], 'b-', label='Acceleration Magnitude', linewidth=1.5)
+        ax.plot(link_data['timestamp'], link_data['cumulative_risk'], 'g-', label='Cumulative Risk', linewidth=2)
+        
+        ax.set_ylabel(f'{link_name.capitalize()} Risk', fontsize=10)
+        ax.legend(loc='upper right')
+        ax.grid(True, alpha=0.3)
+        ax.set_title(f'{link_name.capitalize()} Acceleration Risk Over Time', fontsize=12)
+    
+    axes[-1].set_xlabel('Time (s)', fontsize=10)
+    plt.tight_layout()
+    
+    if output_path:
+        plt.savefig(output_path, dpi=150, bbox_inches='tight')
+        print(f"加速度风险曲线图已保存到: {output_path}")
+    else:
+        plt.show()
+    
+    plt.close()
+
+
 def calculate_joint_wrench_risk(joint_forces_df: pd.DataFrame) -> float:
     """
     计算关节力/力矩相关的risk
@@ -1122,21 +1433,45 @@ def calculate_total_fall_risk(
     """
     计算总的摔倒risk，包括各个子项
     
+    参数:
+        contact_df: 接触力数据
+        sensor_vibration_df: 传感器振动数据
+        joint_state_df: 关节状态数据
+        joint_forces_df: 关节力数据
+        perturbation_df: 扰动数据（可选）
+        output_base: 输出文件路径前缀（可选）
+        
+    注意:
+        - force_threshold 由 extract_collision_timestamps 函数管理（默认 400.0）
+        - a_thr 由 calculate_acceleration_risk 函数管理（默认 20.0）
+    
     返回:
         Dict包含：
         - 各个risk子项的标量值（contact_force_risk, acceleration_risk, ...）
         - total_risk: 总风险
         - breakdowns: Dict，包含各个risk的详细breakdown（如果有的话）
           例如: {'motor_torque': DataFrame, ...}
+        - time_collision: 碰撞时间戳数组（全局可用，供其他 risk 计算使用）
     """
-    # 计算各个子risk
-    contact_risk = calculate_contact_force_risk(contact_df)
-    acceleration_risk = calculate_acceleration_risk(sensor_vibration_df)
+    # 提取碰撞时间戳（全局可用，供其他 risk 计算使用）
+    # force_threshold 由 extract_collision_timestamps 函数管理默认值
+    time_collision = extract_collision_timestamps(contact_df)
     
-    # 准备motor risk的逐帧数据保存路径
+    # 准备保存路径
+    acceleration_frame_by_frame_path = None
     motor_frame_by_frame_path = None
     if output_base:
+        acceleration_frame_by_frame_path = f"{output_base}_acceleration_risk.csv"
         motor_frame_by_frame_path = f"{output_base}_motor_risk.csv"
+    
+    # 计算各个子risk
+    contact_risk = calculate_contact_force_risk(contact_df)
+    # a_thr 由 calculate_acceleration_risk 函数管理默认值
+    acceleration_risk = calculate_acceleration_risk(
+        sensor_vibration_df,
+        time_collision=time_collision,
+        save_frame_by_frame_path=acceleration_frame_by_frame_path
+    )
     
     motor_torque_risk, motor_breakdown = calculate_motor_torque_risk(
         joint_state_df,
@@ -1168,7 +1503,8 @@ def calculate_total_fall_risk(
         'joint_wrench_risk': joint_wrench_risk,
         'perturbation_risk': perturbation_risk,
         'total_risk': total_risk,
-        'breakdowns': breakdowns
+        'breakdowns': breakdowns,
+        'time_collision': time_collision  # 全局可用，供其他 risk 计算使用
     }
 
 
@@ -1236,6 +1572,20 @@ def main():
         help='绘制风险曲线图'
     )
     
+    parser.add_argument(
+        '--a-thr',
+        type=float,
+        default=None,
+        help='加速度阈值 (m/s²)，用于 risk_acc 计算。如果不指定，使用默认值 20.0'
+    )
+    
+    parser.add_argument(
+        '--force-threshold',
+        type=float,
+        default=400.0,
+        help='接触力阈值 (N)，用于提取碰撞时间戳，默认 400.0'
+    )
+    
     args = parser.parse_args()
     
     # 读取所有数据文件
@@ -1262,6 +1612,8 @@ def main():
     
     # 计算risk
     print("\n正在计算risk...")
+    # force_threshold 和 a_thr 由各自的函数管理默认值
+    # 如果需要自定义，可以修改 extract_collision_timestamps 和 calculate_acceleration_risk 的调用
     risk_results = calculate_total_fall_risk(
         contact_df,
         sensor_vibration_df,
@@ -1348,13 +1700,28 @@ def main():
                 print(f"警告: 更新motor_risk CSV失败: {e}")
         
         # 绘制风险曲线
+        # motor_risk 绘图（仅当有数据时）
         if args.plot and os.path.exists(motor_risk_path):
             try:
-                frame_by_frame_df = pd.read_csv(motor_risk_path)
-                plot_output_path = f"{output_base}_motor_risk_curves.png"
-                plot_risk_curves(frame_by_frame_df, plot_output_path)
+                motor_risk_df = pd.read_csv(motor_risk_path)
+                if not motor_risk_df.empty:
+                    plot_output_path = f"{output_base}_motor_risk_curves.png"
+                    plot_risk_curves(motor_risk_df, plot_output_path)
+                else:
+                    print("motor_risk 数据为空，跳过绘图")
             except Exception as e:
-                print(f"警告: 绘制风险曲线失败: {e}")
+                print(f"警告: 绘制 motor_risk 曲线失败: {e}")
+        
+        # acceleration_risk 绘图
+        if args.plot:
+            acceleration_risk_path = f"{output_base}_acceleration_risk.csv"
+            if os.path.exists(acceleration_risk_path):
+                try:
+                    acceleration_risk_df = pd.read_csv(acceleration_risk_path)
+                    plot_output_path = f"{output_base}_acceleration_risk_curves.png"
+                    plot_acceleration_risk_curves(acceleration_risk_df, plot_output_path)
+                except Exception as e:
+                    print(f"警告: 绘制 acceleration_risk 曲线失败: {e}")
 
 
 if __name__ == '__main__':
