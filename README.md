@@ -466,11 +466,30 @@ ffmpeg -i "input.webm" -vf "scale=trunc(iw/2)*2:trunc(ih/2)*2" -c:v libx264 -crf
 
 # 碰撞点viewer
 ## 启动必要的节点
+```bash
 cd /home/wang22/engineai/engineai_ros2_workspace && source install/setup.bash && ros2 launch launch_urdf_only.launch.py
+```
 
 ## 在另一个终端启动RViz
+```bash
 cd /home/wang22/engineai/engineai_ros2_workspace/src/simulation/mujoco/assets/resource/robot/pm_v2/urdf && rviz2 -d robot.rviz
+```
 
 # 查看urdf collision
 # 使用外部URDF文件，自动启动RViz
+```bash
 ros2 launch launch_urdf_only.launch.py urdf_file:=/home/wang22/engineai/engineai_rl_workspace/engineai_gym/engineai_gym/resources/robots/biped/pm01/urdf/serial_pm_v2_primitive.urdf
+```
+
+
+# Risk 计算
+## 单次采样的数据处理
+```bash
+python3 scripts/calculate_fall_risk.py \
+  --contact /home/wang22/data/mujoco_logs/contact_data_20260128_211558.csv \
+  --sensor-vibration /home/wang22/data/mujoco_logs/sensor_vibration_data_20260128_211558.csv \
+  --joint-state /home/wang22/data/mujoco_logs/joint_state_data_20260128_211558.csv \
+  --joint-forces /home/wang22/data/mujoco_logs/joint_forces_data_20260128_211558.csv \
+  --output /home/wang22/data/mujoco_logs/risk_results_20260128_211558 \
+  --plot
+```

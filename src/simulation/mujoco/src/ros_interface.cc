@@ -39,9 +39,8 @@ const int kDofFloatingBase = 6;        // 浮动基座的自由度数量
 const int kNumFloatingBaseJoints = 7;  // 浮动基座的关节数量（四元数 + xyz位置）
 const int kDimQuaternion = 4;          // 四元数的维度
 
-// 全局标志位：控制CSV记录时机
-static bool contact_csv_enabled = false;      // 是否启用contact CSV记录
-static bool perturbation_csv_enabled = false;  // 是否启用perturbation CSV记录
+// 全局标志位：控制CSV记录时机（所有CSV统一使用）
+static bool all_csv_enabled = false;  // 是否启用所有CSV记录（在reset后启用）
 
 // 3D旋转变换函数
 /**
@@ -505,6 +504,147 @@ void RosInterface::UpdateSimState(const mjModel* m, mjData* d) {
     return;
   }
   
+  // ==================== 统一的CSV延迟和reset逻辑 ====================
+  // 检查是否有任何CSV需要保存
+  bool any_csv_enabled = save_contact_csv_ || save_perturbation_csv_ || 
+                         save_joint_forces_csv_ || save_sensor_vibration_csv_ || 
+                         save_joint_state_csv_;
+  
+  if (any_csv_enabled && !all_csv_enabled) {
+    // 使用全局标志位控制CSV记录
+    static double csv_start_time = -1.0;
+    static bool mujoco_reset_done = false;
+    
+    // 如果还没有开始记录，检查是否已经过了3秒
+    if (csv_start_time < 0) {
+      csv_start_time = d->time;  // 记录开始时间
+      RCLCPP_INFO(node_->get_logger(), "CSV记录延迟开始，等待3秒后重置MuJoCo...");
+    }
+    
+    // 检查是否已经过了3秒
+    if (d->time - csv_start_time >= 3.0) {
+      if (!mujoco_reset_done) {
+        // 执行MuJoCo重置
+        RCLCPP_INFO(node_->get_logger(), "3秒延迟结束，开始重置MuJoCo...");
+        
+        // 重置到初始状态
+        // 查找并应用keyframe
+        int keyframe_id = mj_name2id(m, mjOBJ_KEY, "floating_base_homing");
+        if (keyframe_id >= 0) {
+          mj_resetDataKeyframe(m, d, keyframe_id);
+          RCLCPP_INFO(node_->get_logger(), "已应用keyframe 'floating_base_homing' 重置机器人到初始状态");
+        } else {
+          // 如果没有keyframe，重置到零位
+          mju_zero(d->qpos, m->nq);
+          if (m->jnt_type[0] == mjJNT_FREE) {
+            // 对于自由关节，设置四元数为单位四元数，位置为原点
+            d->qpos[0] = 1; d->qpos[1] = d->qpos[2] = d->qpos[3] = 0; // quat = [1,0,0,0]
+            d->qpos[4] = d->qpos[5] = d->qpos[6] = 0; // base at origin (0,0,0)
+          }
+          RCLCPP_INFO(node_->get_logger(), "已重置机器人到零位状态");
+        }
+        
+        // 执行前向运动学计算
+        mj_forward(m, d);
+        RCLCPP_INFO(node_->get_logger(), "MuJoCo重置完成");
+        
+        // 重置auto_sampling状态，让推力重新施加
+        auto& sim_manager = SimManager::GetInstance();
+        sim_manager.ResetAutoSampling();
+        RCLCPP_INFO(node_->get_logger(), "已重置auto_sampling状态，推力将在auto_delay时间后重新施加");
+        
+        // 发布重置完成消息
+        std_msgs::msg::Empty reset_msg;
+        mujoco_reset_pub_->publish(reset_msg);
+        RCLCPP_INFO(node_->get_logger(), "已发布MuJoCo重置完成消息");
+        
+        mujoco_reset_done = true;
+        // 重置后启用所有CSV记录
+        all_csv_enabled = true;
+        RCLCPP_INFO(node_->get_logger(), "所有CSV记录已启用");
+      }
+    } else {
+      // 还在延迟期间，不记录任何CSV
+      // 继续执行其他更新（发布消息等），但不保存CSV
+      is_floating_base_ = (m->nv != m->nu);
+      
+      // 创建消息
+      auto joint_state_msg = std::make_unique<interface_protocol::msg::JointState>();
+      auto imu_msg = std::make_unique<interface_protocol::msg::ImuInfo>();
+      
+      // 设置时间戳
+      joint_state_msg->header.stamp = node_->now();
+      imu_msg->header.stamp = node_->now();
+      
+      // 设置关节状态
+      joint_state_msg->name.resize(num_total_joints_);
+      joint_state_msg->position.resize(num_total_joints_);
+      joint_state_msg->velocity.resize(num_total_joints_);
+      joint_state_msg->torque.resize(num_total_joints_);
+      
+      if (is_floating_base_) {
+        // 跳过浮动基座关节
+        for (int i = 0; i < num_total_joints_; ++i) {
+          // 从MuJoCo模型获取关节名称
+          joint_state_msg->name[i] = m->names + m->name_jntadr[i + kNumFloatingBaseJoints];
+          joint_state_msg->position[i] = d->qpos[i + kNumFloatingBaseJoints];
+          joint_state_msg->velocity[i] = d->qvel[i + kDofFloatingBase];
+          joint_state_msg->torque[i] = d->actuator_force[i];
+        }
+      } else {
+        for (int i = 0; i < num_total_joints_; ++i) {
+          // 从MuJoCo模型获取关节名称
+          joint_state_msg->name[i] = m->names + m->name_jntadr[i];
+          joint_state_msg->position[i] = d->qpos[i];
+          joint_state_msg->velocity[i] = d->qvel[i];
+          joint_state_msg->torque[i] = d->actuator_force[i];
+        }
+      }
+      
+      // IMU数据通常来自MuJoCo中的传感器
+      int index = 0;
+      
+      // 设置IMU四元数
+      imu_msg->quaternion.w = d->sensordata[index + 0];
+      imu_msg->quaternion.x = d->sensordata[index + 1];
+      imu_msg->quaternion.y = d->sensordata[index + 2];
+      imu_msg->quaternion.z = d->sensordata[index + 3];
+      index += kDimQuaternion;
+      
+      // 从传感器数据设置RPY值
+      // 假设RPY值是四元数后的三个值
+      imu_msg->rpy.x = d->sensordata[index + 0];  // 横滚角
+      imu_msg->rpy.y = d->sensordata[index + 1];  // 俯仰角
+      imu_msg->rpy.z = d->sensordata[index + 2];  // 偏航角
+      index += 3;
+      
+      // 线性加速度
+      imu_msg->linear_acceleration.x = d->sensordata[index + 0];
+      imu_msg->linear_acceleration.y = d->sensordata[index + 1];
+      imu_msg->linear_acceleration.z = d->sensordata[index + 2];
+      index += 3;
+      
+      // 角速度
+      imu_msg->angular_velocity.x = d->sensordata[index + 0];
+      imu_msg->angular_velocity.y = d->sensordata[index + 1];
+      imu_msg->angular_velocity.z = d->sensordata[index + 2];
+      
+      // 发布消息
+      joint_state_pub_->publish(std::move(joint_state_msg));
+      imu_pub_->publish(std::move(imu_msg));
+      
+      // 发布接触力（包含接触点发布和RViz可视化功能）
+      if (export_contact_) {
+        // 使用全局同步机制，确保所有情况下都有适当的同步
+        std::lock_guard<std::mutex> global_lock(contact_force_mutex_);
+        PublishContactForces(m, d);
+      }
+      
+      // 延迟期间不保存任何CSV
+      return;
+    }
+  }
+  
   is_floating_base_ = (m->nv != m->nu);
 
   // 创建消息
@@ -579,18 +719,18 @@ void RosInterface::UpdateSimState(const mjModel* m, mjData* d) {
     PublishContactForces(m, d);
   }
 
-  // 保存关节反力到CSV
-  if (save_joint_forces_csv_) {
+  // 保存关节反力到CSV（仅在reset后记录）
+  if (save_joint_forces_csv_ && all_csv_enabled) {
     SaveJointForcesToCSV(m, d);
   }
 
-  // 保存传感器震动数据到CSV（持续记录，不依赖接触力）
-  if (save_sensor_vibration_csv_) {
+  // 保存传感器震动数据到CSV（仅在reset后记录）
+  if (save_sensor_vibration_csv_ && all_csv_enabled) {
     SaveSensorVibrationToCSV(m, d);
   }
 
-  // 保存关节状态数据到CSV（持续记录位置、速度、力矩）
-  if (save_joint_state_csv_) {
+  // 保存关节状态数据到CSV（仅在reset后记录）
+  if (save_joint_state_csv_ && all_csv_enabled) {
     SaveJointStateToCSV(m, d);
   }
 }
@@ -1529,74 +1669,13 @@ void RosInterface::PublishContactForces(const mjModel* m, mjData* d) {
   }
 
   // ==================== 第五部分：保存到CSV文件 ====================
-  if (save_contact_csv_ && csv_file_.is_open()) {
-    // 使用全局标志位控制CSV记录
-    static double csv_start_time = -1.0;
-    static bool mujoco_reset_done = false;
-    
-    // 如果还没有开始记录，检查是否已经过了3秒
-    if (!contact_csv_enabled) {
-      if (csv_start_time < 0) {
-        csv_start_time = d->time;  // 记录开始时间
-        RCLCPP_INFO(node_->get_logger(), "CSV记录延迟开始，等待3秒后重置MuJoCo...");
-      }
-      
-      // 检查是否已经过了3秒
-      if (d->time - csv_start_time >= 3.0) {
-        if (!mujoco_reset_done) {
-          // 执行MuJoCo重置
-          RCLCPP_INFO(node_->get_logger(), "3秒延迟结束，开始重置MuJoCo...");
-          
-          // 重置到初始状态
-          if (m) {
-            // 查找并应用keyframe
-            int keyframe_id = mj_name2id(m, mjOBJ_KEY, "floating_base_homing");
-            if (keyframe_id >= 0) {
-              mj_resetDataKeyframe(m, d, keyframe_id);
-              RCLCPP_INFO(node_->get_logger(), "已应用keyframe 'floating_base_homing' 重置机器人到初始状态");
-            } else {
-              // 如果没有keyframe，重置到零位
-              mju_zero(d->qpos, m->nq);
-              if (m->jnt_type[0] == mjJNT_FREE) {
-                // 对于自由关节，设置四元数为单位四元数，位置为原点
-                d->qpos[0] = 1; d->qpos[1] = d->qpos[2] = d->qpos[3] = 0; // quat = [1,0,0,0]
-                d->qpos[4] = d->qpos[5] = d->qpos[6] = 0; // base at origin (0,0,0)
-              }
-              RCLCPP_INFO(node_->get_logger(), "已重置机器人到零位状态");
-            }
-            
-            // 执行前向运动学计算
-            mj_forward(m, d);
-            RCLCPP_INFO(node_->get_logger(), "MuJoCo重置完成");
-            
-            // 重置auto_sampling状态，让推力重新施加
-            auto& sim_manager = SimManager::GetInstance();
-            sim_manager.ResetAutoSampling();
-            RCLCPP_INFO(node_->get_logger(), "已重置auto_sampling状态，推力将在auto_delay时间后重新施加");
-            
-            // 发布重置完成消息
-            std_msgs::msg::Empty reset_msg;
-            mujoco_reset_pub_->publish(reset_msg);
-            RCLCPP_INFO(node_->get_logger(), "已发布MuJoCo重置完成消息");
-          }
-          
-          mujoco_reset_done = true;
-          // 重置后启用CSV记录
-          contact_csv_enabled = true;
-          perturbation_csv_enabled = true;
-        }
-      } else {
-        // 还在延迟期间，不记录CSV
-        return;
-      }
-    }
-    
+  if (save_contact_csv_ && csv_file_.is_open() && all_csv_enabled) {
     // 使用帧计数器控制保存频率
     static int frame_counter = 0;
     frame_counter++;
     
-    // 根据配置的频率决定是否保存，并且检查标志位
-    if (contact_csv_enabled && frame_counter % csv_save_frequency_ == 0) {
+    // 根据配置的频率决定是否保存
+    if (frame_counter % csv_save_frequency_ == 0) {
       // 使用MuJoCo仿真时间而不是ROS时间
       double sim_time = d->time;
       
@@ -1714,20 +1793,13 @@ void RosInterface::PublishContactForces(const mjModel* m, mjData* d) {
   }
 
   // ==================== 推力数据单独保存 ====================
-  if (save_perturbation_csv_ && perturbation_csv_file_.is_open()) {
-    // 使用全局标志位控制perturbation CSV记录
-    
-    // 检查是否启用perturbation CSV记录
-    if (!perturbation_csv_enabled) {
-      return;
-    }
-    
+  if (save_perturbation_csv_ && perturbation_csv_file_.is_open() && all_csv_enabled) {
     // 使用帧计数器控制保存频率
     static int perturbation_frame_counter = 0;
     perturbation_frame_counter++;
     
-    // 根据配置的频率决定是否保存，并且检查标志位
-    if (perturbation_csv_enabled && perturbation_frame_counter % csv_save_frequency_ == 0) {
+    // 根据配置的频率决定是否保存
+    if (perturbation_frame_counter % csv_save_frequency_ == 0) {
       // 使用MuJoCo仿真时间
       double sim_time = d->time;
       
@@ -1844,6 +1916,11 @@ void RosInterface::MotionStateTimerCallback() {
  */
 void RosInterface::SaveJointForcesToCSV(const mjModel* m, mjData* d) {
   if (!m || !d) return;
+  
+  // 检查是否启用CSV记录（在reset后）
+  if (!all_csv_enabled) {
+    return;
+  }
   
   static int frame_counter = 0;
   frame_counter++;
@@ -2387,6 +2464,11 @@ void RosInterface::FlushRemainingData() {
 void RosInterface::SaveSensorVibrationToCSV(const mjModel* m, mjData* d) {
   if (!m || !d) return;
   
+  // 检查是否启用CSV记录（在reset后）
+  if (!all_csv_enabled) {
+    return;
+  }
+  
   static int frame_counter = 0;
   frame_counter++;
   
@@ -2486,6 +2568,11 @@ void RosInterface::SaveSensorVibrationToCSV(const mjModel* m, mjData* d) {
  */
 void RosInterface::SaveJointStateToCSV(const mjModel* m, mjData* d) {
   if (!m || !d) return;
+  
+  // 检查是否启用CSV记录（在reset后）
+  if (!all_csv_enabled) {
+    return;
+  }
   
   static int frame_counter = 0;
   frame_counter++;

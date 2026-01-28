@@ -387,6 +387,12 @@ void SimManager::TorqueController(const mjModel* m, mjData* d) {
       double velocity_error = cmd.velocity[i] - velocity;
 
       d->ctrl[i] = cmd.feed_forward_torque[i] + cmd.stiffness[i] * position_error + cmd.damping[i] * velocity_error;
+      
+      // 应用执行器层面的硬限制（如果MuJoCo模型中配置了ctrlrange）
+      // 注意：这里限制的是d->ctrl，MuJoCo会在mj_fwdActuation中进一步限制d->actuator_force
+      // 但是，如果ctrlrange (61.0 N·m) 大于配置限制 (52.0 N·m)，我们需要在这里额外限制
+      // 由于我们无法直接访问配置的max_torque_joint，这里依赖MuJoCo的ctrlrange限制
+      // 如果需要更严格的限制，应该修改MuJoCo XML中的ctrlrange
     }
   } else {
     // 如果没有ROS接口，使用零力矩控制（机器人自由运动）
