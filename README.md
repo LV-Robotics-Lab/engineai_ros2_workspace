@@ -498,11 +498,11 @@ python3 scripts/calculate_fall_risk.py \
   --plot
 
 python3 scripts/calculate_fall_risk.py \
-  --contact /home/wang22/data/mujoco_logs/contact_data_20260130_000342.csv \
-  --sensor-vibration /home/wang22/data/mujoco_logs/sensor_vibration_data_20260130_000342.csv \
-  --joint-state /home/wang22/data/mujoco_logs/joint_state_data_20260130_000342.csv \
-  --joint-forces /home/wang22/data/mujoco_logs/joint_forces_data_20260130_000342.csv \
-  --output /home/wang22/data/mujoco_logs/risk_results_20260130_000342 \
+  --contact /home/wang22/data/mujoco_logs/contact_data_20260130_002222.csv \
+  --sensor-vibration /home/wang22/data/mujoco_logs/sensor_vibration_data_20260130_002222.csv \
+  --joint-state /home/wang22/data/mujoco_logs/joint_state_data_20260130_002222.csv \
+  --joint-forces /home/wang22/data/mujoco_logs/joint_forces_data_20260130_002222.csv \
+  --output /home/wang22/data/mujoco_logs/risk_results_20260130_002222 \
   --plot
 
 

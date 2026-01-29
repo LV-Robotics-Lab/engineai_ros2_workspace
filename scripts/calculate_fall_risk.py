@@ -946,6 +946,7 @@ def calculate_contact_force_risk(
     contact_df: pd.DataFrame,
     time_collision: np.ndarray,
     f_thr: float = 1000.0,
+    f_thr_vulnerable: float = 400.0,
     dt: float = 0.002,
     save_frame_by_frame_path: Optional[str] = None
 ) -> Tuple[float, pd.DataFrame]:
@@ -965,7 +966,8 @@ def calculate_contact_force_risk(
             - body2_name: 第二个物体名称
             - force_magnitude: 力的大小
         time_collision: 碰撞时间戳数组（从 extract_collision_timestamps 获取）
-        f_thr: 力阈值（N），默认 1000.0
+        f_thr: 力阈值（N），默认 1000.0（用于一般关节）
+        f_thr_vulnerable: 脆弱关节的力阈值（N），默认 400.0（用于 HEAD 和 ELBOW_END）
         dt: 采样时间间隔（秒），默认 0.002。用于 episode 级时间积分
         save_frame_by_frame_path: 如果指定，保存逐帧数据到 CSV
     
@@ -1058,8 +1060,33 @@ def calculate_contact_force_risk(
         empty_breakdown = pd.DataFrame(columns=["link_name", "R_link"])
         return 0.0, empty_breakdown
     
+    # 定义不同关节的阈值（关键词 -> 阈值）
+    # HEAD, ELBOW_END: 400N（最脆弱）
+    # TORSO: 700N（中等脆弱）
+    # 其他: 1000N（默认）
+    vulnerable_thresholds = {
+        'HEAD': f_thr_vulnerable,       # 400
+        'ELBOW_END': f_thr_vulnerable,  # 400
+        'TORSO': 700.0,                 # 700
+    }
+    
+    def get_threshold_for_link(link_name: str) -> float:
+        """根据 link 名称返回对应的阈值"""
+        link_upper = str(link_name).upper()
+        for keyword, threshold in vulnerable_thresholds.items():
+            if keyword in link_upper:
+                return threshold
+        return f_thr
+    
+    # 为每行计算对应的阈值
+    contact_df_collision['f_threshold'] = contact_df_collision['robot_link'].apply(get_threshold_for_link)
+    
     # 计算每行的风险值 r_link = ReLU(||f(t)|| - f_thr) / f_thr
-    contact_df_collision['r_link'] = relu((contact_df_collision['force_magnitude'] - f_thr) / f_thr)
+    # 使用每行对应的阈值
+    contact_df_collision['r_link'] = contact_df_collision.apply(
+        lambda row: relu((row['force_magnitude'] - row['f_threshold']) / row['f_threshold']),
+        axis=1
+    )
     
     # 保存逐帧数据（如果指定了路径）
     if save_frame_by_frame_path is not None:
@@ -1071,6 +1098,7 @@ def calculate_contact_force_risk(
                         'timestamp': round(float(row['timestamp']), 4),
                         'link_name': str(row['robot_link']),
                         'force_magnitude': round(float(row['force_magnitude']), 4),
+                        'f_threshold': round(float(row['f_threshold']), 1),
                         'r_link': round(float(row['r_link']), 4),
                     })
             
@@ -1080,7 +1108,7 @@ def calculate_contact_force_risk(
                 frame_df.to_csv(save_frame_by_frame_path, index=False, float_format='%.4f')
                 print(f"contact force 逐帧风险数据已保存到: {save_frame_by_frame_path} ({len(frame_df)} 条记录)")
             else:
-                empty_df = pd.DataFrame(columns=['timestamp', 'link_name', 'force_magnitude', 'r_link'])
+                empty_df = pd.DataFrame(columns=['timestamp', 'link_name', 'force_magnitude', 'f_threshold', 'r_link'])
                 empty_df.to_csv(save_frame_by_frame_path, index=False, float_format='%.4f')
                 print(f"contact force 逐帧风险数据已保存到: {save_frame_by_frame_path} (无超阈值数据)")
         except Exception as e:

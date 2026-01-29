@@ -332,7 +332,7 @@
                             
                             <body name="LINK_ELBOW_END_L">
                                 <inertial pos="0 0 0" mass="1e-3" diaginertia="1e-12 1e-12 1e-12"/>
-                                <!-- <geom class="collision_left_elbow_end"/> -->
+                                <geom class="collision_left_elbow_end"/>
                             </body>
                         </body>
                     </body>
@@ -379,7 +379,7 @@
                             
                             <body name="LINK_ELBOW_END_R">
                                 <inertial pos="0 0 0" mass="1e-3" diaginertia="1e-12 1e-12 1e-12"/>
-                                <!-- <geom class="collision_right_elbow_end"/> -->
+                                <geom class="collision_right_elbow_end"/>
                             </body>
                         </body>
                     </body>
