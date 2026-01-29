@@ -762,7 +762,7 @@ def calculate_acceleration_risk(
     time_collision: np.ndarray,
     a_thr: float = 30.0,
     dt: float = 0.002,
-    window_ms: float = 20.0,
+    window_ms: float = 2.0,
     save_frame_by_frame_path: Optional[str] = None
 ) -> float:
     """
@@ -1652,6 +1652,141 @@ def plot_acceleration_risk_curves(frame_by_frame_df: pd.DataFrame, output_path: 
     plt.close()
 
 
+def plot_acceleration_curves(
+    sensor_vibration_df: pd.DataFrame,
+    time_collision: Optional[np.ndarray] = None,
+    window_ms: float = 20.0,
+    a_thr: float = 30.0,
+    output_path: Optional[str] = None
+) -> None:
+    """
+    单独绘制加速度曲线（torso / head 模长），便于观察护具对作用时间与峰值的影响。
+    
+    参数:
+        sensor_vibration_df: 传感器振动数据 DataFrame，应包含列：
+            - timestamp
+            - base_link_lin_acc_x, base_link_lin_acc_y, base_link_lin_acc_z
+            - head_lin_acc_x, head_lin_acc_y, head_lin_acc_z
+        time_collision: 碰撞时间戳数组（可选），若提供则画垂线并标出 20ms 窗口
+        window_ms: 时间窗（ms），用于标出窗口范围，默认 20.0
+        a_thr: 加速度阈值（m/s^2），画水平参考线，默认 30.0
+        output_path: 图片保存路径（可选）
+    """
+    if sensor_vibration_df.empty:
+        print("警告: sensor_vibration_df 为空，无法绘图")
+        return
+    
+    required = [
+        'timestamp',
+        'base_link_lin_acc_x', 'base_link_lin_acc_y', 'base_link_lin_acc_z',
+        'head_lin_acc_x', 'head_lin_acc_y', 'head_lin_acc_z'
+    ]
+    missing = [c for c in required if c not in sensor_vibration_df.columns]
+    if missing:
+        print(f"警告: 缺少列 {missing}，无法绘图")
+        return
+    
+    ts = sensor_vibration_df['timestamp'].to_numpy(dtype=float)
+    torso_acc = np.sqrt(
+        sensor_vibration_df['base_link_lin_acc_x'].to_numpy(dtype=float)**2 +
+        sensor_vibration_df['base_link_lin_acc_y'].to_numpy(dtype=float)**2 +
+        sensor_vibration_df['base_link_lin_acc_z'].to_numpy(dtype=float)**2
+    )
+    head_acc = np.sqrt(
+        sensor_vibration_df['head_lin_acc_x'].to_numpy(dtype=float)**2 +
+        sensor_vibration_df['head_lin_acc_y'].to_numpy(dtype=float)**2 +
+        sensor_vibration_df['head_lin_acc_z'].to_numpy(dtype=float)**2
+    )
+    
+    fig, axes = plt.subplots(2, 1, figsize=(14, 8), sharex=True)
+    window_s = window_ms / 1000.0
+    
+    for ax, acc, name in zip(axes, [torso_acc, head_acc], ['Torso (base_link)', 'Head']):
+        ax.plot(ts, acc, 'b-', label=f'||a|| (m/s^2)', linewidth=1.2)
+        ax.axhline(y=a_thr, color='orange', linestyle='--', linewidth=1, label=f'threshold={a_thr}')
+        ax.set_ylabel(f'{name} acc (m/s^2)', fontsize=10)
+        ax.legend(loc='upper right')
+        ax.grid(True, alpha=0.3)
+        
+        if time_collision is not None and len(time_collision) > 0:
+            for t in time_collision:
+                ax.axvline(x=t, color='red', linestyle=':', linewidth=0.8, alpha=0.7)
+                ax.axvspan(t, t + window_s, alpha=0.08, color='red')
+            from matplotlib.lines import Line2D
+            h, l = ax.get_legend_handles_labels()
+            h.append(Line2D([0], [0], color='red', linestyle=':', linewidth=1.5))
+            l.append('collision')
+            h.append(Line2D([0], [0], color='red', alpha=0.3, linewidth=8))
+            l.append(f'{window_ms}ms window')
+            ax.legend(handles=h, labels=l, loc='upper right')
+    
+    axes[0].set_title('Acceleration magnitude (for vibration risk: integral over 20ms window)', fontsize=12)
+    axes[-1].set_xlabel('Time (s)', fontsize=10)
+    plt.tight_layout()
+    
+    if output_path:
+        plt.savefig(output_path, dpi=150, bbox_inches='tight')
+        print(f"加速度曲线图已保存到: {output_path}")
+    else:
+        plt.show()
+    plt.close()
+
+
+def plot_contact_force_curves(
+    contact_df: pd.DataFrame,
+    time_collision: Optional[np.ndarray] = None,
+    f_thr: float = 1000.0,
+    output_path: Optional[str] = None
+) -> None:
+    """
+    单独绘制接触力曲线（每时刻最大接触力），便于观察护具对力峰值与时间的影响。
+    
+    参数:
+        contact_df: 接触力数据 DataFrame，应包含列：timestamp, force_magnitude
+        time_collision: 碰撞时间戳数组（可选），若提供则画垂线
+        f_thr: 力阈值（N），画水平参考线，默认 1000.0
+        output_path: 图片保存路径（可选）
+    """
+    if contact_df.empty:
+        print("警告: contact_df 为空，无法绘图")
+        return
+    if 'timestamp' not in contact_df.columns or 'force_magnitude' not in contact_df.columns:
+        print("警告: contact_df 缺少 timestamp 或 force_magnitude 列，无法绘图")
+        return
+    
+    # 每时刻取最大接触力（同一时刻可能有多接触点）
+    by_time = contact_df.groupby('timestamp')['force_magnitude'].max().reset_index()
+    by_time = by_time.sort_values('timestamp')
+    ts = by_time['timestamp'].to_numpy(dtype=float)
+    force = by_time['force_magnitude'].to_numpy(dtype=float)
+    
+    fig, ax = plt.subplots(1, 1, figsize=(14, 5))
+    ax.plot(ts, force, 'b-', label='max contact force (N)', linewidth=1.2)
+    ax.axhline(y=f_thr, color='orange', linestyle='--', linewidth=1, label=f'threshold={f_thr} N')
+    ax.set_ylabel('Force (N)', fontsize=10)
+    ax.set_xlabel('Time (s)', fontsize=10)
+    ax.legend(loc='upper right')
+    ax.grid(True, alpha=0.3)
+    ax.set_title('Contact force magnitude (max per timestamp)', fontsize=12)
+    
+    if time_collision is not None and len(time_collision) > 0:
+        for t in time_collision:
+            ax.axvline(x=t, color='red', linestyle=':', linewidth=0.8, alpha=0.7)
+        from matplotlib.lines import Line2D
+        h, l = ax.get_legend_handles_labels()
+        h.append(Line2D([0], [0], color='red', linestyle=':', linewidth=1.5))
+        l.append('collision')
+        ax.legend(handles=h, labels=l, loc='upper right')
+    
+    plt.tight_layout()
+    if output_path:
+        plt.savefig(output_path, dpi=150, bbox_inches='tight')
+        print(f"接触力曲线图已保存到: {output_path}")
+    else:
+        plt.show()
+    plt.close()
+
+
 def plot_contact_force_risk_curves(frame_by_frame_df: pd.DataFrame, output_path: Optional[str] = None):
     """
     绘制接触力风险曲线
@@ -2341,6 +2476,18 @@ def main():
                     plot_acceleration_risk_curves(acceleration_risk_df, plot_output_path)
                 except Exception as e:
                     print(f"警告: 绘制 acceleration_risk 曲线失败: {e}")
+            # 单独画加速度曲线（torso/head ||a||，标碰撞与 20ms 窗口）
+            try:
+                time_collision = risk_results.get('time_collision', np.array([]))
+                a_thr = 30.0 if args.a_thr is None else args.a_thr
+                plot_acceleration_curves(
+                    sensor_vibration_df,
+                    time_collision=time_collision if len(time_collision) > 0 else None,
+                    a_thr=a_thr,
+                    output_path=f"{output_base}_acc_curves.png"
+                )
+            except Exception as e:
+                print(f"警告: 绘制加速度曲线失败: {e}")
         
         # contact_force_risk 绘图
         if args.plot:
@@ -2352,6 +2499,17 @@ def main():
                     plot_contact_force_risk_curves(contact_force_risk_df, plot_output_path)
                 except Exception as e:
                     print(f"警告: 绘制 contact_force_risk 曲线失败: {e}")
+            # 单独画接触力曲线（原始 force_magnitude，标碰撞时刻）
+            try:
+                time_collision = risk_results.get('time_collision', np.array([]))
+                plot_contact_force_curves(
+                    contact_df,
+                    time_collision=time_collision if len(time_collision) > 0 else None,
+                    f_thr=1000.0,
+                    output_path=f"{output_base}_contact_force_curves.png"
+                )
+            except Exception as e:
+                print(f"警告: 绘制接触力曲线失败: {e}")
         
         # joint_wrench_risk 绘图
         if args.plot:

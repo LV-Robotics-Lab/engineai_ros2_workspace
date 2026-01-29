@@ -18,126 +18,36 @@ plt.rcParams['font.sans-serif'] = ['DejaVu Sans', 'Arial']
 plt.rcParams['axes.unicode_minus'] = False
 
 def load_and_clean_data(csv_file):
-    """Load and clean CSV data"""
+    """Load contact force CSV (new format: single-line header, timestamp, contact_id, body names, force columns, etc.)."""
     print(f"Loading data: {csv_file}")
-    
     try:
-        # 尝试不同的CSV读取方式来处理换行问题
-        try:
-            # 首先尝试标准读取
-            df = pd.read_csv(csv_file)
-        except:
-            # 如果失败，尝试处理换行问题
-            print("Standard CSV reading failed, trying to handle line breaks...")
-            with open(csv_file, 'r') as f:
-                content = f.read()
-            
-            # 修复换行的列名
-            lines = content.split('\n')
-            header = []
-            current_header = ""
-            
-            for line in lines:
-                if line.strip():
-                    if current_header:
-                        current_header += line.strip()
-                    else:
-                        current_header = line.strip()
-                    
-                    if current_header.count(',') >= 55:  # 应该有56列
-                        header.append(current_header)
-                        current_header = ""
-                        break
-            
-            if header:
-                # 重新读取，使用修复后的头部
-                df = pd.read_csv(csv_file, header=None, names=header[0].split(','))
-                print("Successfully loaded with fixed header")
-            else:
-                # 如果还是失败，使用默认列名
-                df = pd.read_csv(csv_file, header=None)
-                print("Loaded with default column names")
-        
-        print(f"Successfully loaded {len(df)} rows")
-        
-        # Check if robot frame coordinates are available
-        robot_frame_columns = [col for col in df.columns if 'robot_frame' in col.lower()]
-        if robot_frame_columns:
-            print(f"Found robot frame coordinate columns: {robot_frame_columns}")
-        else:
-            print("Warning: No robot frame coordinate columns found")
-        
-        # Check if collision link pose columns are available
-        collision_link_columns = [col for col in df.columns if 'collision_link' in col.lower()]
-        if collision_link_columns:
-            print(f"Found collision link pose columns: {collision_link_columns}")
-        else:
-            print("Warning: No collision link pose columns found")
-        
-        # Check if force_normal column is available
-        if 'force_normal' in df.columns:
-            print("Found force_normal column - will analyze normal force component")
-        else:
-            print("Warning: No force_normal column found")
-        
-        # Check if joint angles are available
-        joint_columns = [col for col in df.columns if 'joint_' in col and '_angle' in col]
-        if joint_columns:
-            print(f"Found {len(joint_columns)} joint angle columns")
-        else:
-            print("Warning: No joint angle columns found")
-        
-        # Basic data check
-        print(f"Time range: {df['timestamp'].min():.3f} - {df['timestamp'].max():.3f} seconds")
-        print(f"Number of contact points: {df['contact_id'].nunique()}")
-        print(f"Number of body1 names: {df['body1_name'].nunique()}")
-        print(f"Number of body2 names: {df['body2_name'].nunique()}")
-        
-        # Debug: Check force data
-        if 'force_magnitude' in df.columns:
-            print(f"Force magnitude range: {df['force_magnitude'].min():.3f} - {df['force_magnitude'].max():.3f} N")
-            print(f"First few force_magnitude values: {df['force_magnitude'].head().tolist()}")
-            print(f"Data type: {df['force_magnitude'].dtype}")
-        
-        if 'force_normal' in df.columns:
-            print(f"Force normal range: {df['force_normal'].min():.3f} - {df['force_normal'].max():.3f} N")
-            print(f"First few force_normal values: {df['force_normal'].head().tolist()}")
-            print(f"Data type: {df['force_normal'].dtype}")
-        
-        if 'force_x' in df.columns:
-            print(f"Force X range: {df['force_x'].min():.3f} - {df['force_x'].max():.3f} N")
-            print(f"First few force_x values: {df['force_x'].head().tolist()}")
-        
-        # Check for any NaN or infinite values
-        if 'force_magnitude' in df.columns:
-            nan_count = df['force_magnitude'].isna().sum()
-            inf_count = np.isinf(df['force_magnitude']).sum()
-            print(f"Force magnitude - NaN: {nan_count}, Inf: {inf_count}")
-        
-        # Debug: Print all column names to check mapping
-        print(f"\nAll column names:")
-        for i, col in enumerate(df.columns):
-            print(f"  {i:2d}: {col}")
-        
-        # Debug: Check first few rows of key columns
-        print(f"\nFirst row data:")
-        if len(df) > 0:
-            first_row = df.iloc[0]
-            key_cols = ['timestamp', 'contact_id', 'force_magnitude', 'force_normal', 'force_x', 'force_y', 'force_z']
-            for col in key_cols:
-                if col in df.columns:
-                    print(f"  {col}: {first_row[col]}")
-        
-        # Debug: Check raw CSV reading
-        print(f"\nRaw CSV inspection:")
-        with open(csv_file, 'r') as f:
-            first_line = f.readline().strip()
-            second_line = f.readline().strip()
-            print(f"  First line (header): {first_line[:100]}...")
-            print(f"  Second line (data): {second_line[:100]}...")
-            print(f"  Header comma count: {first_line.count(',')}")
-            print(f"  Data comma count: {second_line.count(',')}")
-        
+        df = pd.read_csv(csv_file)
+        if len(df) == 0:
+            print("Warning: CSV is empty.")
+            return df
+        # Required columns for analysis
+        required = ['timestamp', 'contact_id', 'body1_name', 'body2_name']
+        missing = [c for c in required if c not in df.columns]
+        if missing:
+            print(f"Error: Missing required columns: {missing}")
+            return None
+        # Ensure force_magnitude or force components exist
+        if 'force_magnitude' not in df.columns and not all(c in df.columns for c in ['force_x', 'force_y', 'force_z']):
+            print("Error: Need either 'force_magnitude' or force_x, force_y, force_z.")
+            return None
+        if 'force_magnitude' not in df.columns:
+            df['force_magnitude'] = np.sqrt(df['force_x']**2 + df['force_y']**2 + df['force_z']**2)
+        # Optional columns (inform only)
+        if 'force_normal' not in df.columns:
+            print("Note: No force_normal column (optional).")
+        if not [c for c in df.columns if 'robot_frame' in c.lower()]:
+            print("Note: No robot_frame columns (optional, time evolution heatmap skipped).")
+        if not [c for c in df.columns if 'collision_link' in c.lower()]:
+            print("Note: No collision_link columns (optional).")
+        # Basic stats
+        print(f"Loaded {len(df)} rows, {df['contact_id'].nunique()} contact ids, "
+              f"time {df['timestamp'].min():.3f} - {df['timestamp'].max():.3f} s, "
+              f"force_magnitude {df['force_magnitude'].min():.3f} - {df['force_magnitude'].max():.3f} N")
         return df
     except Exception as e:
         print(f"Failed to load data: {e}")
