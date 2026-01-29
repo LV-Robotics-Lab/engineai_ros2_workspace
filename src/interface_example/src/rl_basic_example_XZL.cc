@@ -1,4 +1,5 @@
 #include <chrono>
+#include <cmath>
 #include <memory>
 #include <rclcpp/logging.hpp>
 #include <rclcpp/rclcpp.hpp>
@@ -48,6 +49,9 @@ class RlBasicRunnerXZL : public rclcpp::Node {
       if (torque_limit_enabled_) {
         RCLCPP_INFO(get_logger(), "Soft torque limit: %.2f", soft_torque_limit_);
       }
+      // 读取 enable_damping_mode（俯仰角超阈值时是否进入 kp=0, kd=0.5，默认 true）
+      enable_damping_mode_ = config["enable_damping_mode"] ? config["enable_damping_mode"].as<bool>() : true;
+      RCLCPP_INFO(get_logger(), "Damping mode (pitch > 50 deg): %s", enable_damping_mode_ ? "enabled" : "disabled");
     } catch (const std::exception& e) {
       RCLCPP_WARN(get_logger(), "Failed to load torque limit parameters: %s", e.what());
       torque_limit_enabled_ = false;
@@ -116,6 +120,9 @@ class RlBasicRunnerXZL : public rclcpp::Node {
       time_ = 0.0;
       global_phase_ = 0.0;
       is_first_time_ = true;
+
+      // Load IMU install bias from param (for GetCurrentPitchAngle)
+      imu_install_bias_ = param_->imu_install_bias;
 
       RCLCPP_INFO(get_logger(), "Starting control loop");
       
@@ -291,6 +298,25 @@ class RlBasicRunnerXZL : public rclcpp::Node {
     }
   }
 
+  // 获取当前 IMU 俯仰角度（弧度），用于 damping mode 判断
+  double GetCurrentPitchAngle() {
+    auto imu = message_handler_->GetLatestImu();
+    if (!imu) {
+      RCLCPP_WARN(get_logger(), "IMU data not available, using default pitch angle 0.0");
+      return 0.0;
+    }
+    Eigen::AngleAxisd rollAngle(imu_install_bias_.x(), Eigen::Vector3d::UnitX());
+    Eigen::AngleAxisd pitchAngle(imu_install_bias_.y(), Eigen::Vector3d::UnitY());
+    Eigen::AngleAxisd yawAngle(imu_install_bias_.z(), Eigen::Vector3d::UnitZ());
+    Eigen::Quaterniond q_install = yawAngle * pitchAngle * rollAngle;
+    Eigen::Matrix3d R_install = q_install.toRotationMatrix();
+    Eigen::Matrix3d R_local = Eigen::Quaterniond(imu->quaternion.w, imu->quaternion.x,
+                                                 imu->quaternion.y, imu->quaternion.z).toRotationMatrix();
+    Eigen::Matrix3d R_real = R_local * R_install.transpose();
+    Eigen::Vector3d rpy = math::CalcRollPitchYawFromRotationMatrix(R_real);
+    return rpy[1];  // pitch
+  }
+
   void ApplyTorqueLimits() {
     const int n = q_des_.size();
     if (q_real_.size() != n || qd_real_.size() != n || joint_kp_.size() != n || joint_kd_.size() != n) {
@@ -358,8 +384,24 @@ class RlBasicRunnerXZL : public rclcpp::Node {
     joint_command_->velocity = std::vector<double>(q_des_.size(), 0.0);
     joint_command_->feed_forward_torque = std::vector<double>(q_des_.size(), 0.0);
     joint_command_->torque = std::vector<double>(q_des_.size(), 0.0);
-    joint_command_->stiffness = std::vector<double>(joint_kp_.data(), joint_kp_.data() + joint_kp_.size());
-    joint_command_->damping = std::vector<double>(joint_kd_.data(), joint_kd_.data() + joint_kd_.size());
+
+    // Damping mode: 当 enable_damping_mode_ 为 true 且俯仰角 > 50° 或 < -50° 时 kp=0, kd=0.5
+    const double kPitchDampingThresholdRad = 50.0 * M_PI / 180.0;  // 50°
+    bool in_damping = false;
+    if (enable_damping_mode_) {
+      double current_pitch = GetCurrentPitchAngle();
+      if (current_pitch > kPitchDampingThresholdRad || current_pitch < -kPitchDampingThresholdRad) {
+        in_damping = true;
+      }
+    }
+    if (in_damping) {
+      joint_command_->stiffness = std::vector<double>(q_des_.size(), 0.0);
+      joint_command_->damping = std::vector<double>(q_des_.size(), 0.5);
+    } else {
+      joint_command_->stiffness = std::vector<double>(joint_kp_.data(), joint_kp_.data() + joint_kp_.size());
+      joint_command_->damping = std::vector<double>(joint_kd_.data(), joint_kd_.data() + joint_kd_.size());
+    }
+
     joint_command_->parallel_parser_type = interface_protocol::msg::ParallelParserType::RL_PARSER;
     // Send command through message handler
     message_handler_->PublishJointCommand(*joint_command_);
@@ -403,6 +445,9 @@ class RlBasicRunnerXZL : public rclcpp::Node {
   bool torque_limit_enabled_ = false;
   std::vector<Eigen::VectorXd> max_torque_joint_;
   double soft_torque_limit_ = 0.9;  // 软扭矩限制系数，默认0.9（参考XZL实现）
+
+  // Damping mode: 俯仰角 > 50° 或 < -50° 时是否进入 kp=0, kd=0.5（由 YAML enable_damping_mode 控制）
+  bool enable_damping_mode_ = true;
 };
 
 }  // namespace example

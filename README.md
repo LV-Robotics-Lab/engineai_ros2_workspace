@@ -509,21 +509,33 @@ python3 scripts/calculate_fall_risk.py \
 
 # passive using heuristic manner
 python3 scripts/calculate_fall_risk.py \
-  --contact /home/wang22/data/mujoco_logs/passive_heuristic/contact_data_20260129_155823.csv \
-  --sensor-vibration /home/wang22/data/mujoco_logs/passive_heuristic/sensor_vibration_data_20260129_155823.csv \
-  --joint-state /home/wang22/data/mujoco_logs/passive_heuristic/joint_state_data_20260129_155823.csv \
-  --joint-forces /home/wang22/data/mujoco_logs/passive_heuristic/joint_forces_data_20260129_155823.csv \
-  --output /home/wang22/data/mujoco_logs/passive_heuristic/risk_results_20260129_155823 \
+  --contact /home/wang22/data/mujoco_logs/passive_heuristic/contact_data_20260129_171136.csv \
+  --sensor-vibration /home/wang22/data/mujoco_logs/passive_heuristic/sensor_vibration_data_20260129_171136.csv \
+  --joint-state /home/wang22/data/mujoco_logs/passive_heuristic/joint_state_data_20260129_171136.csv \
+  --joint-forces /home/wang22/data/mujoco_logs/passive_heuristic/joint_forces_data_20260129_171136.csv \
+  --output /home/wang22/data/mujoco_logs/passive_heuristic/risk_results_20260129_171136 \
   --plot
 
 # passive using rigid reinforcement strategies
 
 
 # active using damping mode 
-
+python3 scripts/calculate_fall_risk.py \
+  --contact /home/wang22/data/mujoco_logs/active_damping/contact_data_20260129_170459.csv \
+  --sensor-vibration /home/wang22/data/mujoco_logs/active_damping/sensor_vibration_data_20260129_170459.csv \
+  --joint-state /home/wang22/data/mujoco_logs/active_damping/joint_state_data_20260129_170459.csv \
+  --joint-forces /home/wang22/data/mujoco_logs/active_damping/joint_forces_data_20260129_170459.csv \
+  --output /home/wang22/data/mujoco_logs/active_damping/risk_results_20260129_170459 \
+  --plot
 
 # active + passive
-
+python3 scripts/calculate_fall_risk.py \
+  --contact /home/wang22/data/mujoco_logs/active_passive/contact_data_20260129_171610.csv \
+  --sensor-vibration /home/wang22/data/mujoco_logs/active_passive/sensor_vibration_data_20260129_171610.csv \
+  --joint-state /home/wang22/data/mujoco_logs/active_passive/joint_state_data_20260129_171610.csv \
+  --joint-forces /home/wang22/data/mujoco_logs/active_passive/joint_forces_data_20260129_171610.csv \
+  --output /home/wang22/data/mujoco_logs/active_passive/risk_results_20260129_171610 \
+  --plot
 
 # 
 
