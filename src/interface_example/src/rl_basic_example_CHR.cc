@@ -735,7 +735,8 @@ class RlBasicRunnerCHR : public rclcpp::Node {
           double mimic_pitch = GetCurrentPitchAngle();
           size_t matched_idx = FindMatchingTrajectoryIndex(mimic_pitch);
           trajectory_index_ = matched_idx;
-          RCLCPP_INFO(get_logger(), "Matched pitch angle (%.4f rad) and set trajectory_index_ to %zu", mimic_pitch, trajectory_index_);
+          RCLCPP_INFO(get_logger(), "[摔倒检测] mimic 选取第 %zu 帧 (pitch=%.4f rad, 轨迹总帧数=%ld)", 
+                      trajectory_index_, mimic_pitch, current_traj_ ? static_cast<long>(current_traj_->rows()) : 0);
         } else {
           RCLCPP_WARN(get_logger(), "Cannot match pitch: observation_type=%s, current_traj_=%s", 
                       observation_type_.c_str(), current_traj_ ? "valid" : "null");
@@ -1090,6 +1091,12 @@ class RlBasicRunnerCHR : public rclcpp::Node {
         // 提取当前帧的关节位置和速度
         obs.segment(offset, num_joints) = current_traj_->row(trajectory_index_).head(num_joints);  // joint_pos
         obs.segment(offset + num_joints, num_joints) = current_traj_->row(trajectory_index_).segment(num_joints, num_joints);  // joint_vel
+        // 实时输出 command 里填的帧（节流：每 0.1s 打印一次，避免刷屏）
+        if (time_ - last_command_frame_print_time_ >= 0.1) {
+          RCLCPP_INFO(get_logger(), "[mimic] command 使用轨迹第 %zu 帧 (总帧数=%ld, time=%.2f)", 
+                      trajectory_index_, static_cast<long>(current_traj_->rows()), time_);
+          last_command_frame_print_time_ = time_;
+        }
       } else {
         // 如果轨迹不可用，使用零向量
         obs.segment(offset, command_total).setZero();
@@ -1386,6 +1393,7 @@ class RlBasicRunnerCHR : public rclcpp::Node {
   std::map<std::string, Eigen::MatrixXd> interpolated_trajs_;
   std::map<std::string, Eigen::MatrixXd> interpolated_base_vel_trajs_;  // 基座速度轨迹
   size_t trajectory_index_ = 0;  // 当前轨迹索引
+  double last_command_frame_print_time_ = -1.0;  // 上次打印 command 帧的时间（节流用）
   
   // Proprioceptive history buffers (5步历史)
   Eigen::MatrixXd q_diff_history_;      // q_actual - default_joint_q (24维 × 5步)
