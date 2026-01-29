@@ -485,11 +485,47 @@ ros2 launch launch_urdf_only.launch.py urdf_file:=/home/wang22/engineai/engineai
 # Risk 计算
 ## 单次采样的数据处理
 ```bash
+# active using mimic
 python3 scripts/calculate_fall_risk.py \
-  --contact /home/wang22/data/mujoco_logs/contact_data_20260128_211558.csv \
-  --sensor-vibration /home/wang22/data/mujoco_logs/sensor_vibration_data_20260128_211558.csv \
-  --joint-state /home/wang22/data/mujoco_logs/joint_state_data_20260128_211558.csv \
-  --joint-forces /home/wang22/data/mujoco_logs/joint_forces_data_20260128_211558.csv \
-  --output /home/wang22/data/mujoco_logs/risk_results_20260128_211558 \
+  --contact /home/wang22/data/mujoco_logs/active_mimic/contact_data_20260128_211558.csv \
+  --sensor-vibration /home/wang22/data/mujoco_logs/active_mimic/sensor_vibration_data_20260128_211558.csv \
+  --joint-state /home/wang22/data/mujoco_logs/active_mimic/joint_state_data_20260128_211558.csv \
+  --joint-forces /home/wang22/data/mujoco_logs/active_mimic/joint_forces_data_20260128_211558.csv \
+  --output /home/wang22/data/mujoco_logs/active_mimic/risk_results_20260128_211558 \
   --plot
+
+# non
+python3 scripts/calculate_fall_risk.py \
+  --contact /home/wang22/data/mujoco_logs/non/contact_data_20260129_152540.csv \
+  --sensor-vibration /home/wang22/data/mujoco_logs/non/sensor_vibration_data_20260129_152540.csv \
+  --joint-state /home/wang22/data/mujoco_logs/non/joint_state_data_20260129_152540.csv \
+  --joint-forces /home/wang22/data/mujoco_logs/non/joint_forces_data_20260129_152540.csv \
+  --output /home/wang22/data/mujoco_logs/non/risk_results_20260129_152540 \
+  --plot
+
+# passive using risk-guided manner
+
+
+
+# passive using heuristic manner
+python3 scripts/calculate_fall_risk.py \
+  --contact /home/wang22/data/mujoco_logs/passive_heuristic/contact_data_20260129_155823.csv \
+  --sensor-vibration /home/wang22/data/mujoco_logs/passive_heuristic/sensor_vibration_data_20260129_155823.csv \
+  --joint-state /home/wang22/data/mujoco_logs/passive_heuristic/joint_state_data_20260129_155823.csv \
+  --joint-forces /home/wang22/data/mujoco_logs/passive_heuristic/joint_forces_data_20260129_155823.csv \
+  --output /home/wang22/data/mujoco_logs/passive_heuristic/risk_results_20260129_155823 \
+  --plot
+
+# passive using rigid reinforcement strategies
+
+
+# active using damping mode 
+
+
+# active + passive
+
+
+# 
+
 ```
+

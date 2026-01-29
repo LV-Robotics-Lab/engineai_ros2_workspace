@@ -184,10 +184,10 @@ bool IsContactVisualizationEnabled();
   // 防护护具相关成员变量
   std::unique_ptr<ForceInterpolation> force_interpolator_;  // 力插值计算器
   double protection_thickness_ = 12.0;  // 防护材料厚度 (mm)，默认12mm
-  bool protection_enabled_ = false;  // 是否启用防护功能
+  bool protection_enabled_ = true;  // 是否启用防护功能
   
-  // 排除防护的接触对列表（body1_name, body2_name）
-  // 例如：排除 "LINK_ANKLE_PITCH_L" 和 "world" 之间的接触
+  // 排除防护的接触对列表（body1_name, body2_name），这些接触不施加防护力缩放
+  // 脚/踝与 world 的接触已排除，避免走路时地面打滑（LINK_ANKLE_ROLL_L/R 为脚掌接地 body）
   // 使用 std::pair<std::string, std::string> 存储，顺序无关
   static const std::vector<std::pair<std::string, std::string>> excluded_contact_pairs_;
 

@@ -30,9 +30,13 @@ using namespace std::chrono_literals;
 const int kDofFloatingBase = 6;        // 浮动基座的自由度数量
 
 // 排除防护的接触对列表定义
+// 排除防护的接触对：脚/踝与地面的接触不施加防护，避免走路时地面打滑
+// 脚掌碰撞几何体挂在 LINK_ANKLE_ROLL_L/R 下，需排除；LINK_ANKLE_PITCH 为踝俯仰轴
 const std::vector<std::pair<std::string, std::string>> SimManager::excluded_contact_pairs_ = {
   {"LINK_ANKLE_PITCH_L", "world"},
-  {"LINK_ANKLE_PITCH_R", "world"}
+  {"LINK_ANKLE_PITCH_R", "world"},
+  {"LINK_ANKLE_ROLL_L", "world"},   // 左脚掌接地接触
+  {"LINK_ANKLE_ROLL_R", "world"}    // 右脚掌接地接触
 };
 const int kNumFloatingBaseJoints = 7;  // 浮动基座的关节数量（四元数 + xyz位置）
 constexpr double kSyncMisalign = 0.1;  // 重新同步前的最大偏差
