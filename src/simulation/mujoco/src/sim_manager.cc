@@ -1612,18 +1612,9 @@ void SimManager::ApplyProtectionToContactForces() {
     }
     
     // 如果法向力太小，跳过（避免对微小接触力进行插值）
-    if (contact_force_normal < 400) {  // 400 N阈值
+    // 阈值 800N：躺着时体重分布的力通常 < 800N，不处理；摔倒冲击力 > 800N 才做防护
+    if (contact_force_normal < 500) {  // 800 N阈值
       skipped_small_force++;
-      // 对于高力，立即记录（不依赖frame_count）
-      if (contact_force_normal > 20000) {
-        static int high_force_small_count = 0;
-        high_force_small_count++;
-        if (high_force_small_count <= 5) {
-          RCLCPP_WARN(node_->get_logger(), 
-                      "High force %.2f N detected but skipped (small force threshold: 400 N)",
-                      contact_force_normal);
-        }
-      }
       continue;
     }
     
@@ -1820,10 +1811,35 @@ void SimManager::ApplyProtectionToContactForces() {
   // 重要：修改efc_force后，需要重新计算qfrc_constraint
   // 因为qfrc_constraint = J^T * efc_force，其中J是约束雅可比矩阵
   // 如果不重新计算，修改的efc_force不会影响后续的动力学计算
-  if (protected_contacts > 0) {
+  if (protected_contacts > 0 && m_->nv > 0 && m_->nv <= 1024) {
+    // 用增量方式更新 qacc：qacc_new = qacc_old + M^{-1} * (qfrc_constraint_new - qfrc_constraint_old)
+    // 注意：mj_solveM 的最后一个参数 n 表示"解多少组向量"（每组长度 nv），不是向量长度！
+    // 之前误传 nv 导致越界崩溃，正确值是 n=1。
+    //
+    // 阈值 800N 确保：躺着时小力不处理（仿真正常），只有摔倒冲击大力才重算 acc。
+    
+    // 1. 保存防护前的 qfrc_constraint
+    std::vector<mjtNum> qfrc_old(d_->qfrc_constraint, d_->qfrc_constraint + m_->nv);
+    
+    // 2. 用新的 efc_force 计算新的 qfrc_constraint
     mj_mulJacTVec(m_, d_, d_->qfrc_constraint, d_->efc_force);
-    // 不在此处重算 qacc/cacc：MuJoCo 3.2 下 mj_solveM/mj_rnePostConstraint 曾导致 stack smashing / SIGSEGV。
-    // 因此 CSV 中 contact force = 防护后（变小），link acc/risk_acc = 防护前（未变小），属已知不一致。
+    
+    // 3. 计算增量 delta_qfrc = qfrc_constraint_new - qfrc_constraint_old
+    std::vector<mjtNum> delta_qfrc(static_cast<size_t>(m_->nv));
+    mju_sub(delta_qfrc.data(), d_->qfrc_constraint, qfrc_old.data(), m_->nv);
+    
+    // 4. 计算 delta_qacc = M^{-1} * delta_qfrc（n=1 表示解 1 组向量）
+    std::vector<mjtNum> delta_qacc(static_cast<size_t>(m_->nv));
+    mj_solveM(m_, d_, delta_qacc.data(), delta_qfrc.data(), 1);
+    
+    // 5. qacc_new = qacc_old + delta_qacc
+    mju_addTo(d_->qacc, delta_qacc.data(), m_->nv);
+    
+    // 6. 更新 body 笛卡尔加速度 cacc（CSV 的 base_link_lin_acc 等来自 cacc）
+    mj_rnePostConstraint(m_, d_);
+  } else if (protected_contacts > 0) {
+    // nv 超范围时只更新 qfrc_constraint，不重算 qacc/cacc
+    mj_mulJacTVec(m_, d_, d_->qfrc_constraint, d_->efc_force);
   }
 
   // 每1000帧打印一次统计信息（避免日志过多）

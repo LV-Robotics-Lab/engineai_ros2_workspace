@@ -712,6 +712,7 @@ class RlBasicRunnerCHR : public rclcpp::Node {
       time_ = 0.0;
       is_first_time_ = true;
       is_walking_mode_ = true;
+      is_damping_mode_ = false;
       walking_start_time_ = -1.0;
       mujoco_reset_received_ = false;
       return;
@@ -923,12 +924,24 @@ class RlBasicRunnerCHR : public rclcpp::Node {
       size_t end = current_traj_->rows() > 0 ? current_traj_->rows() - 1 : 0;
       if (trajectory_index_ < end) {
         trajectory_index_++;
+      } else if (!is_damping_mode_ && trajectory_index_ >= end) {
+        // 轨迹播放完成，进入 damping mode
+        is_damping_mode_ = true;
+        RCLCPP_INFO(get_logger(), "[mimic] 轨迹播放完成（第 %zu 帧），进入 damping mode (time=%.2f)",
+                    trajectory_index_, time_);
       }
-      // 与 rl_dance 一致：到达最后一帧后不再步进（replay=false）
     }
   }
 
   void CalculateMotorCommand() {
+    // Damping mode: mimic 轨迹播放完后，只发送阻尼命令（kp=0, kd=damping）
+    if (is_damping_mode_) {
+      // 保持当前关节位置，但不使用 kp 控制，只靠阻尼稳定关节
+      // q_des_ 设为当前实际位置，这样在 SendJointCommands 中 position 会是当前位置
+      q_des_ = q_real_;
+      return;
+    }
+    
     Eigen::VectorXd obs;
     
     if (is_walking_mode_) {
@@ -1227,7 +1240,11 @@ class RlBasicRunnerCHR : public rclcpp::Node {
   void ApplyTorqueLimits() {
     // 获取当前使用的 kp/kd
     Eigen::VectorXd joint_kp, joint_kd;
-    if (is_walking_mode_) {
+    if (is_damping_mode_) {
+      // Damping mode: kp=0, kd=0.5
+      joint_kp = Eigen::VectorXd::Zero(joint_kd_.size());
+      joint_kd = Eigen::VectorXd::Constant(joint_kd_.size(), 0.5);
+    } else if (is_walking_mode_) {
       joint_kp = walking_joint_kp_;
       joint_kd = walking_joint_kd_;
     } else {
@@ -1339,7 +1356,11 @@ class RlBasicRunnerCHR : public rclcpp::Node {
     joint_command_->torque = std::vector<double>(q_des_.size(), 0.0);
     
     // 根据模式选择正确的 kp/kd 参数
-    if (is_walking_mode_) {
+    if (is_damping_mode_) {
+      // Damping mode: kp=0, kd=0.5
+      joint_command_->stiffness = std::vector<double>(q_des_.size(), 0.0);
+      joint_command_->damping = std::vector<double>(q_des_.size(), 0.5);
+    } else if (is_walking_mode_) {
       joint_command_->stiffness = std::vector<double>(walking_joint_kp_.data(), walking_joint_kp_.data() + walking_joint_kp_.size());
       joint_command_->damping = std::vector<double>(walking_joint_kd_.data(), walking_joint_kd_.data() + walking_joint_kd_.size());
     } else {
@@ -1415,6 +1436,7 @@ class RlBasicRunnerCHR : public rclcpp::Node {
   double global_phase_;
   bool is_first_time_;
   bool is_walking_mode_;
+  bool is_damping_mode_ = false;  // damping 模式：mimic 播放完后进入
   double walking_duration_;
   double walking_start_time_;
   bool mujoco_reset_received_;

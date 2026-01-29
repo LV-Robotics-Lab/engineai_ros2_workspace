@@ -179,9 +179,10 @@ chmod +x /home/wang22/engineai/engineai_ros2_workspace/scripts/automated_collect
 # 加护具仿真
 # 修改 sim_manager.h 中最后两行 protection_enabled_  ，  protection_thickness_
 # 修改 sim_manager.cc 中的排除列表 excluded_contact_pairs_
-# 说明：启用护具后，ApplyProtectionToContactForces 会缩放 efc_force 并重算 qfrc_constraint；
-# 同时会重算 qacc 与 cacc，使 CSV 中 contact force（防护后）与 link acc / risk_acc 一致，
-# 避免出现「加护具后 contact force 减小、但 link acc max / risk_acc 反而变大」的悖论。
+# 说明：启用护具后，ApplyProtectionToContactForces 会：
+#   1. 只对 > 800N 的接触力做防护衰减（躺着时小力不处理，仿真正常）
+#   2. 缩放 efc_force 并重算 qacc/cacc（CSV 中 contact_force 与 link_acc 一致）
+# 注意：修改 qacc 会影响仿真行为，可能导致弹跳等问题（约束一致性被破坏）。
 
 # terminal 3
 # choose mesh or geometry: in src/simulation/mujoco/assets/config/pm_v2.yaml
@@ -497,11 +498,11 @@ python3 scripts/calculate_fall_risk.py \
   --plot
 
 python3 scripts/calculate_fall_risk.py \
-  --contact /home/wang22/data/mujoco_logs/contact_data_20260129_204411.csv \
-  --sensor-vibration /home/wang22/data/mujoco_logs/sensor_vibration_data_20260129_204411.csv \
-  --joint-state /home/wang22/data/mujoco_logs/joint_state_data_20260129_204411.csv \
-  --joint-forces /home/wang22/data/mujoco_logs/joint_forces_data_20260129_204411.csv \
-  --output /home/wang22/data/mujoco_logs/risk_results_20260129_204411 \
+  --contact /home/wang22/data/mujoco_logs/contact_data_20260130_000342.csv \
+  --sensor-vibration /home/wang22/data/mujoco_logs/sensor_vibration_data_20260130_000342.csv \
+  --joint-state /home/wang22/data/mujoco_logs/joint_state_data_20260130_000342.csv \
+  --joint-forces /home/wang22/data/mujoco_logs/joint_forces_data_20260130_000342.csv \
+  --output /home/wang22/data/mujoco_logs/risk_results_20260130_000342 \
   --plot
 
 

@@ -762,7 +762,7 @@ def calculate_acceleration_risk(
     time_collision: np.ndarray,
     a_thr: float = 30.0,
     dt: float = 0.002,
-    window_ms: float = 2.0,
+    window_ms: float = 20.0,
     save_frame_by_frame_path: Optional[str] = None
 ) -> float:
     """
