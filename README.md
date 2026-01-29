@@ -59,6 +59,7 @@ conda create -n engineai_ros2 python=3.10
 conda activate engineai_ros2
 # Install glog (required for rl_basic_example_CHR)
 conda install -y -c conda-forge glog
+conda install pandas 
 
 ```
 
@@ -178,8 +179,9 @@ chmod +x /home/wang22/engineai/engineai_ros2_workspace/scripts/automated_collect
 # 加护具仿真
 # 修改 sim_manager.h 中最后两行 protection_enabled_  ，  protection_thickness_
 # 修改 sim_manager.cc 中的排除列表 excluded_contact_pairs_
-
-
+# 说明：启用护具后，ApplyProtectionToContactForces 会缩放 efc_force 并重算 qfrc_constraint；
+# 同时会重算 qacc 与 cacc，使 CSV 中 contact force（防护后）与 link acc / risk_acc 一致，
+# 避免出现「加护具后 contact force 减小、但 link acc max / risk_acc 反而变大」的悖论。
 
 # terminal 3
 # choose mesh or geometry: in src/simulation/mujoco/assets/config/pm_v2.yaml
@@ -494,6 +496,16 @@ python3 scripts/calculate_fall_risk.py \
   --output /home/wang22/data/mujoco_logs/active_mimic/risk_results_20260128_211558 \
   --plot
 
+python3 scripts/calculate_fall_risk.py \
+  --contact /home/wang22/data/mujoco_logs/contact_data_20260129_204411.csv \
+  --sensor-vibration /home/wang22/data/mujoco_logs/sensor_vibration_data_20260129_204411.csv \
+  --joint-state /home/wang22/data/mujoco_logs/joint_state_data_20260129_204411.csv \
+  --joint-forces /home/wang22/data/mujoco_logs/joint_forces_data_20260129_204411.csv \
+  --output /home/wang22/data/mujoco_logs/risk_results_20260129_204411 \
+  --plot
+
+
+
 # non
 python3 scripts/calculate_fall_risk.py \
   --contact /home/wang22/data/mujoco_logs/non/contact_data_20260129_152540.csv \
@@ -509,11 +521,11 @@ python3 scripts/calculate_fall_risk.py \
 
 # passive using heuristic manner
 python3 scripts/calculate_fall_risk.py \
-  --contact /home/wang22/data/mujoco_logs/passive_heuristic/contact_data_20260129_171136.csv \
-  --sensor-vibration /home/wang22/data/mujoco_logs/passive_heuristic/sensor_vibration_data_20260129_171136.csv \
-  --joint-state /home/wang22/data/mujoco_logs/passive_heuristic/joint_state_data_20260129_171136.csv \
-  --joint-forces /home/wang22/data/mujoco_logs/passive_heuristic/joint_forces_data_20260129_171136.csv \
-  --output /home/wang22/data/mujoco_logs/passive_heuristic/risk_results_20260129_171136 \
+  --contact /home/wang22/data/mujoco_logs/passive_heuristic/contact_data_20260129_192350.csv \
+  --sensor-vibration /home/wang22/data/mujoco_logs/passive_heuristic/sensor_vibration_data_20260129_192350.csv \
+  --joint-state /home/wang22/data/mujoco_logs/passive_heuristic/joint_state_data_20260129_192350.csv \
+  --joint-forces /home/wang22/data/mujoco_logs/passive_heuristic/joint_forces_data_20260129_192350.csv \
+  --output /home/wang22/data/mujoco_logs/passive_heuristic/risk_results_20260129_192350 \
   --plot
 
 # passive using rigid reinforcement strategies
@@ -521,20 +533,20 @@ python3 scripts/calculate_fall_risk.py \
 
 # active using damping mode 
 python3 scripts/calculate_fall_risk.py \
-  --contact /home/wang22/data/mujoco_logs/active_damping/contact_data_20260129_170459.csv \
-  --sensor-vibration /home/wang22/data/mujoco_logs/active_damping/sensor_vibration_data_20260129_170459.csv \
-  --joint-state /home/wang22/data/mujoco_logs/active_damping/joint_state_data_20260129_170459.csv \
-  --joint-forces /home/wang22/data/mujoco_logs/active_damping/joint_forces_data_20260129_170459.csv \
-  --output /home/wang22/data/mujoco_logs/active_damping/risk_results_20260129_170459 \
+  --contact /home/wang22/data/mujoco_logs/active_damping/contact_data_20260129_192809.csv \
+  --sensor-vibration /home/wang22/data/mujoco_logs/active_damping/sensor_vibration_data_20260129_192809.csv \
+  --joint-state /home/wang22/data/mujoco_logs/active_damping/joint_state_data_20260129_192809.csv \
+  --joint-forces /home/wang22/data/mujoco_logs/active_damping/joint_forces_data_20260129_192809.csv \
+  --output /home/wang22/data/mujoco_logs/active_damping/risk_results_20260129_192809 \
   --plot
 
 # active + passive
 python3 scripts/calculate_fall_risk.py \
-  --contact /home/wang22/data/mujoco_logs/active_passive/contact_data_20260129_171610.csv \
-  --sensor-vibration /home/wang22/data/mujoco_logs/active_passive/sensor_vibration_data_20260129_171610.csv \
-  --joint-state /home/wang22/data/mujoco_logs/active_passive/joint_state_data_20260129_171610.csv \
-  --joint-forces /home/wang22/data/mujoco_logs/active_passive/joint_forces_data_20260129_171610.csv \
-  --output /home/wang22/data/mujoco_logs/active_passive/risk_results_20260129_171610 \
+  --contact /home/wang22/data/mujoco_logs/active_passive/contact_data_20260129_193636.csv \
+  --sensor-vibration /home/wang22/data/mujoco_logs/active_passive/sensor_vibration_data_20260129_193636.csv \
+  --joint-state /home/wang22/data/mujoco_logs/active_passive/joint_state_data_20260129_193636.csv \
+  --joint-forces /home/wang22/data/mujoco_logs/active_passive/joint_forces_data_20260129_193636.csv \
+  --output /home/wang22/data/mujoco_logs/active_passive/risk_results_20260129_193636 \
   --plot
 
 # 

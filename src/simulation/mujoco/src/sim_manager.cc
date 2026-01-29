@@ -1735,7 +1735,7 @@ void SimManager::ApplyProtectionToContactForces() {
     // 接触约束通常包括：
     // 1. 法向约束（1个）
     // 2. 摩擦约束（最多4个，取决于摩擦维数）
-    // 我们需要缩放法向约束的力，摩擦约束的力按相同比例缩放
+    // 法向与摩擦同比例缩放，保证仍在摩擦锥内（|friction| <= mu*normal），否则仿真会失稳
     
     // 获取接触的约束维数（dim = 1, 3, 4, 或 6）
     // dim = 1: 只有法向约束
@@ -1776,9 +1776,9 @@ void SimManager::ApplyProtectionToContactForces() {
       // 记录原始法向力（用于验证）
       double original_normal = decoded_force[0];
       
-      // 缩放接触力（只缩放法向力，切向力按相同比例缩放以保持方向）
+      // 法向与切向同比例缩放，保持摩擦锥一致（否则会约束不一致、仿真摔飞）
       decoded_force[0] *= scale_factor;  // 法向力
-      for (int j = 1; j < dim && j < 6; ++j) {  // 确保不越界
+      for (int j = 1; j < dim && j < 6; ++j) {
         decoded_force[j] *= scale_factor;  // 切向力
       }
       
@@ -1799,9 +1799,7 @@ void SimManager::ApplyProtectionToContactForces() {
         }
       }
     } else {
-      // Elliptic 摩擦锥或 dim=1（无摩擦）：直接缩放 efc_force
-      // 对于 dim=1，只有 1 个元素（法向力）
-      // 对于 elliptic，有 dim 个元素
+      // Elliptic 摩擦锥或 dim=1：法向与摩擦同比例缩放
       int efc_size = (dim == 1) ? 1 : dim;
       if (efc_address >= 0 && efc_address < d_->nefc && efc_size > 0) {
         int max_size = std::min(efc_size, d_->nefc - efc_address);
@@ -1824,8 +1822,10 @@ void SimManager::ApplyProtectionToContactForces() {
   // 如果不重新计算，修改的efc_force不会影响后续的动力学计算
   if (protected_contacts > 0) {
     mj_mulJacTVec(m_, d_, d_->qfrc_constraint, d_->efc_force);
+    // 不在此处重算 qacc/cacc：MuJoCo 3.2 下 mj_solveM/mj_rnePostConstraint 曾导致 stack smashing / SIGSEGV。
+    // 因此 CSV 中 contact force = 防护后（变小），link acc/risk_acc = 防护前（未变小），属已知不一致。
   }
-  
+
   // 每1000帧打印一次统计信息（避免日志过多）
   frame_count++;
   if (frame_count % 1000 == 0 && node_) {
