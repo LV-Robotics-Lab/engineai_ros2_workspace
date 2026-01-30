@@ -119,7 +119,7 @@ cd /home/wang22/engineai/engineai_ros2_workspace && conda activate engineai_ros2
 ./scripts/build_nodes_4090.sh sim
 source install/setup.bash 
 # ros2 launch mujoco_simulator mujoco_simulator.launch.py csv_format:=csv or binary
-# 修改 sim_manager.h protection_enabled_ 启用护具功能（减少冲击力）
+# 修改 pm_v2.yaml protection: enabled:true 启用护具功能（thickness:设置厚度）
 # 修改 rl_basic_param_XZL.yaml 的 enable_damping_mode, 启用摔倒damping mode 
 ros2 launch mujoco_simulator mujoco_simulator.launch.py save_contact_csv:=true save_joint_state_csv:=true save_sensor_vibration_csv:=true save_joint_forces_csv:=true csv_format:=csv
 
