@@ -1636,37 +1636,65 @@ def plot_acceleration_risk_curves(frame_by_frame_df: pd.DataFrame, output_path: 
     else:
         axes = axes.flatten() if hasattr(axes, 'flatten') else [axes]
     
-    # 第一个子图：总 risk（使用 cumulative_risk 的最大值）
+    # 第一个子图：总 risk（瞬时风险和累计风险）
     frame_by_frame_df_sorted = frame_by_frame_df.sort_values('timestamp')
-    # 获取每个 link 的最大 cumulative_risk，然后求和
-    max_cumulative_by_link = frame_by_frame_df_sorted.groupby('link_name')['cumulative_risk'].max()
-    total_max_cumulative = max_cumulative_by_link.sum()
+    
+    # 计算每个时刻的瞬时风险总和（所有 link 的 risk_value 之和）
+    instant_risk_by_time = frame_by_frame_df_sorted.groupby('timestamp')['risk_value'].sum().reset_index()
+    instant_risk_by_time = instant_risk_by_time.sort_values('timestamp')
     
     # 绘制累计风险随时间的变化（取每个时刻的最大 cumulative_risk）
     cumulative_by_time = frame_by_frame_df_sorted.groupby('timestamp')['cumulative_risk'].max().reset_index()
     cumulative_by_time = cumulative_by_time.sort_values('timestamp')
     
     ax_total = axes[0]
-    ax_total.plot(cumulative_by_time['timestamp'], cumulative_by_time['cumulative_risk'], 
-                  'k-', label='Total Cumulative Risk', linewidth=2)
-    ax_total.set_ylabel('Cumulative Risk', fontsize=10)
-    ax_total.legend(loc='upper right')
+    # 左 y 轴：瞬时风险
+    line1, = ax_total.plot(instant_risk_by_time['timestamp'], instant_risk_by_time['risk_value'], 
+                           'b-', label='Instantaneous Risk (sum of risk_value)', linewidth=1.5)
+    ax_total.set_ylabel('Instantaneous Risk', fontsize=10, color='blue')
+    ax_total.tick_params(axis='y', labelcolor='blue')
     ax_total.grid(True, alpha=0.3)
     ax_total.set_title('Total Acceleration Risk Over Time', fontsize=12)
     
-    # 每个 link 的子图
+    # 右 y 轴：累计风险
+    ax_total_twin = ax_total.twinx()
+    line2, = ax_total_twin.plot(cumulative_by_time['timestamp'], cumulative_by_time['cumulative_risk'], 
+                                'r-', label='Cumulative Risk', linewidth=2)
+    ax_total_twin.set_ylabel('Cumulative Risk', fontsize=10, color='red')
+    ax_total_twin.tick_params(axis='y', labelcolor='red')
+    
+    # 合并图例
+    lines = [line1, line2]
+    labels = [l.get_label() for l in lines]
+    ax_total.legend(lines, labels, loc='upper left')
+    
+    # 每个 link 的子图（使用双 y 轴，避免数值范围差异导致风险值看起来像0）
     for i, link_name in enumerate(links):
         link_data = frame_by_frame_df[frame_by_frame_df['link_name'] == link_name].copy()
         link_data = link_data.sort_values('timestamp')
         
         ax = axes[i + 1]
-        ax.plot(link_data['timestamp'], link_data['acc_magnitude'], 'b-', label='Acceleration Magnitude', linewidth=1.5)
-        ax.plot(link_data['timestamp'], link_data['cumulative_risk'], 'g-', label='Cumulative Risk', linewidth=2)
-        
-        ax.set_ylabel(f'{link_name.capitalize()} Risk', fontsize=10)
-        ax.legend(loc='upper right')
+        # 左 y 轴：加速度模长
+        line1, = ax.plot(link_data['timestamp'], link_data['acc_magnitude'], 'b-', 
+                         label='Acceleration (m/s²)', linewidth=1.5)
+        ax.set_ylabel(f'Acceleration (m/s²)', fontsize=10, color='blue')
+        ax.tick_params(axis='y', labelcolor='blue')
         ax.grid(True, alpha=0.3)
         ax.set_title(f'{link_name.capitalize()} Acceleration Risk Over Time', fontsize=12)
+        
+        # 右 y 轴：瞬时风险值（risk_value）和累计风险（cumulative_risk）
+        ax_twin = ax.twinx()
+        line2, = ax_twin.plot(link_data['timestamp'], link_data['risk_value'], 'r-', 
+                              label='Instant Risk (risk_value)', linewidth=2)
+        line3, = ax_twin.plot(link_data['timestamp'], link_data['cumulative_risk'], 'g--', 
+                              label='Cumulative Risk', linewidth=1.5, alpha=0.7)
+        ax_twin.set_ylabel('Risk Value', fontsize=10, color='red')
+        ax_twin.tick_params(axis='y', labelcolor='red')
+        
+        # 合并图例
+        lines = [line1, line2, line3]
+        labels = [l.get_label() for l in lines]
+        ax.legend(lines, labels, loc='upper left')
     
     axes[-1].set_xlabel('Time (s)', fontsize=10)
     plt.tight_layout()
@@ -1845,10 +1873,13 @@ def plot_contact_force_risk_curves(frame_by_frame_df: pd.DataFrame, output_path:
     else:
         axes = axes.flatten() if hasattr(axes, 'flatten') else [axes]
     
-    # 第一个子图：总 risk（所有 link 的 r_link 总和）
+    # 第一个子图：总 risk（瞬时风险和累计风险）
     frame_by_frame_df_sorted = frame_by_frame_df.sort_values('timestamp')
     total_risk_by_time = frame_by_frame_df_sorted.groupby('timestamp')['r_link'].sum().reset_index()
     total_risk_by_time = total_risk_by_time.sort_values('timestamp')
+    
+    # 计算累计风险
+    total_risk_by_time['cumulative_risk'] = total_risk_by_time['r_link'].cumsum()
     
     # 获取所有时间戳的最小值和最大值，用于设置 x 轴范围
     min_timestamp = frame_by_frame_df_sorted['timestamp'].min()
@@ -1857,28 +1888,53 @@ def plot_contact_force_risk_curves(frame_by_frame_df: pd.DataFrame, output_path:
     x_margin = max(0.01, timestamp_range * 0.02)  # 2% 边距，至少 0.01 秒
     
     ax_total = axes[0]
-    ax_total.plot(total_risk_by_time['timestamp'], total_risk_by_time['r_link'], 
-                  'k-', label='Total Contact Force Risk (sum of r_link)', linewidth=2)
+    # 左 y 轴：瞬时风险
+    line1, = ax_total.plot(total_risk_by_time['timestamp'], total_risk_by_time['r_link'], 
+                           'b-', label='Instantaneous Risk (sum of r_link)', linewidth=1.5)
     ax_total.set_xlim(min_timestamp - x_margin, max_timestamp + x_margin)
-    ax_total.set_ylabel('Total Risk', fontsize=10)
-    ax_total.legend(loc='upper right')
+    ax_total.set_ylabel('Instantaneous Risk', fontsize=10, color='blue')
+    ax_total.tick_params(axis='y', labelcolor='blue')
     ax_total.grid(True, alpha=0.3)
     ax_total.set_title('Total Contact Force Risk Over Time', fontsize=12)
     
-    # 每个 link 的子图
+    # 右 y 轴：累计风险
+    ax_total_twin = ax_total.twinx()
+    line2, = ax_total_twin.plot(total_risk_by_time['timestamp'], total_risk_by_time['cumulative_risk'], 
+                                'r-', label='Cumulative Risk', linewidth=2)
+    ax_total_twin.set_ylabel('Cumulative Risk', fontsize=10, color='red')
+    ax_total_twin.tick_params(axis='y', labelcolor='red')
+    
+    # 合并图例
+    lines = [line1, line2]
+    labels = [l.get_label() for l in lines]
+    ax_total.legend(lines, labels, loc='upper left')
+    
+    # 每个 link 的子图（使用双 y 轴，避免数值范围差异导致风险值看起来像0）
     for i, link_name in enumerate(links):
         link_data = frame_by_frame_df[frame_by_frame_df['link_name'] == link_name].copy()
         link_data = link_data.sort_values('timestamp')
         
         ax = axes[i + 1]
-        ax.plot(link_data['timestamp'], link_data['force_magnitude'], 'b-', label='Force Magnitude', linewidth=1.5)
-        ax.plot(link_data['timestamp'], link_data['r_link'], 'r-', label='Risk Value', linewidth=2)
+        # 左 y 轴：force_magnitude
+        line1, = ax.plot(link_data['timestamp'], link_data['force_magnitude'], 'b-', 
+                         label='Force Magnitude (N)', linewidth=1.5)
         ax.set_xlim(min_timestamp - x_margin, max_timestamp + x_margin)
-        
-        ax.set_ylabel(f'{link_name} Risk', fontsize=10)
-        ax.legend(loc='upper right')
+        ax.set_ylabel(f'Force (N)', fontsize=10, color='blue')
+        ax.tick_params(axis='y', labelcolor='blue')
         ax.grid(True, alpha=0.3)
         ax.set_title(f'{link_name} Contact Force Risk Over Time', fontsize=12)
+        
+        # 右 y 轴：r_link（风险值有独立的 y 轴，不会被压扁）
+        ax_twin = ax.twinx()
+        line2, = ax_twin.plot(link_data['timestamp'], link_data['r_link'], 'r-', 
+                              label='Risk Value (r_link)', linewidth=2)
+        ax_twin.set_ylabel('Risk Value', fontsize=10, color='red')
+        ax_twin.tick_params(axis='y', labelcolor='red')
+        
+        # 合并图例
+        lines = [line1, line2]
+        labels = [l.get_label() for l in lines]
+        ax.legend(lines, labels, loc='upper left')
     
     axes[-1].set_xlabel('Time (s) - Absolute Timestamp', fontsize=10)
     plt.tight_layout()
