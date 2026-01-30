@@ -26,6 +26,11 @@ contact_visualization:
   marker_size: 0.1    # 可视化标记的大小（箭头、球体等标记的尺寸）
   position_offset: 0.0 # 位置偏移量（用于调整可视化标记的位置）
 
+# 防护功能配置 - 控制碰撞时的虚拟护具
+protection:
+  enabled: true              # 是否启用防护功能（虚拟护具）
+  thickness: 12.0             # 护具厚度（mm），默认12mm
+
 # 模型参数 - 定义机器人的基本结构参数
 model_param:
   num_contacts: 4                    # 机器人接触点的数量（通常是脚部的4个接触点）

@@ -118,8 +118,9 @@ cd /home/wang22/engineai/engineai_ros2_workspace && conda activate engineai_ros2
 ./scripts/build_nodes.sh sim    # or colcon build --packages-select mujoco_simulator , or colcon build
 ./scripts/build_nodes_4090.sh sim
 source install/setup.bash 
-# ros2 launch mujoco_simulator mujoco_simulator.launch.py
-# 修改 sim_manager.h protection_enabled_ 启用护具功能（减少冲击力）csv_format:=csv or binary
+# ros2 launch mujoco_simulator mujoco_simulator.launch.py csv_format:=csv or binary
+# 修改 sim_manager.h protection_enabled_ 启用护具功能（减少冲击力）
+# 修改 rl_basic_param_XZL.yaml 的 enable_damping_mode, 启用摔倒damping mode 
 ros2 launch mujoco_simulator mujoco_simulator.launch.py save_contact_csv:=true save_joint_state_csv:=true save_sensor_vibration_csv:=true save_joint_forces_csv:=true csv_format:=csv
 
 # # 推倒采样仿真器 - 支持交互式干扰力控制
@@ -138,7 +139,7 @@ ros2 launch interface_example rl_basic_example_CHR.launch.py
 ## ground.xml friction="0.1"
 ## serial_pm_v2_mesh.xml foot 和 toe 的 friction=0.1
 ## pm_v2.yaml default_force_magnitude = 0.0, auto_sampling = true
-## rl_basic_param_XZL.yaml linear velocity = 2.0
+## rl_basic_param_XZL.yaml linear velocity = 1.0
 
 ## 绊倒采样
 ## pm_v2_mesh.xml, 取消 terrain.xml的注释
@@ -507,13 +508,40 @@ python3 scripts/calculate_fall_risk.py \
 
 
 
-# non
+# non_stumble
 python3 scripts/calculate_fall_risk.py \
-  --contact /home/wang22/data/mujoco_logs/non/contact_data_20260129_152540.csv \
-  --sensor-vibration /home/wang22/data/mujoco_logs/non/sensor_vibration_data_20260129_152540.csv \
-  --joint-state /home/wang22/data/mujoco_logs/non/joint_state_data_20260129_152540.csv \
-  --joint-forces /home/wang22/data/mujoco_logs/non/joint_forces_data_20260129_152540.csv \
-  --output /home/wang22/data/mujoco_logs/non/risk_results_20260129_152540 \
+  --contact /home/wang22/data/mujoco_logs/non_stumble/contact_data_20260130_130908.csv \
+  --sensor-vibration /home/wang22/data/mujoco_logs/non_stumble/sensor_vibration_data_20260130_130908.csv \
+  --joint-state /home/wang22/data/mujoco_logs/non_stumble/joint_state_data_20260130_130908.csv \
+  --joint-forces /home/wang22/data/mujoco_logs/non_stumble/joint_forces_data_20260130_130908.csv \
+  --output /home/wang22/data/mujoco_logs/non_stumble/risk_results_20260130_130908 \
+  --plot
+
+# non_slip
+python3 scripts/calculate_fall_risk.py \
+  --contact /home/wang22/data/mujoco_logs/non_slip/contact_data_20260130_133543.csv \
+  --sensor-vibration /home/wang22/data/mujoco_logs/non_slip/sensor_vibration_data_20260130_133543.csv \
+  --joint-state /home/wang22/data/mujoco_logs/non_slip/joint_state_data_20260130_133543.csv \
+  --joint-forces /home/wang22/data/mujoco_logs/non_slip/joint_forces_data_20260130_133543.csv \
+  --output /home/wang22/data/mujoco_logs/non_slip/risk_results_20260130_133543 \
+  --plot
+
+# non_poweroff
+python3 scripts/calculate_fall_risk.py \
+  --contact /home/wang22/data/mujoco_logs/non_poweroff/contact_data_20260130_131602.csv \
+  --sensor-vibration /home/wang22/data/mujoco_logs/non_poweroff/sensor_vibration_data_20260130_131602.csv \
+  --joint-state /home/wang22/data/mujoco_logs/non_poweroff/joint_state_data_20260130_131602.csv \
+  --joint-forces /home/wang22/data/mujoco_logs/non_poweroff/joint_forces_data_20260130_131602.csv \
+  --output /home/wang22/data/mujoco_logs/non_poweroff/risk_results_20260130_131602 \
+  --plot
+
+# non_push
+python3 scripts/calculate_fall_risk.py \
+  --contact /home/wang22/data/mujoco_logs/non_push/contact_data_20260130_132708.csv \
+  --sensor-vibration /home/wang22/data/mujoco_logs/non_push/sensor_vibration_data_20260130_132708.csv \
+  --joint-state /home/wang22/data/mujoco_logs/non_push/joint_state_data_20260130_132708.csv \
+  --joint-forces /home/wang22/data/mujoco_logs/non_push/joint_forces_data_20260130_132708.csv \
+  --output /home/wang22/data/mujoco_logs/non_push/risk_results_20260130_132708 \
   --plot
 
 # passive using risk-guided manner

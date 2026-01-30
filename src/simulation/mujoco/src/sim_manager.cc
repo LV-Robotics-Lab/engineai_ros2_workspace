@@ -625,6 +625,12 @@ bool SimManager::Initialize() {
   RCLCPP_INFO(logger, "Loaded perturbation parameters from YAML: force=%.1fN, torque=%.1fN.m, duration=%.1fs", 
               perturb_force_magnitude_, perturb_torque_magnitude_, perturb_duration_);
 
+  // 从YAML配置加载防护功能参数
+  protection_enabled_ = config_loader_->IsProtectionEnabled();
+  protection_thickness_ = config_loader_->GetProtectionThickness();
+  RCLCPP_INFO(logger, "Protection from YAML config: enabled=%s, thickness=%.1fmm", 
+              protection_enabled_ ? "YES" : "NO", protection_thickness_);
+
   // 初始化力插值计算器（用于柔性护具防护力计算）
   try {
     // 尝试多个可能的路径来找到RT-FEM.tsv文件

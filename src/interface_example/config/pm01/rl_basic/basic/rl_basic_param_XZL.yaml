@@ -101,7 +101,7 @@ initial_velocity:
   angular: [0.0, 0.0, 0.0]   # 初始角速度 [x, y, z] (rad/s)
 
 # Damping mode: 俯仰角 > 50° 或 < -50° 时进入 kp=0, kd=0.5；设为 false 则关闭
-enable_damping_mode: true
+enable_damping_mode: false
 
 # 扭矩限制
 torque_limit: True

@@ -61,6 +61,10 @@ class ConfigLoader {
   double GetInitialAngularVelocityY() const { return initial_angular_velocity_y_; }
   double GetInitialAngularVelocityZ() const { return initial_angular_velocity_z_; }
 
+  // 防护功能配置
+  bool IsProtectionEnabled() const { return protection_enabled_; }
+  double GetProtectionThickness() const { return protection_thickness_; }
+
   // Asset path related methods
   std::string GetModelFilePath() const;
   std::string GetResourceDir() const;
@@ -115,6 +119,10 @@ class ConfigLoader {
   double initial_angular_velocity_x_ = 0.0;  // 初始角速度X分量
   double initial_angular_velocity_y_ = 0.0;  // 初始角速度Y分量
   double initial_angular_velocity_z_ = 0.0;  // 初始角速度Z分量
+
+  // 防护功能配置
+  bool protection_enabled_ = false;          // 是否启用防护功能（虚拟护具）
+  double protection_thickness_ = 12.0;       // 护具厚度（mm），默认12mm
 };
 
 #endif  // CONFIG_LOADER_H_
