@@ -130,6 +130,13 @@ RosInterface::~RosInterface() {
     RCLCPP_INFO(node_->get_logger(), "Sensor vibration data saved to: %s", sensor_vibration_csv_file_path_.c_str());
   }
   
+  // 关闭Link动能CSV文件
+  if (link_kinetic_energy_csv_file_.is_open()) {
+    std::lock_guard<std::mutex> lock(link_kinetic_energy_csv_mutex_);
+    link_kinetic_energy_csv_file_.close();
+    RCLCPP_INFO(node_->get_logger(), "Link kinetic energy data saved to: %s", link_kinetic_energy_csv_file_path_.c_str());
+  }
+  
   // 报告队列统计信息
   if (contact_queue_dropped_ > 0) {
     RCLCPP_WARN(node_->get_logger(), "Contact data queue dropped %zu records during execution", contact_queue_dropped_);
@@ -163,6 +170,7 @@ bool RosInterface::Initialize() {
   node_->declare_parameter("save_joint_forces_csv", false);
   node_->declare_parameter("save_sensor_vibration_csv", false);
   node_->declare_parameter("save_joint_state_csv", false);
+  node_->declare_parameter("save_link_kinetic_energy_csv", false);
   node_->declare_parameter("csv_file_path", "");
   node_->declare_parameter("csv_save_frequency", 1);  // 每帧都保存
   node_->declare_parameter("csv_format", "csv");  // 格式：csv 或 binary
@@ -172,6 +180,7 @@ bool RosInterface::Initialize() {
   save_joint_forces_csv_ = node_->get_parameter("save_joint_forces_csv").as_bool();
   save_sensor_vibration_csv_ = node_->get_parameter("save_sensor_vibration_csv").as_bool();
   save_joint_state_csv_ = node_->get_parameter("save_joint_state_csv").as_bool();
+  save_link_kinetic_energy_csv_ = node_->get_parameter("save_link_kinetic_energy_csv").as_bool();
   csv_file_path_ = node_->get_parameter("csv_file_path").as_string();
   csv_save_frequency_ = node_->get_parameter("csv_save_frequency").as_int();
   csv_format_ = node_->get_parameter("csv_format").as_string();
@@ -295,6 +304,29 @@ bool RosInterface::Initialize() {
     } else {
       RCLCPP_ERROR(node_->get_logger(), "Failed to open joint state CSV file: %s", joint_state_csv_file_path_.c_str());
       save_joint_state_csv_ = false;
+    }
+  }
+  
+  // 初始化Link动能CSV文件（头部将在第一次保存时根据model写入）
+  if (save_link_kinetic_energy_csv_) {
+    std::stringstream ss_kinetic;
+    std::string ext = (csv_format_ == "binary") ? ".bin" : ".csv";
+    ss_kinetic << csv_dir << "/link_kinetic_energy_data_" << std::put_time(std::localtime(&time_t), "%Y%m%d_%H%M%S") << ext;
+    link_kinetic_energy_csv_file_path_ = ss_kinetic.str();
+    
+    std::lock_guard<std::mutex> lock(link_kinetic_energy_csv_mutex_);
+    if (csv_format_ == "binary") {
+      link_kinetic_energy_csv_file_.open(link_kinetic_energy_csv_file_path_, std::ios::out | std::ios::binary);
+    } else {
+      link_kinetic_energy_csv_file_.open(link_kinetic_energy_csv_file_path_, std::ios::out);
+    }
+    if (link_kinetic_energy_csv_file_.is_open()) {
+      // 注意：CSV头部将在第一次保存时根据model写入，因为此时还没有model
+      RCLCPP_INFO(node_->get_logger(), "Link kinetic energy data will be saved to: %s (format: %s)", 
+                  link_kinetic_energy_csv_file_path_.c_str(), csv_format_.c_str());
+    } else {
+      RCLCPP_ERROR(node_->get_logger(), "Failed to open link kinetic energy CSV file: %s", link_kinetic_energy_csv_file_path_.c_str());
+      save_link_kinetic_energy_csv_ = false;
     }
   }
   
@@ -508,7 +540,7 @@ void RosInterface::UpdateSimState(const mjModel* m, mjData* d) {
   // 检查是否有任何CSV需要保存
   bool any_csv_enabled = save_contact_csv_ || save_perturbation_csv_ || 
                          save_joint_forces_csv_ || save_sensor_vibration_csv_ || 
-                         save_joint_state_csv_;
+                         save_joint_state_csv_ || save_link_kinetic_energy_csv_;
   
   if (any_csv_enabled && !all_csv_enabled) {
     // 使用全局标志位控制CSV记录
@@ -732,6 +764,11 @@ void RosInterface::UpdateSimState(const mjModel* m, mjData* d) {
   // 保存关节状态数据到CSV（仅在reset后记录）
   if (save_joint_state_csv_ && all_csv_enabled) {
     SaveJointStateToCSV(m, d);
+  }
+
+  // 保存Link动能数据到CSV（仅在reset后记录）
+  if (save_link_kinetic_energy_csv_ && all_csv_enabled) {
+    SaveLinkKineticEnergyToCSV(m, d);
   }
 }
 
@@ -2712,6 +2749,258 @@ void RosInterface::SaveJointStateToCSV(const mjModel* m, mjData* d) {
     if (flush_counter >= 100) {
       joint_state_csv_file_.flush();
       flush_counter = 0;
+    }
+  }
+}
+
+/**
+ * @brief 保存Link动能数据到CSV文件（持续记录每个link的速度和能量）
+ * @param m MuJoCo模型指针
+ * @param d MuJoCo数据指针
+ * @details 记录每个link的：
+ *          - 线速度 (vel_x, vel_y, vel_z)
+ *          - 角速度 (angvel_x, angvel_y, angvel_z)
+ *          最后5列：
+ *          - total_linear_KE: 所有link的线动能总和 (0.5 * m * v^2)
+ *          - total_angular_KE: 所有link的角动能总和 (0.5 * I * ω^2)
+ *          - total_KE: 总动能 (linear + angular)
+ *          - total_PE: 总重力势能 (m * g * h)
+ *          - total_energy: 总机械能 (KE + PE)
+ */
+void RosInterface::SaveLinkKineticEnergyToCSV(const mjModel* m, mjData* d) {
+  if (!m || !d) return;
+  
+  // 检查是否启用CSV记录（在reset后）
+  if (!all_csv_enabled) {
+    return;
+  }
+  
+  static int frame_counter = 0;
+  static bool header_written = false;
+  frame_counter++;
+  
+  // 根据配置的频率决定是否保存
+  if (frame_counter % csv_save_frequency_ != 0) {
+    return;
+  }
+  
+  std::lock_guard<std::mutex> lock(link_kinetic_energy_csv_mutex_);
+  
+  if (!link_kinetic_energy_csv_file_.is_open()) {
+    return;
+  }
+  
+  // 第一次保存时写入CSV头部（因为初始化时没有model）
+  if (!header_written && csv_format_ == "csv") {
+    link_kinetic_energy_csv_file_ << "timestamp";
+    
+    // 每个body的速度列和动能列
+    for (int i = 0; i < m->nbody; i++) {
+      std::string body_name = m->names + m->name_bodyadr[i];
+      // 将body名称中的空格替换为下划线，避免CSV解析问题
+      for (char& c : body_name) {
+        if (c == ' ' || c == ',') c = '_';
+      }
+      // 线速度
+      link_kinetic_energy_csv_file_ << "," << body_name << "_vel_x";
+      link_kinetic_energy_csv_file_ << "," << body_name << "_vel_y";
+      link_kinetic_energy_csv_file_ << "," << body_name << "_vel_z";
+      // 角速度
+      link_kinetic_energy_csv_file_ << "," << body_name << "_angvel_x";
+      link_kinetic_energy_csv_file_ << "," << body_name << "_angvel_y";
+      link_kinetic_energy_csv_file_ << "," << body_name << "_angvel_z";
+      // 高度
+      link_kinetic_energy_csv_file_ << "," << body_name << "_height";
+      // 每个body的能量
+      link_kinetic_energy_csv_file_ << "," << body_name << "_linear_KE";
+      link_kinetic_energy_csv_file_ << "," << body_name << "_angular_KE";
+      link_kinetic_energy_csv_file_ << "," << body_name << "_PE";
+    }
+    
+    // 最后5列：线动能总和、角动能总和、总动能、重力势能、总机械能
+    link_kinetic_energy_csv_file_ << ",total_linear_KE,total_angular_KE,total_KE,total_PE,total_energy";
+    link_kinetic_energy_csv_file_ << "\n";
+    link_kinetic_energy_csv_file_.flush();
+    header_written = true;
+    RCLCPP_INFO(node_->get_logger(), "Link kinetic energy CSV header written with %d bodies (10 cols each: 6 vel + 1 height + 3 energy, plus 5 total energy cols)", m->nbody);
+  }
+  
+  if (csv_format_ == "binary") {
+    // 二进制格式写入
+    double sim_time = d->time;
+    link_kinetic_energy_csv_file_.write(reinterpret_cast<const char*>(&sim_time), sizeof(double));
+    
+    // 写入body数量
+    int32_t num_bodies = m->nbody;
+    link_kinetic_energy_csv_file_.write(reinterpret_cast<const char*>(&num_bodies), sizeof(int32_t));
+    
+    // 获取重力加速度（MuJoCo中重力通常是负的z方向）
+    double gravity_mag = std::sqrt(m->opt.gravity[0] * m->opt.gravity[0] + 
+                                    m->opt.gravity[1] * m->opt.gravity[1] + 
+                                    m->opt.gravity[2] * m->opt.gravity[2]);
+    // 重力方向（归一化）
+    double grav_dir[3] = {0, 0, -1};  // 默认向下
+    if (gravity_mag > 1e-6) {
+      grav_dir[0] = m->opt.gravity[0] / gravity_mag;
+      grav_dir[1] = m->opt.gravity[1] / gravity_mag;
+      grav_dir[2] = m->opt.gravity[2] / gravity_mag;
+    }
+    
+    // 计算并写入每个body的速度和动能
+    double total_linear_ke = 0.0;
+    double total_angular_ke = 0.0;
+    double total_pe = 0.0;
+    
+    for (int i = 0; i < m->nbody; i++) {
+      // 获取body质心的速度（cvel格式：[angvel_x, angvel_y, angvel_z, vel_x, vel_y, vel_z]）
+      double angvel_x = d->cvel[i * 6 + 0];
+      double angvel_y = d->cvel[i * 6 + 1];
+      double angvel_z = d->cvel[i * 6 + 2];
+      double vel_x = d->cvel[i * 6 + 3];
+      double vel_y = d->cvel[i * 6 + 4];
+      double vel_z = d->cvel[i * 6 + 5];
+      
+      // 获取body的质量和惯性
+      double mass = m->body_mass[i];
+      double I_xx = m->body_inertia[i * 3 + 0];
+      double I_yy = m->body_inertia[i * 3 + 1];
+      double I_zz = m->body_inertia[i * 3 + 2];
+      
+      // 计算线动能: KE_linear = 0.5 * m * v^2
+      double v_squared = vel_x * vel_x + vel_y * vel_y + vel_z * vel_z;
+      double linear_ke = 0.5 * mass * v_squared;
+      total_linear_ke += linear_ke;
+      
+      // 计算角动能: KE_angular = 0.5 * (I_xx * ωx^2 + I_yy * ωy^2 + I_zz * ωz^2)
+      // 注意：这是近似值，假设惯性张量在世界坐标系下近似对角
+      double angular_ke = 0.5 * (I_xx * angvel_x * angvel_x + 
+                                  I_yy * angvel_y * angvel_y + 
+                                  I_zz * angvel_z * angvel_z);
+      total_angular_ke += angular_ke;
+      
+      // 计算重力势能: PE = m * g * h（沿重力反方向的高度）
+      // xipos是body质心在世界坐标系下的位置
+      double pos_x = d->xipos[i * 3 + 0];
+      double pos_y = d->xipos[i * 3 + 1];
+      double pos_z = d->xipos[i * 3 + 2];
+      // 高度是沿重力反方向的投影（重力向下时，h = z）
+      double height = -(grav_dir[0] * pos_x + grav_dir[1] * pos_y + grav_dir[2] * pos_z);
+      double pe = mass * gravity_mag * height;
+      total_pe += pe;
+      
+      // 写入速度（6个double）
+      link_kinetic_energy_csv_file_.write(reinterpret_cast<const char*>(&vel_x), sizeof(double));
+      link_kinetic_energy_csv_file_.write(reinterpret_cast<const char*>(&vel_y), sizeof(double));
+      link_kinetic_energy_csv_file_.write(reinterpret_cast<const char*>(&vel_z), sizeof(double));
+      link_kinetic_energy_csv_file_.write(reinterpret_cast<const char*>(&angvel_x), sizeof(double));
+      link_kinetic_energy_csv_file_.write(reinterpret_cast<const char*>(&angvel_y), sizeof(double));
+      link_kinetic_energy_csv_file_.write(reinterpret_cast<const char*>(&angvel_z), sizeof(double));
+      // 写入高度（1个double）
+      link_kinetic_energy_csv_file_.write(reinterpret_cast<const char*>(&height), sizeof(double));
+      // 写入该body的能量（3个double：linear_KE, angular_KE, PE）
+      link_kinetic_energy_csv_file_.write(reinterpret_cast<const char*>(&linear_ke), sizeof(double));
+      link_kinetic_energy_csv_file_.write(reinterpret_cast<const char*>(&angular_ke), sizeof(double));
+      link_kinetic_energy_csv_file_.write(reinterpret_cast<const char*>(&pe), sizeof(double));
+    }
+    
+    // 写入总能量
+    double total_ke = total_linear_ke + total_angular_ke;
+    double total_energy = total_ke + total_pe;
+    link_kinetic_energy_csv_file_.write(reinterpret_cast<const char*>(&total_linear_ke), sizeof(double));
+    link_kinetic_energy_csv_file_.write(reinterpret_cast<const char*>(&total_angular_ke), sizeof(double));
+    link_kinetic_energy_csv_file_.write(reinterpret_cast<const char*>(&total_ke), sizeof(double));
+    link_kinetic_energy_csv_file_.write(reinterpret_cast<const char*>(&total_pe), sizeof(double));
+    link_kinetic_energy_csv_file_.write(reinterpret_cast<const char*>(&total_energy), sizeof(double));
+    
+    // 每N条记录flush一次
+    static int flush_counter_bin = 0;
+    flush_counter_bin++;
+    if (flush_counter_bin >= 100) {
+      link_kinetic_energy_csv_file_.flush();
+      flush_counter_bin = 0;
+    }
+  } else {
+    // CSV格式写入
+    link_kinetic_energy_csv_file_ << std::fixed << std::setprecision(6) << d->time;
+    
+    // 获取重力加速度（MuJoCo中重力通常是负的z方向）
+    double gravity_mag = std::sqrt(m->opt.gravity[0] * m->opt.gravity[0] + 
+                                    m->opt.gravity[1] * m->opt.gravity[1] + 
+                                    m->opt.gravity[2] * m->opt.gravity[2]);
+    // 重力方向（归一化）
+    double grav_dir[3] = {0, 0, -1};  // 默认向下
+    if (gravity_mag > 1e-6) {
+      grav_dir[0] = m->opt.gravity[0] / gravity_mag;
+      grav_dir[1] = m->opt.gravity[1] / gravity_mag;
+      grav_dir[2] = m->opt.gravity[2] / gravity_mag;
+    }
+    
+    // 计算总能量
+    double total_linear_ke = 0.0;
+    double total_angular_ke = 0.0;
+    double total_pe = 0.0;
+    
+    // 写入每个body的速度和动能，同时累加总能量
+    for (int i = 0; i < m->nbody; i++) {
+      // 获取body质心的速度（cvel格式：[angvel_x, angvel_y, angvel_z, vel_x, vel_y, vel_z]）
+      double angvel_x = d->cvel[i * 6 + 0];
+      double angvel_y = d->cvel[i * 6 + 1];
+      double angvel_z = d->cvel[i * 6 + 2];
+      double vel_x = d->cvel[i * 6 + 3];
+      double vel_y = d->cvel[i * 6 + 4];
+      double vel_z = d->cvel[i * 6 + 5];
+      
+      // 获取body的质量和惯性
+      double mass = m->body_mass[i];
+      double I_xx = m->body_inertia[i * 3 + 0];
+      double I_yy = m->body_inertia[i * 3 + 1];
+      double I_zz = m->body_inertia[i * 3 + 2];
+      
+      // 计算线动能: KE_linear = 0.5 * m * v^2
+      double v_squared = vel_x * vel_x + vel_y * vel_y + vel_z * vel_z;
+      double linear_ke = 0.5 * mass * v_squared;
+      total_linear_ke += linear_ke;
+      
+      // 计算角动能: KE_angular = 0.5 * (I_xx * ωx^2 + I_yy * ωy^2 + I_zz * ωz^2)
+      // 注意：这是近似值，假设惯性张量在世界坐标系下近似对角
+      double angular_ke = 0.5 * (I_xx * angvel_x * angvel_x + 
+                                  I_yy * angvel_y * angvel_y + 
+                                  I_zz * angvel_z * angvel_z);
+      total_angular_ke += angular_ke;
+      
+      // 计算重力势能: PE = m * g * h（沿重力反方向的高度）
+      // xipos是body质心在世界坐标系下的位置
+      double pos_x = d->xipos[i * 3 + 0];
+      double pos_y = d->xipos[i * 3 + 1];
+      double pos_z = d->xipos[i * 3 + 2];
+      // 高度是沿重力反方向的投影（重力向下时，h = z）
+      double height = -(grav_dir[0] * pos_x + grav_dir[1] * pos_y + grav_dir[2] * pos_z);
+      double pe = mass * gravity_mag * height;
+      total_pe += pe;
+      
+      // 写入速度（6列）
+      link_kinetic_energy_csv_file_ << "," << vel_x << "," << vel_y << "," << vel_z;
+      link_kinetic_energy_csv_file_ << "," << angvel_x << "," << angvel_y << "," << angvel_z;
+      // 写入高度（1列）
+      link_kinetic_energy_csv_file_ << "," << height;
+      // 写入该body的能量（3列：linear_KE, angular_KE, PE）
+      link_kinetic_energy_csv_file_ << "," << linear_ke << "," << angular_ke << "," << pe;
+    }
+    
+    // 写入最后5列：线动能总和、角动能总和、总动能、重力势能、总机械能
+    double total_ke = total_linear_ke + total_angular_ke;
+    double total_energy = total_ke + total_pe;
+    link_kinetic_energy_csv_file_ << "," << total_linear_ke << "," << total_angular_ke << "," << total_ke;
+    link_kinetic_energy_csv_file_ << "," << total_pe << "," << total_energy;
+    
+    link_kinetic_energy_csv_file_ << "\n";
+    
+    // 每N条记录flush一次
+    static int flush_counter_csv = 0;
+    flush_counter_csv++;
+    if (flush_counter_csv >= 100) {
+      link_kinetic_energy_csv_file_.flush();
+      flush_counter_csv = 0;
     }
   }
 }

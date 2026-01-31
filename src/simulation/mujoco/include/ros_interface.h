@@ -134,6 +134,12 @@ class RosInterface {
   std::ofstream joint_state_csv_file_;
   std::mutex joint_state_csv_mutex_;
 
+  // Link kinetic energy CSV logging parameters (持续记录每个link的动能)
+  bool save_link_kinetic_energy_csv_ = false;
+  std::string link_kinetic_energy_csv_file_path_;
+  std::ofstream link_kinetic_energy_csv_file_;
+  std::mutex link_kinetic_energy_csv_mutex_;
+
   // 异步写入数据结构
   struct ContactDataRow {
     double sim_time;
@@ -207,6 +213,9 @@ class RosInterface {
   
   // 关节状态数据记录函数（持续记录位置、速度、力矩）
   void SaveJointStateToCSV(const mjModel* m, mjData* d);
+  
+  // Link动能数据记录函数（持续记录每个link的动能 0.5*m*v^2）
+  void SaveLinkKineticEnergyToCSV(const mjModel* m, mjData* d);
 
   // Mutex for thread safety
   mutable std::mutex mtx_;

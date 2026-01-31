@@ -491,6 +491,86 @@ def read_binary_joint_forces_data(bin_path: str) -> pd.DataFrame:
     return pd.DataFrame(data)
 
 
+def read_binary_link_kinetic_energy_data(bin_path: str) -> pd.DataFrame:
+    """
+    读取二进制格式的link_kinetic_energy_data文件
+    
+    二进制格式：
+    - 每条记录：
+      - double timestamp
+      - int32_t num_bodies
+      - 每个body: double[10] (vel_x, vel_y, vel_z, angvel_x, angvel_y, angvel_z, height, linear_KE, angular_KE, PE)
+      - double total_linear_KE
+      - double total_angular_KE
+      - double total_KE
+      - double total_PE
+      - double total_energy
+    """
+    data = []
+    
+    with open(bin_path, 'rb') as f:
+        # 读取第一条记录来获取body数量
+        first_timestamp_bytes = f.read(8)
+        if len(first_timestamp_bytes) < 8:
+            return pd.DataFrame()
+        first_timestamp = struct.unpack('d', first_timestamp_bytes)[0]
+        
+        num_bodies_bytes = f.read(4)
+        if len(num_bodies_bytes) < 4:
+            return pd.DataFrame()
+        num_bodies = struct.unpack('i', num_bodies_bytes)[0]
+        
+        # 回到文件开头重新读取
+        f.seek(0)
+        
+        while True:
+            # 读取timestamp
+            timestamp_bytes = f.read(8)
+            if len(timestamp_bytes) < 8:
+                break
+            timestamp = struct.unpack('d', timestamp_bytes)[0]
+            
+            # 读取body数量
+            num_bodies_bytes = f.read(4)
+            if len(num_bodies_bytes) < 4:
+                break
+            num_bodies = struct.unpack('i', num_bodies_bytes)[0]
+            
+            row = {'timestamp': timestamp}
+            
+            # 读取每个body的速度、高度和能量
+            for i in range(num_bodies):
+                body_data = f.read(80)  # 10 * 8 bytes (6 vel + 1 height + 3 energy)
+                if len(body_data) < 80:
+                    break
+                vals = struct.unpack('10d', body_data)
+                row[f'body_{i}_vel_x'] = vals[0]
+                row[f'body_{i}_vel_y'] = vals[1]
+                row[f'body_{i}_vel_z'] = vals[2]
+                row[f'body_{i}_angvel_x'] = vals[3]
+                row[f'body_{i}_angvel_y'] = vals[4]
+                row[f'body_{i}_angvel_z'] = vals[5]
+                row[f'body_{i}_height'] = vals[6]
+                row[f'body_{i}_linear_KE'] = vals[7]
+                row[f'body_{i}_angular_KE'] = vals[8]
+                row[f'body_{i}_PE'] = vals[9]
+            
+            # 读取能量数据
+            energy_bytes = f.read(40)  # 5 * 8 bytes
+            if len(energy_bytes) < 40:
+                break
+            energies = struct.unpack('5d', energy_bytes)
+            row['total_linear_KE'] = energies[0]
+            row['total_angular_KE'] = energies[1]
+            row['total_KE'] = energies[2]
+            row['total_PE'] = energies[3]
+            row['total_energy'] = energies[4]
+            
+            data.append(row)
+    
+    return pd.DataFrame(data)
+
+
 def load_data_file(file_path: str) -> pd.DataFrame:
     """
     根据文件扩展名自动选择CSV或二进制格式读取
@@ -514,6 +594,8 @@ def load_data_file(file_path: str) -> pd.DataFrame:
             return read_binary_perturbation_data(file_path)
         elif 'joint_forces_data' in filename:
             return read_binary_joint_forces_data(file_path)
+        elif 'link_kinetic_energy_data' in filename:
+            return read_binary_link_kinetic_energy_data(file_path)
         else:
             print(f"警告: 无法识别二进制文件类型: {file_path}")
             return pd.DataFrame()
@@ -2032,6 +2114,247 @@ def plot_joint_wrench_risk_curves(frame_by_frame_df: pd.DataFrame, output_path: 
     plt.close()
 
 
+def get_link_group(body_name: str) -> str:
+    """
+    根据 body 名称返回分组名称
+    分组规则：
+    - Body: base, torso, head
+    - Shoulder: 包含 shoulder
+    - Elbow: 包含 elbow
+    - Hip: 包含 hip
+    - Knee: 包含 knee 或 ankle
+    - Skip: foot（质量几乎为零，忽略）、world
+    """
+    name_lower = body_name.lower()
+    
+    # 忽略 foot（质量几乎为零）和 world
+    if 'foot' in name_lower or name_lower == 'world':
+        return None  # 返回 None 表示跳过
+    
+    # Body 组: base, torso, head
+    if any(keyword in name_lower for keyword in ['base', 'torso', 'head']):
+        return 'Body'
+    
+    # Shoulder 组
+    if 'shoulder' in name_lower:
+        return 'Shoulder'
+    
+    # Elbow 组
+    if 'elbow' in name_lower:
+        return 'Elbow'
+    
+    # Hip 组
+    if 'hip' in name_lower:
+        return 'Hip'
+    
+    # Knee 组（包括 ankle）
+    if 'knee' in name_lower or 'ankle' in name_lower:
+        return 'Knee'
+    
+    # 其他归入 Other
+    return 'Other'
+
+
+def plot_link_energy_curves(energy_df: pd.DataFrame, output_path: Optional[str] = None):
+    """
+    绘制link能量曲线（动能、势能、总能量）
+    
+    参数:
+        energy_df: link动能数据 DataFrame，应包含列：
+            - timestamp: 时间戳
+            - 每个body的速度列: {body_name}_vel_x/y/z, {body_name}_angvel_x/y/z
+            - total_linear_KE: 总线动能
+            - total_angular_KE: 总角动能
+            - total_KE: 总动能
+            - total_PE: 总重力势能
+            - total_energy: 总机械能
+        output_path: 图片保存路径（可选）
+    """
+    if energy_df.empty:
+        print("警告: link能量数据为空，无法绑图")
+        return
+    
+    # 检查必要的总能量列
+    required_cols = ['timestamp', 'total_linear_KE', 'total_angular_KE', 'total_KE', 'total_PE', 'total_energy']
+    missing_cols = [col for col in required_cols if col not in energy_df.columns]
+    if missing_cols:
+        print(f"警告: link能量数据缺少必要的列: {missing_cols}")
+        return
+    
+    # 按时间戳排序
+    energy_df = energy_df.sort_values('timestamp').reset_index(drop=True)
+    timestamps = energy_df['timestamp'].values
+    min_t = timestamps.min()
+    max_t = timestamps.max()
+    t_range = max_t - min_t
+    x_margin = max(0.01, t_range * 0.02)
+    
+    # 提取所有 body 名称（从列名中提取）
+    # 列名格式: {body_name}_vel_x, {body_name}_vel_y, {body_name}_vel_z, 
+    #           {body_name}_angvel_x, {body_name}_angvel_y, {body_name}_angvel_z
+    body_names = set()
+    for col in energy_df.columns:
+        if col.endswith('_vel_x'):
+            body_name = col[:-6]  # 去掉 '_vel_x'
+            body_names.add(body_name)
+    body_names = sorted(body_names)
+    
+    print(f"  找到 {len(body_names)} 个 body: {body_names}")
+    
+    # 按组分类 body（跳过 foot 等质量为零的 link）
+    group_bodies = {}  # group_name -> [body_names]
+    skipped_bodies = []
+    for body_name in body_names:
+        group = get_link_group(body_name)
+        if group is None:
+            skipped_bodies.append(body_name)
+            continue
+        if group not in group_bodies:
+            group_bodies[group] = []
+        group_bodies[group].append(body_name)
+    
+    if skipped_bodies:
+        print(f"  跳过质量为零的 body: {skipped_bodies}")
+    
+    # 定义分组顺序
+    group_order = ['Body', 'Shoulder', 'Elbow', 'Hip', 'Knee', 'Other']
+    # 过滤掉没有数据的组
+    groups = [g for g in group_order if g in group_bodies]
+    
+    print(f"  分组结果:")
+    for g in groups:
+        print(f"    {g}: {group_bodies[g]}")
+    
+    # 计算每组的能量（KE 和 PE）
+    # 优先使用 linear_KE、angular_KE、PE 列，如果不存在则用 v^2 近似
+    group_linear_ke = {}   # group_name -> array of linear KE for each timestamp
+    group_angular_ke = {}  # group_name -> array of angular KE for each timestamp
+    group_pe = {}          # group_name -> array of PE for each timestamp
+    use_real_energy = False    # 是否使用真正的能量列
+    
+    # 检查是否有能量列
+    sample_body = body_names[0] if body_names else None
+    if sample_body and f'{sample_body}_linear_KE' in energy_df.columns:
+        use_real_energy = True
+        has_pe = f'{sample_body}_PE' in energy_df.columns
+        print(f"  使用真正的能量数据 (linear_KE, angular_KE" + (", PE)" if has_pe else ")"))
+    else:
+        has_pe = False
+        print(f"  未找到能量列，使用 v² 近似")
+    
+    for group in groups:
+        linear_ke_sum = np.zeros(len(energy_df))
+        angular_ke_sum = np.zeros(len(energy_df))
+        pe_sum = np.zeros(len(energy_df))
+        for body_name in group_bodies[group]:
+            if use_real_energy:
+                # 使用真正的能量列
+                linear_ke_col = f'{body_name}_linear_KE'
+                angular_ke_col = f'{body_name}_angular_KE'
+                pe_col = f'{body_name}_PE'
+                if linear_ke_col in energy_df.columns:
+                    linear_ke_sum += energy_df[linear_ke_col].values
+                if angular_ke_col in energy_df.columns:
+                    angular_ke_sum += energy_df[angular_ke_col].values
+                if pe_col in energy_df.columns:
+                    pe_sum += energy_df[pe_col].values
+            else:
+                # 使用 v^2 近似
+                vel_x_col = f'{body_name}_vel_x'
+                vel_y_col = f'{body_name}_vel_y'
+                vel_z_col = f'{body_name}_vel_z'
+                if all(col in energy_df.columns for col in [vel_x_col, vel_y_col, vel_z_col]):
+                    vel_x = energy_df[vel_x_col].values
+                    vel_y = energy_df[vel_y_col].values
+                    vel_z = energy_df[vel_z_col].values
+                    linear_ke_sum += vel_x**2 + vel_y**2 + vel_z**2  # 近似
+        group_linear_ke[group] = linear_ke_sum
+        group_angular_ke[group] = angular_ke_sum
+        group_pe[group] = pe_sum
+    
+    # 创建子图：1个总能量图 + len(groups) 个分组图
+    n_groups = len(groups)
+    n_subplots = 1 + n_groups
+    fig, axes = plt.subplots(n_subplots, 1, figsize=(14, 3.5 * n_subplots), sharex=True)
+    if n_subplots == 1:
+        axes = [axes]
+    
+    # 定义颜色
+    colors = {
+        'Body': '#E74C3C',      # 红色
+        'Shoulder': '#3498DB',  # 蓝色
+        'Elbow': '#2ECC71',     # 绿色
+        'Hip': '#9B59B6',       # 紫色
+        'Knee': '#F39C12',      # 橙色
+        'Other': '#95A5A6',     # 灰色
+    }
+    
+    # ===== 子图1：总能量（KE、PE、ME）=====
+    ax_total = axes[0]
+    ax_total.plot(timestamps, energy_df['total_KE'], 'r-', label='Total KE', linewidth=1.5)
+    ax_total.plot(timestamps, energy_df['total_PE'], 'b-', label='Total PE', linewidth=1.5)
+    ax_total.plot(timestamps, energy_df['total_energy'], 'k-', label='Total ME (KE+PE)', linewidth=2)
+    ax_total.set_xlim(min_t - x_margin, max_t + x_margin)
+    ax_total.set_ylabel('Energy (J)', fontsize=11)
+    ax_total.legend(loc='upper right')
+    ax_total.grid(True, alpha=0.3)
+    ax_total.set_title('Total Energy: KE (Kinetic), PE (Potential), ME (Mechanical)', fontsize=12)
+    
+    # ===== 子图2~N：各分组的能量（KE 和 PE）=====
+    for i, group in enumerate(groups):
+        ax = axes[i + 1]
+        color = colors.get(group, '#333333')
+        
+        linear_ke = group_linear_ke[group]
+        angular_ke = group_angular_ke[group]
+        total_ke = linear_ke + angular_ke
+        pe = group_pe[group]
+        
+        if use_real_energy:
+            # 绘制真正的能量曲线（双Y轴：左轴KE，右轴PE）
+            ax.plot(timestamps, total_ke, color=color, linewidth=1.5, label=f'Total KE')
+            ax.fill_between(timestamps, 0, total_ke, color=color, alpha=0.2)
+            ax.set_ylabel('Kinetic Energy (J)', fontsize=11, color=color)
+            ax.tick_params(axis='y', labelcolor=color)
+            
+            # 创建右侧Y轴显示PE
+            ax2 = ax.twinx()
+            ax2.plot(timestamps, pe, color='#1ABC9C', linewidth=1.5, label=f'PE', linestyle='--')
+            ax2.set_ylabel('Potential Energy (J)', fontsize=11, color='#1ABC9C')
+            ax2.tick_params(axis='y', labelcolor='#1ABC9C')
+            
+            # 合并图例
+            lines1, labels1 = ax.get_legend_handles_labels()
+            lines2, labels2 = ax2.get_legend_handles_labels()
+            ax.legend(lines1 + lines2, labels1 + labels2, loc='upper right')
+        else:
+            # 绘制 v^2 近似曲线
+            ax.plot(timestamps, linear_ke, color=color, linewidth=1.5, label=f'{group} Σv²')
+            ax.fill_between(timestamps, 0, linear_ke, color=color, alpha=0.2)
+            ax.set_ylabel('Σv² (m²/s²)', fontsize=11)
+        
+        ax.set_xlim(min_t - x_margin, max_t + x_margin)
+        ax.legend(loc='upper right')
+        ax.grid(True, alpha=0.3)
+        
+        # 显示该组包含的 body
+        body_list = ', '.join(group_bodies[group])
+        ax.set_title(f'{group} Group: {body_list}', fontsize=11)
+    
+    # 设置最后一个子图的 x 轴标签
+    axes[-1].set_xlabel('Time (s)', fontsize=11)
+    
+    plt.tight_layout()
+    
+    if output_path:
+        plt.savefig(output_path, dpi=150, bbox_inches='tight')
+        print(f"Link能量曲线图已保存到: {output_path}")
+    else:
+        plt.show()
+    
+    plt.close()
+
+
 def calculate_joint_wrench_risk(
     joint_forces_df: pd.DataFrame,
     time_collision: np.ndarray,
@@ -2608,6 +2931,33 @@ def main():
                         print("joint_wrench_risk 数据为空，跳过绘图")
                 except Exception as e:
                     print(f"警告: 绘制 joint_wrench_risk 曲线失败: {e}")
+    
+    # ==================== Link Energy 绘图（独立于 risk 计算） ====================
+    if args.plot:
+        # 根据 contact 文件路径自动查找对应的 link_kinetic_energy_data 文件
+        contact_path = Path(args.contact)
+        contact_dir = contact_path.parent
+        contact_stem = contact_path.stem  # e.g., contact_data_20260131_183505
+        
+        # 提取时间戳部分（假设格式为 xxx_data_YYYYMMDD_HHMMSS）
+        import re
+        timestamp_match = re.search(r'(\d{8}_\d{6})', contact_stem)
+        if timestamp_match:
+            timestamp_str = timestamp_match.group(1)
+            # 尝试查找对应的 link_kinetic_energy_data 文件
+            for ext in ['.csv', '.bin']:
+                link_energy_path = contact_dir / f"link_kinetic_energy_data_{timestamp_str}{ext}"
+                if link_energy_path.exists():
+                    print(f"\n找到 Link Energy 数据文件: {link_energy_path}")
+                    link_energy_df = load_data_file(str(link_energy_path))
+                    if not link_energy_df.empty:
+                        print(f"  Link能量数据: {len(link_energy_df)} 条记录")
+                        energy_plot_path = f"{output_base}_link_energy_curves.png"
+                        try:
+                            plot_link_energy_curves(link_energy_df, energy_plot_path)
+                        except Exception as e:
+                            print(f"警告: 绘制 link energy 曲线失败: {e}")
+                    break  # 找到并处理后退出循环
 
 
 if __name__ == '__main__':

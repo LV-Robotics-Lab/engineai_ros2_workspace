@@ -121,7 +121,7 @@ source install/setup.bash
 # ros2 launch mujoco_simulator mujoco_simulator.launch.py csv_format:=csv or binary
 # 修改 pm_v2.yaml protection: enabled:true 启用护具功能（thickness:设置厚度）
 # 修改 rl_basic_param_XZL.yaml 的 enable_damping_mode, 启用摔倒damping mode 
-ros2 launch mujoco_simulator mujoco_simulator.launch.py save_contact_csv:=true save_joint_state_csv:=true save_sensor_vibration_csv:=true save_joint_forces_csv:=true csv_format:=csv
+ros2 launch mujoco_simulator mujoco_simulator.launch.py save_contact_csv:=true save_joint_state_csv:=true save_sensor_vibration_csv:=true save_joint_forces_csv:=true save_link_kinetic_energy_csv:=true csv_format:=csv
 
 # # 推倒采样仿真器 - 支持交互式干扰力控制
 # # 基本启动
@@ -498,12 +498,14 @@ python3 scripts/calculate_fall_risk.py \
   --output /home/wang22/data/mujoco_logs/active_mimic/risk_results_20260128_211558 \
   --plot
 
+# --plot 会自动查找同目录下的 link_kinetic_energy_data_*.csv 并绘制能量曲线
+# 需要仿真时开启 save_link_kinetic_energy_csv: true 才会生成该文件
 python3 scripts/calculate_fall_risk.py \
-  --contact /home/wang22/data/mujoco_logs/contact_data_20260130_215818.csv \
-  --sensor-vibration /home/wang22/data/mujoco_logs/sensor_vibration_data_20260130_215818.csv \
-  --joint-state /home/wang22/data/mujoco_logs/joint_state_data_20260130_215818.csv \
-  --joint-forces /home/wang22/data/mujoco_logs/joint_forces_data_20260130_215818.csv \
-  --output /home/wang22/data/mujoco_logs/risk_results_20260130_215818 \
+  --contact /home/wang22/data/mujoco_logs/contact_data_20260131_192508.csv \
+  --sensor-vibration /home/wang22/data/mujoco_logs/sensor_vibration_data_20260131_192508.csv \
+  --joint-state /home/wang22/data/mujoco_logs/joint_state_data_20260131_192508.csv \
+  --joint-forces /home/wang22/data/mujoco_logs/joint_forces_data_20260131_192508.csv \
+  --output /home/wang22/data/mujoco_logs/risk_results_20260131_192508 \
   --plot
 
 

@@ -62,6 +62,12 @@ def generate_launch_description():
         description='是否保存关节状态数据到CSV文件（持续记录关节位置、速度、力矩） (true/false)'
     )
     
+    declare_save_link_kinetic_energy_csv_arg = DeclareLaunchArgument(
+        'save_link_kinetic_energy_csv',
+        default_value='false',
+        description='是否保存Link动能数据到CSV文件（持续记录每个link的速度和动能） (true/false)'
+    )
+    
     declare_csv_format_arg = DeclareLaunchArgument(
         'csv_format',
         default_value='csv',
@@ -129,6 +135,7 @@ def generate_launch_description():
         save_joint_forces_csv_str = LaunchConfiguration('save_joint_forces_csv').perform(context)
         save_sensor_vibration_csv_str = LaunchConfiguration('save_sensor_vibration_csv').perform(context)
         save_joint_state_csv_str = LaunchConfiguration('save_joint_state_csv').perform(context)
+        save_link_kinetic_energy_csv_str = LaunchConfiguration('save_link_kinetic_energy_csv').perform(context)
         csv_format = LaunchConfiguration('csv_format').perform(context)
         csv_file_path = LaunchConfiguration('csv_file_path').perform(context)
         urdf_file = LaunchConfiguration('urdf_file').perform(context)
@@ -144,6 +151,7 @@ def generate_launch_description():
         save_joint_forces_csv = save_joint_forces_csv_str.lower() == 'true'
         save_sensor_vibration_csv = save_sensor_vibration_csv_str.lower() == 'true'
         save_joint_state_csv = save_joint_state_csv_str.lower() == 'true'
+        save_link_kinetic_energy_csv = save_link_kinetic_energy_csv_str.lower() == 'true'
 
         # 读取URDF文件内容
         try:
@@ -188,6 +196,7 @@ def generate_launch_description():
                 {'save_joint_forces_csv': save_joint_forces_csv},  # 是否保存关节反力CSV
                 {'save_sensor_vibration_csv': save_sensor_vibration_csv},  # 是否保存传感器震动CSV
                 {'save_joint_state_csv': save_joint_state_csv},  # 是否保存关节状态CSV
+                {'save_link_kinetic_energy_csv': save_link_kinetic_energy_csv},  # 是否保存Link动能CSV
                 {'csv_format': csv_format},  # CSV格式：csv 或 binary
                 {'csv_file_path': csv_file_path},    # CSV文件路径
                 {'perturb_force_magnitude': float(perturb_force)},      # 干扰力大小
@@ -242,6 +251,7 @@ def generate_launch_description():
         declare_save_joint_forces_csv_arg,
         declare_save_sensor_vibration_csv_arg,
         declare_save_joint_state_csv_arg,
+        declare_save_link_kinetic_energy_csv_arg,
         declare_csv_format_arg,
         declare_csv_path_arg,
         declare_urdf_file_arg,
