@@ -1,3 +1,4 @@
+#include <array>
 #include <chrono>
 #include <memory>
 #include <rclcpp/logging.hpp>
@@ -21,6 +22,25 @@
 using namespace std::chrono_literals;
 
 namespace example {
+
+// 8个方向的枚举定义
+enum class MimicDirection {
+  FORWARD = 0,       // 前 (+X)
+  FORWARD_LEFT,      // 前左 (+X, +Y)
+  LEFT,              // 左 (+Y)
+  BACKWARD_LEFT,     // 后左 (-X, +Y)
+  BACKWARD,          // 后 (-X)
+  BACKWARD_RIGHT,    // 后右 (-X, -Y)
+  RIGHT,             // 右 (-Y)
+  FORWARD_RIGHT,     // 前右 (+X, -Y)
+  COUNT = 8
+};
+
+// 方向名称（用于日志和配置）
+const std::array<std::string, 8> kMimicDirectionNames = {
+  "forward", "forward_left", "left", "backward_left",
+  "backward", "backward_right", "right", "forward_right"
+};
 
 class RlBasicRunnerCHR : public rclcpp::Node {
  public:
@@ -120,28 +140,10 @@ class RlBasicRunnerCHR : public rclcpp::Node {
         return false;
       }
       
-      std::string mimic_policy_path;
-      if (!current_profile_.policy_path.empty()) {
-        if (current_profile_.policy_path[0] == '/') {
-          mimic_policy_path = current_profile_.policy_path;
-        } else {
-          std::string config_based = config_file_dir_ + "/" + current_profile_.policy_path;
-          std::ifstream test(config_based);
-          if (test.good()) {
-            mimic_policy_path = config_based;
-            test.close();
-          } else {
-            mimic_policy_path = workspace_root + "/" + current_profile_.policy_path;
-          }
-        }
-      } else if (config_["policy_file"]) {
-        mimic_policy_path = config_file_dir_ + "/" + config_["policy_file"].as<std::string>();
-      } else {
-        return false;
-      }
+      // 加载8个方向的 mimic Policy
+      LoadMimicDirectionalPolicies(workspace_root);
       
       mlp_net_walking_ = std::make_unique<math::MnnModel>(walking_policy_path);
-      mlp_net_mimic_ = std::make_unique<math::MnnModel>(mimic_policy_path);
       mlp_net_ = mlp_net_walking_.get();
       mlp_net_action_walking_.setZero(walking_num_actions_);
       mlp_net_action_.setZero(num_actions_);
@@ -281,6 +283,26 @@ class RlBasicRunnerCHR : public rclcpp::Node {
     if (config_["action_scale85"]) {
       action_scale85_ = math::ConcatenateVectors(LoadVectorArrayFromYaml(config_["action_scale85"]));
     }
+    
+    // 加载摔倒检测参数
+    if (config_["fall_detection"]) {
+      const YAML::Node& fall_config = config_["fall_detection"];
+      if (fall_config["tilt_threshold"]) {
+        fall_tilt_threshold_ = fall_config["tilt_threshold"].as<double>();
+      }
+      if (fall_config["omega_threshold"]) {
+        fall_omega_threshold_ = fall_config["omega_threshold"].as<double>();
+      }
+      if (fall_config["confirm_frames"]) {
+        fall_confirm_frames_ = fall_config["confirm_frames"].as<int>();
+      }
+      if (fall_config["fast_fall_omega"]) {
+        fast_fall_omega_ = fall_config["fast_fall_omega"].as<double>();
+      }
+      if (fall_config["fast_fall_confirm_frames"]) {
+        fast_fall_confirm_frames_ = fall_config["fast_fall_confirm_frames"].as<int>();
+      }
+    }
   }
   
   std::string GetWorkspaceRoot(const std::string& config_dir) {
@@ -364,6 +386,19 @@ class RlBasicRunnerCHR : public rclcpp::Node {
     walking_observation_clip_ = config_walking_["observation_clip"] ? config_walking_["observation_clip"].as<double>() : 100.0;
     walking_transition_time_ = config_walking_["transition_time"] ? config_walking_["transition_time"].as<double>() : 0.5;
     
+    // 加载 walking 模式的 joint_kp 和 joint_kd（与 XZL yaml 匹配）
+    if (config_walking_["joint_kp"]) {
+      walking_joint_kp_ = math::ConcatenateVectors(LoadVectorArrayFromYaml(config_walking_["joint_kp"]));
+    } else {
+      walking_joint_kp_ = joint_kp_;  // 如果没有配置，使用默认值
+    }
+    
+    if (config_walking_["joint_kd"]) {
+      walking_joint_kd_ = math::ConcatenateVectors(LoadVectorArrayFromYaml(config_walking_["joint_kd"]));
+    } else {
+      walking_joint_kd_ = joint_kd_;  // 如果没有配置，使用默认值
+    }
+    
     if (config_walking_["imu_install_delta_bias"]) {
       if (config_walking_["imu_install_delta_bias"].IsScalar()) {
         double bias_val = config_walking_["imu_install_delta_bias"].as<double>();
@@ -414,6 +449,103 @@ class RlBasicRunnerCHR : public rclcpp::Node {
         return;
       }
     }
+  }
+  
+  // 加载8个方向的 mimic Policy
+  void LoadMimicDirectionalPolicies(const std::string& workspace_root) {
+    // 检查是否有 mimic_policies 配置节点
+    if (config_["mimic_policies"]) {
+      const YAML::Node& mimic_policies = config_["mimic_policies"];
+      
+      for (size_t i = 0; i < static_cast<size_t>(MimicDirection::COUNT); ++i) {
+        const std::string& dir_name = kMimicDirectionNames[i];
+        if (mimic_policies[dir_name]) {
+          std::string policy_file = mimic_policies[dir_name].as<std::string>();
+          std::string policy_path = ResolvePolicyPath(policy_file, workspace_root);
+          
+          if (!policy_path.empty()) {
+            try {
+              mlp_net_mimic_directions_[i] = std::make_unique<math::MnnModel>(policy_path);
+              RCLCPP_INFO(get_logger(), "Loaded mimic policy for direction %s: %s", 
+                          dir_name.c_str(), policy_path.c_str());
+            } catch (const std::exception& e) {
+              RCLCPP_ERROR(get_logger(), "Failed to load mimic policy for direction %s: %s", 
+                           dir_name.c_str(), e.what());
+            }
+          }
+        }
+      }
+    } else {
+      // 回退：尝试从 motion_states 中的 policy_path 加载单个 Policy（用于所有方向）
+      std::string mimic_policy_path;
+      if (!current_profile_.policy_path.empty()) {
+        mimic_policy_path = ResolvePolicyPath(current_profile_.policy_path, workspace_root);
+      } else if (config_["policy_file"]) {
+        mimic_policy_path = config_file_dir_ + "/" + config_["policy_file"].as<std::string>();
+      }
+      
+      if (!mimic_policy_path.empty()) {
+        RCLCPP_INFO(get_logger(), "No mimic_policies config found, loading single policy for all directions: %s", 
+                    mimic_policy_path.c_str());
+        try {
+          // 加载一个 Policy，并将其复制到所有方向
+          auto single_policy = std::make_unique<math::MnnModel>(mimic_policy_path);
+          // 第一个方向使用原始 Policy
+          mlp_net_mimic_directions_[0] = std::move(single_policy);
+          // 其他方向也加载相同的 Policy（因为 MLP 结构相同）
+          for (size_t i = 1; i < static_cast<size_t>(MimicDirection::COUNT); ++i) {
+            mlp_net_mimic_directions_[i] = std::make_unique<math::MnnModel>(mimic_policy_path);
+          }
+        } catch (const std::exception& e) {
+          RCLCPP_ERROR(get_logger(), "Failed to load single mimic policy: %s", e.what());
+        }
+      }
+    }
+    
+    // 确保至少有一个 Policy 被加载
+    bool any_loaded = false;
+    for (size_t i = 0; i < static_cast<size_t>(MimicDirection::COUNT); ++i) {
+      if (mlp_net_mimic_directions_[i]) {
+        any_loaded = true;
+        break;
+      }
+    }
+    
+    if (!any_loaded) {
+      RCLCPP_WARN(get_logger(), "No mimic policies loaded! Mimic mode may not work correctly.");
+    }
+  }
+  
+  // 解析 Policy 文件路径（支持相对路径和绝对路径）
+  std::string ResolvePolicyPath(const std::string& policy_file, const std::string& workspace_root) {
+    if (policy_file.empty()) {
+      return "";
+    }
+    
+    if (policy_file[0] == '/') {
+      // 绝对路径
+      return policy_file;
+    }
+    
+    // 尝试相对于配置目录
+    std::string config_based = config_file_dir_ + "/" + policy_file;
+    std::ifstream test(config_based);
+    if (test.good()) {
+      test.close();
+      return config_based;
+    }
+    
+    // 尝试相对于工作空间根目录
+    std::string workspace_based = workspace_root + "/" + policy_file;
+    test.open(workspace_based);
+    if (test.good()) {
+      test.close();
+      return workspace_based;
+    }
+    
+    RCLCPP_WARN(get_logger(), "Policy file not found: %s (tried config-based: %s, workspace-based: %s)",
+                policy_file.c_str(), config_based.c_str(), workspace_based.c_str());
+    return "";
   }
   
   void LoadCsvTrajectory(const std::string& workspace_root) {
@@ -578,35 +710,6 @@ class RlBasicRunnerCHR : public rclcpp::Node {
     return pitch;
   }
   
-  // 获取当前 IMU 俯仰角度（使用 walking 模式的 IMU bias）
-  double GetCurrentPitchAngleWalking() {
-    auto imu = message_handler_->GetLatestImu();
-    if (!imu) {
-      RCLCPP_WARN(get_logger(), "IMU data not available, using default pitch angle 0.0");
-      return 0.0;
-    }
-    
-    // 应用 walking 模式的 IMU 安装偏差校正
-    Eigen::AngleAxisd rollAngle(walking_imu_install_bias_.x(), Eigen::Vector3d::UnitX());
-    Eigen::AngleAxisd pitchAngle(walking_imu_install_bias_.y(), Eigen::Vector3d::UnitY());
-    Eigen::AngleAxisd yawAngle(walking_imu_install_bias_.z(), Eigen::Vector3d::UnitZ());
-    Eigen::Quaterniond q_install = yawAngle * pitchAngle * rollAngle;
-    Eigen::Matrix3d R_install = q_install.toRotationMatrix();
-    
-    // 从 IMU 四元数获取旋转矩阵
-    Eigen::Matrix3d R_local = Eigen::Quaterniond(imu->quaternion.w, imu->quaternion.x, 
-                                                 imu->quaternion.y, imu->quaternion.z).toRotationMatrix();
-    
-    // 计算校正后的旋转矩阵
-    Eigen::Matrix3d R_real = R_local * R_install.transpose();
-    
-    // 计算 RPY 角度
-    Eigen::Vector3d rpy = math::CalcRollPitchYawFromRotationMatrix(R_real);
-    double pitch = rpy[1];  // pitch 是第二个元素
-    
-    return pitch;
-  }
-  
   // 在插值后的轨迹中查找最匹配的俯仰角度 timestep
   size_t FindMatchingTrajectoryIndex(double current_pitch) {
     if (current_traj_ == nullptr) {
@@ -676,6 +779,185 @@ class RlBasicRunnerCHR : public rclcpp::Node {
       RCLCPP_INFO(get_logger(), "Received MuJoCo reset signal, starting walking timer from time: %.2f", time_);
     }
   }
+  
+  // 根据重力投影方向选择 mimic Policy
+  // projected_gravity 是在机体坐标系下的重力向量（归一化后约为 [gx, gy, gz]）
+  // gx > 0 表示机器人前倾（重力向前投影），gx < 0 表示后倾
+  // gy > 0 表示机器人左倾（重力向左投影），gy < 0 表示右倾
+  MimicDirection SelectMimicDirectionFromGravity(const Eigen::Vector3d& projected_gravity) {
+    double gx = projected_gravity.x();  // 前后方向
+    double gy = projected_gravity.y();  // 左右方向
+    
+    // 计算在XY平面的角度（以+X轴为0度，逆时针为正）
+    double angle = std::atan2(gy, gx);  // 范围 [-π, π]
+    
+    // 将角度转换为0-360度
+    double angle_deg = angle * 180.0 / M_PI;
+    if (angle_deg < 0) angle_deg += 360.0;
+    
+    // 8个方向，每个方向占45度
+    // 前 (Forward): -22.5° ~ 22.5° (或 337.5° ~ 360° 和 0° ~ 22.5°)
+    // 前左: 22.5° ~ 67.5°
+    // 左: 67.5° ~ 112.5°
+    // 后左: 112.5° ~ 157.5°
+    // 后: 157.5° ~ 202.5°
+    // 后右: 202.5° ~ 247.5°
+    // 右: 247.5° ~ 292.5°
+    // 前右: 292.5° ~ 337.5°
+    
+    MimicDirection dir;
+    if (angle_deg >= 337.5 || angle_deg < 22.5) {
+      dir = MimicDirection::FORWARD;
+    } else if (angle_deg >= 22.5 && angle_deg < 67.5) {
+      dir = MimicDirection::FORWARD_LEFT;
+    } else if (angle_deg >= 67.5 && angle_deg < 112.5) {
+      dir = MimicDirection::LEFT;
+    } else if (angle_deg >= 112.5 && angle_deg < 157.5) {
+      dir = MimicDirection::BACKWARD_LEFT;
+    } else if (angle_deg >= 157.5 && angle_deg < 202.5) {
+      dir = MimicDirection::BACKWARD;
+    } else if (angle_deg >= 202.5 && angle_deg < 247.5) {
+      dir = MimicDirection::BACKWARD_RIGHT;
+    } else if (angle_deg >= 247.5 && angle_deg < 292.5) {
+      dir = MimicDirection::RIGHT;
+    } else {  // 292.5° ~ 337.5°
+      dir = MimicDirection::FORWARD_RIGHT;
+    }
+    
+    return dir;
+  }
+  
+  // 获取当前 IMU 重力投影（使用 mimic 模式的 IMU bias）
+  Eigen::Vector3d GetCurrentProjectedGravity() {
+    auto imu = message_handler_->GetLatestImu();
+    if (!imu) {
+      RCLCPP_WARN(get_logger(), "IMU data not available, using default gravity [0, 0, -1]");
+      return Eigen::Vector3d(0, 0, -1);
+    }
+    
+    // 应用 IMU 安装偏差校正
+    Eigen::AngleAxisd rollAngle(imu_install_bias_.x(), Eigen::Vector3d::UnitX());
+    Eigen::AngleAxisd pitchAngle(imu_install_bias_.y(), Eigen::Vector3d::UnitY());
+    Eigen::AngleAxisd yawAngle(imu_install_bias_.z(), Eigen::Vector3d::UnitZ());
+    Eigen::Quaterniond q_install = yawAngle * pitchAngle * rollAngle;
+    Eigen::Matrix3d R_install = q_install.toRotationMatrix();
+    
+    // 从 IMU 四元数获取旋转矩阵
+    Eigen::Matrix3d R_local = Eigen::Quaterniond(imu->quaternion.w, imu->quaternion.x, 
+                                                 imu->quaternion.y, imu->quaternion.z).toRotationMatrix();
+    
+    // 计算校正后的旋转矩阵
+    Eigen::Matrix3d R_real = R_local * R_install.transpose();
+    
+    // 计算重力投影（机体坐标系下的重力向量）
+    Eigen::Vector3d projected_gravity = -R_real.transpose() * Eigen::Vector3d::UnitZ();
+    
+    return projected_gravity;
+  }
+  
+  // 更新 mimic Policy 选择（基于当前重力投影方向）
+  void UpdateMimicPolicySelection() {
+    Eigen::Vector3d projected_gravity = GetCurrentProjectedGravity();
+    MimicDirection new_direction = SelectMimicDirectionFromGravity(projected_gravity);
+    
+    if (new_direction != current_mimic_direction_) {
+      int dir_idx = static_cast<int>(new_direction);
+      if (mlp_net_mimic_directions_[dir_idx]) {
+        current_mimic_direction_ = new_direction;
+        mlp_net_ = mlp_net_mimic_directions_[dir_idx].get();
+        RCLCPP_INFO(get_logger(), "Switched mimic policy to direction: %s (gravity: [%.3f, %.3f, %.3f])",
+                    kMimicDirectionNames[dir_idx].c_str(),
+                    projected_gravity.x(), projected_gravity.y(), projected_gravity.z());
+      } else {
+        RCLCPP_WARN(get_logger(), "Mimic policy for direction %s not loaded, keeping current policy",
+                    kMimicDirectionNames[dir_idx].c_str());
+      }
+    }
+  }
+  
+  // 摔倒检测：基于倾斜角度和角速度，带防抖机制
+  // 返回 true 表示检测到摔倒，同时设置 detected_direction
+  bool DetectFall(MimicDirection& detected_direction) {
+    // 使用 walking 模式的 IMU bias 计算重力投影和角速度
+    auto imu = message_handler_->GetLatestImu();
+    if (!imu) {
+      fall_stable_count_ = 0;
+      return false;
+    }
+    
+    // 应用 walking 模式的 IMU 安装偏差校正
+    Eigen::AngleAxisd rollAngle(walking_imu_install_bias_.x(), Eigen::Vector3d::UnitX());
+    Eigen::AngleAxisd pitchAngle(walking_imu_install_bias_.y(), Eigen::Vector3d::UnitY());
+    Eigen::AngleAxisd yawAngle(walking_imu_install_bias_.z(), Eigen::Vector3d::UnitZ());
+    Eigen::Quaterniond q_install = yawAngle * pitchAngle * rollAngle;
+    Eigen::Matrix3d R_install = q_install.toRotationMatrix();
+    
+    Eigen::Matrix3d R_local = Eigen::Quaterniond(imu->quaternion.w, imu->quaternion.x, 
+                                                 imu->quaternion.y, imu->quaternion.z).toRotationMatrix();
+    Eigen::Matrix3d R_real = R_local * R_install.transpose();
+    
+    // 计算角速度（机体坐标系）
+    Eigen::Vector3d w_real = R_real.transpose() * R_local * 
+        Eigen::Vector3d(imu->angular_velocity.x, imu->angular_velocity.y, imu->angular_velocity.z);
+    
+    // 计算重力投影
+    Eigen::Vector3d projected_gravity = -R_real.transpose() * Eigen::Vector3d::UnitZ();
+    
+    // 缓存值供后续使用
+    w_real_cached_ = w_real;
+    projected_gravity_cached_ = projected_gravity;
+    
+    const double gx = projected_gravity.x();
+    const double gy = projected_gravity.y();
+    const double gz = projected_gravity.z();
+    const double gxy = std::hypot(gx, gy);
+    
+    // 如果重力投影在 XY 平面的分量太小，说明机器人接近直立，方向不可靠
+    if (gxy < 1e-3) {
+      fall_stable_count_ = 0;
+      return false;
+    }
+    
+    // 8方向分类：theta: 0=前(+X), 90°=左(+Y)
+    double theta = std::atan2(gy, gx);  // [-π, π]
+    int bin8 = static_cast<int>(std::llround(theta / (M_PI / 4.0)));
+    bin8 = ((bin8 % 8) + 8) % 8;  // 归一化到 0..7
+    
+    // 计算倾斜角和 XY 平面角速度
+    double tilt = std::acos(std::clamp(-gz, -1.0, 1.0));
+    double omega_xy = std::hypot(w_real.x(), w_real.y());
+    
+    // 摔倒候选条件：倾斜角超阈值 或 角速度超阈值
+    bool candidate = (tilt > fall_tilt_threshold_) || (omega_xy > fall_omega_threshold_);
+    
+    // 自适应确认帧数：快速摔倒时减少确认帧数
+    int N_confirm = (omega_xy > fast_fall_omega_) ? fast_fall_confirm_frames_ : fall_confirm_frames_;
+    
+    // 防抖机制：需要连续 N 帧检测到相同方向
+    if (candidate) {
+      if (bin8 == fall_last_bin_) {
+        fall_stable_count_++;
+      } else {
+        fall_last_bin_ = bin8;
+        fall_stable_count_ = 1;
+      }
+    } else {
+      fall_stable_count_ = 0;
+    }
+    
+    // 检测到摔倒
+    if (fall_stable_count_ >= N_confirm) {
+      detected_direction = static_cast<MimicDirection>(bin8);
+      
+      RCLCPP_INFO(get_logger(), "Fall detected! Direction: %s (bin=%d, tilt=%.3f rad, omega_xy=%.3f rad/s)",
+                  kMimicDirectionNames[bin8].c_str(), bin8, tilt, omega_xy);
+      
+      fall_stable_count_ = 0;  // 避免重复触发
+      return true;
+    }
+    
+    return false;
+  }
 
   void ControlCallback() {
     if (message_handler_->GetLatestMotionState()->current_motion_task != "joint_bridge") {
@@ -690,14 +972,34 @@ class RlBasicRunnerCHR : public rclcpp::Node {
     auto joint_state = message_handler_->GetLatestJointState();
     if (!joint_state) return;
 
-    // 基于俯仰角切换：在 walking 模式下，如果俯仰角大于 0.5 rad，切换到 mimic 模式
+    // 摔倒检测：在 walking 模式下，使用倾斜角+角速度+防抖机制检测摔倒
     if (is_walking_mode_ && mujoco_reset_received_) {
-      double current_pitch = GetCurrentPitchAngleWalking();
-      if (current_pitch > 0.5) {
+      MimicDirection fall_direction;
+      if (DetectFall(fall_direction)) {
         is_walking_mode_ = false;
-        mlp_net_ = mlp_net_mimic_.get();
-        RCLCPP_INFO(get_logger(), "Switching from walking to mimic mode at time: %.2f (pitch: %.4f rad > 0.5 rad)", 
-                    time_, current_pitch);
+        
+        // 根据检测到的摔倒方向选择 mimic Policy
+        current_mimic_direction_ = fall_direction;
+        int dir_idx = static_cast<int>(fall_direction);
+        
+        if (mlp_net_mimic_directions_[dir_idx]) {
+          mlp_net_ = mlp_net_mimic_directions_[dir_idx].get();
+          RCLCPP_INFO(get_logger(), "Switching from walking to mimic mode at time: %.2f", time_);
+          RCLCPP_INFO(get_logger(), "Selected mimic direction: %s (gravity: [%.3f, %.3f, %.3f])",
+                      kMimicDirectionNames[dir_idx].c_str(),
+                      projected_gravity_cached_.x(), projected_gravity_cached_.y(), projected_gravity_cached_.z());
+        } else {
+          // 如果对应方向的 Policy 未加载，尝试找到任何可用的 Policy
+          for (size_t i = 0; i < static_cast<size_t>(MimicDirection::COUNT); ++i) {
+            if (mlp_net_mimic_directions_[i]) {
+              mlp_net_ = mlp_net_mimic_directions_[i].get();
+              current_mimic_direction_ = static_cast<MimicDirection>(i);
+              RCLCPP_WARN(get_logger(), "Policy for direction %s not available, using %s instead",
+                          kMimicDirectionNames[dir_idx].c_str(), kMimicDirectionNames[i].c_str());
+              break;
+            }
+          }
+        }
         
         // 匹配 IMU 俯仰角度并设置 trajectory_index_
         if (observation_type_ == "mimic_future" && current_traj_ != nullptr) {
@@ -712,6 +1014,11 @@ class RlBasicRunnerCHR : public rclcpp::Node {
           trajectory_index_ = 0;
         }
       }
+    }
+    
+    // 在 mimic 模式下，根据重力投影方向动态切换 Policy
+    if (!is_walking_mode_) {
+      UpdateMimicPolicySelection();
     }
 
     UpdateState(joint_state);
@@ -1221,8 +1528,9 @@ class RlBasicRunnerCHR : public rclcpp::Node {
 
   // MNN model
   std::unique_ptr<math::MnnModel> mlp_net_walking_;
-  std::unique_ptr<math::MnnModel> mlp_net_mimic_;
+  std::array<std::unique_ptr<math::MnnModel>, 8> mlp_net_mimic_directions_;  // 8个方向的 mimic Policy
   math::MnnModel* mlp_net_;
+  MimicDirection current_mimic_direction_ = MimicDirection::FORWARD;  // 当前选择的 mimic 方向
   Eigen::MatrixXd mlp_net_observation_;
   Eigen::MatrixXd mlp_net_observation_walking_;
   Eigen::VectorXd mlp_net_action_;
@@ -1260,6 +1568,19 @@ class RlBasicRunnerCHR : public rclcpp::Node {
   double walking_start_time_;
   bool mujoco_reset_received_;
   Eigen::Vector3d command_;
+  
+  // Fall detection state (cached from CalculateObservation for reuse)
+  Eigen::Vector3d w_real_cached_;           // 缓存的角速度（机体坐标系）
+  Eigen::Vector3d projected_gravity_cached_; // 缓存的重力投影
+  int fall_last_bin_ = 0;                   // 上一帧的方向 bin
+  int fall_stable_count_ = 0;               // 连续稳定帧计数
+  
+  // Fall detection parameters
+  double fall_tilt_threshold_ = 0.5;        // 倾斜角阈值 (rad)
+  double fall_omega_threshold_ = 1.8;       // 角速度阈值 (rad/s)
+  int fall_confirm_frames_ = 8;             // 确认帧数
+  double fast_fall_omega_ = 2.5;            // 快速摔倒角速度阈值 (rad/s)
+  int fast_fall_confirm_frames_ = 2;        // 快速摔倒确认帧数
   
   // MuJoCo reset subscription
   rclcpp::Subscription<std_msgs::msg::Empty>::SharedPtr mujoco_reset_sub_;
