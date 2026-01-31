@@ -34,7 +34,7 @@ def generate_launch_description():
 
     declare_save_csv_arg = DeclareLaunchArgument(
         'save_contact_csv',
-        default_value='true',
+        default_value='false',
         description='是否保存接触力数据到CSV文件 (true/false)'
     )
     
@@ -46,7 +46,7 @@ def generate_launch_description():
     
     declare_save_joint_forces_csv_arg = DeclareLaunchArgument(
         'save_joint_forces_csv',
-        default_value='true',
+        default_value='false',
         description='是否保存关节反力数据到CSV文件 (true/false)'
     )
     

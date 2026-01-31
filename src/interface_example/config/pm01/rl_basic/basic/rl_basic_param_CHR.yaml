@@ -29,13 +29,13 @@ motion_states:
     policy_path: "policies/toFront_3.mnn"
     mimic_policies:
       forward: "policies/toFront_3.mnn"
-      forward_left: "policies/toFront_left_3.mnn"
+      forward_left: "policies/toLeftFront_3.mnn"
       left: "policies/toLeft_3.mnn"
-      backward_left: "policies/toBack_left_3.mnn"
+      backward_left: "policies/toLeftBack_3.mnn"
       backward: "policies/toBack_3.mnn"
-      backward_right: "policies/toBack_right_3.mnn"
+      backward_right: "policies/toRightBack_3.mnn"
       right: "policies/toRight_3.mnn"
-      forward_right: "policies/toFront_right_3.mnn"
+      forward_right: "policies/toRightFront_3.mnn"
     # policy_path: "rl_dance/policies/new_kf_addrand/model_70000.mnn"
     # policy_path: "rl_dance/policies/wbst/kf3_85.mnn"
     # data_path: "rl_dance/trajectories/wbst_best.csv"
@@ -252,4 +252,12 @@ ang_vel_set_zero_threshold: 0.314
 # 步态相位参数
 unstable_cycle_time_scale: 0.5
 default_dynamic_cycle_time: 0.8
+
+# 摔倒检测参数
+fall_detection:
+  tilt_threshold: 0.5           # 倾斜角阈值 (rad)
+  omega_threshold: 1.8          # 角速度阈值 (rad/s)
+  confirm_frames: 8             # 确认帧数
+  fast_fall_omega: 2.5          # 快速摔倒角速度阈值 (rad/s)
+  fast_fall_confirm_frames: 2   # 快速摔倒确认帧数
 
