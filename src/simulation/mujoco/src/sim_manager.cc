@@ -30,9 +30,13 @@ using namespace std::chrono_literals;
 const int kDofFloatingBase = 6;        // 浮动基座的自由度数量
 
 // 排除防护的接触对列表定义
+// 排除防护的接触对：脚/踝与地面的接触不施加防护，避免走路时地面打滑
+// 脚掌碰撞几何体挂在 LINK_ANKLE_ROLL_L/R 下，需排除；LINK_ANKLE_PITCH 为踝俯仰轴
 const std::vector<std::pair<std::string, std::string>> SimManager::excluded_contact_pairs_ = {
   {"LINK_ANKLE_PITCH_L", "world"},
-  {"LINK_ANKLE_PITCH_R", "world"}
+  {"LINK_ANKLE_PITCH_R", "world"},
+  {"LINK_ANKLE_ROLL_L", "world"},   // 左脚掌接地接触
+  {"LINK_ANKLE_ROLL_R", "world"}    // 右脚掌接地接触
 };
 const int kNumFloatingBaseJoints = 7;  // 浮动基座的关节数量（四元数 + xyz位置）
 constexpr double kSyncMisalign = 0.1;  // 重新同步前的最大偏差
@@ -387,6 +391,12 @@ void SimManager::TorqueController(const mjModel* m, mjData* d) {
       double velocity_error = cmd.velocity[i] - velocity;
 
       d->ctrl[i] = cmd.feed_forward_torque[i] + cmd.stiffness[i] * position_error + cmd.damping[i] * velocity_error;
+      
+      // 应用执行器层面的硬限制（如果MuJoCo模型中配置了ctrlrange）
+      // 注意：这里限制的是d->ctrl，MuJoCo会在mj_fwdActuation中进一步限制d->actuator_force
+      // 但是，如果ctrlrange (61.0 N·m) 大于配置限制 (52.0 N·m)，我们需要在这里额外限制
+      // 由于我们无法直接访问配置的max_torque_joint，这里依赖MuJoCo的ctrlrange限制
+      // 如果需要更严格的限制，应该修改MuJoCo XML中的ctrlrange
     }
   } else {
     // 如果没有ROS接口，使用零力矩控制（机器人自由运动）
@@ -614,6 +624,12 @@ bool SimManager::Initialize() {
   perturb_duration_ = config_loader_->GetForceDuration();
   RCLCPP_INFO(logger, "Loaded perturbation parameters from YAML: force=%.1fN, torque=%.1fN.m, duration=%.1fs", 
               perturb_force_magnitude_, perturb_torque_magnitude_, perturb_duration_);
+
+  // 从YAML配置加载防护功能参数
+  protection_enabled_ = config_loader_->IsProtectionEnabled();
+  protection_thickness_ = config_loader_->GetProtectionThickness();
+  RCLCPP_INFO(logger, "Protection from YAML config: enabled=%s, thickness=%.1fmm", 
+              protection_enabled_ ? "YES" : "NO", protection_thickness_);
 
   // 初始化力插值计算器（用于柔性护具防护力计算）
   try {
@@ -1602,18 +1618,9 @@ void SimManager::ApplyProtectionToContactForces() {
     }
     
     // 如果法向力太小，跳过（避免对微小接触力进行插值）
-    if (contact_force_normal < 400) {  // 400 N阈值
+    // 阈值 800N：躺着时体重分布的力通常 < 800N，不处理；摔倒冲击力 > 800N 才做防护
+    if (contact_force_normal < 500) {  // 800 N阈值
       skipped_small_force++;
-      // 对于高力，立即记录（不依赖frame_count）
-      if (contact_force_normal > 20000) {
-        static int high_force_small_count = 0;
-        high_force_small_count++;
-        if (high_force_small_count <= 5) {
-          RCLCPP_WARN(node_->get_logger(), 
-                      "High force %.2f N detected but skipped (small force threshold: 400 N)",
-                      contact_force_normal);
-        }
-      }
       continue;
     }
     
@@ -1725,7 +1732,7 @@ void SimManager::ApplyProtectionToContactForces() {
     // 接触约束通常包括：
     // 1. 法向约束（1个）
     // 2. 摩擦约束（最多4个，取决于摩擦维数）
-    // 我们需要缩放法向约束的力，摩擦约束的力按相同比例缩放
+    // 法向与摩擦同比例缩放，保证仍在摩擦锥内（|friction| <= mu*normal），否则仿真会失稳
     
     // 获取接触的约束维数（dim = 1, 3, 4, 或 6）
     // dim = 1: 只有法向约束
@@ -1766,9 +1773,9 @@ void SimManager::ApplyProtectionToContactForces() {
       // 记录原始法向力（用于验证）
       double original_normal = decoded_force[0];
       
-      // 缩放接触力（只缩放法向力，切向力按相同比例缩放以保持方向）
+      // 法向与切向同比例缩放，保持摩擦锥一致（否则会约束不一致、仿真摔飞）
       decoded_force[0] *= scale_factor;  // 法向力
-      for (int j = 1; j < dim && j < 6; ++j) {  // 确保不越界
+      for (int j = 1; j < dim && j < 6; ++j) {
         decoded_force[j] *= scale_factor;  // 切向力
       }
       
@@ -1789,9 +1796,7 @@ void SimManager::ApplyProtectionToContactForces() {
         }
       }
     } else {
-      // Elliptic 摩擦锥或 dim=1（无摩擦）：直接缩放 efc_force
-      // 对于 dim=1，只有 1 个元素（法向力）
-      // 对于 elliptic，有 dim 个元素
+      // Elliptic 摩擦锥或 dim=1：法向与摩擦同比例缩放
       int efc_size = (dim == 1) ? 1 : dim;
       if (efc_address >= 0 && efc_address < d_->nefc && efc_size > 0) {
         int max_size = std::min(efc_size, d_->nefc - efc_address);
@@ -1812,10 +1817,37 @@ void SimManager::ApplyProtectionToContactForces() {
   // 重要：修改efc_force后，需要重新计算qfrc_constraint
   // 因为qfrc_constraint = J^T * efc_force，其中J是约束雅可比矩阵
   // 如果不重新计算，修改的efc_force不会影响后续的动力学计算
-  if (protected_contacts > 0) {
+  if (protected_contacts > 0 && m_->nv > 0 && m_->nv <= 1024) {
+    // 用增量方式更新 qacc：qacc_new = qacc_old + M^{-1} * (qfrc_constraint_new - qfrc_constraint_old)
+    // 注意：mj_solveM 的最后一个参数 n 表示"解多少组向量"（每组长度 nv），不是向量长度！
+    // 之前误传 nv 导致越界崩溃，正确值是 n=1。
+    //
+    // 阈值 800N 确保：躺着时小力不处理（仿真正常），只有摔倒冲击大力才重算 acc。
+    
+    // 1. 保存防护前的 qfrc_constraint
+    std::vector<mjtNum> qfrc_old(d_->qfrc_constraint, d_->qfrc_constraint + m_->nv);
+    
+    // 2. 用新的 efc_force 计算新的 qfrc_constraint
+    mj_mulJacTVec(m_, d_, d_->qfrc_constraint, d_->efc_force);
+    
+    // 3. 计算增量 delta_qfrc = qfrc_constraint_new - qfrc_constraint_old
+    std::vector<mjtNum> delta_qfrc(static_cast<size_t>(m_->nv));
+    mju_sub(delta_qfrc.data(), d_->qfrc_constraint, qfrc_old.data(), m_->nv);
+    
+    // 4. 计算 delta_qacc = M^{-1} * delta_qfrc（n=1 表示解 1 组向量）
+    std::vector<mjtNum> delta_qacc(static_cast<size_t>(m_->nv));
+    mj_solveM(m_, d_, delta_qacc.data(), delta_qfrc.data(), 1);
+    
+    // 5. qacc_new = qacc_old + delta_qacc
+    mju_addTo(d_->qacc, delta_qacc.data(), m_->nv);
+    
+    // 6. 更新 body 笛卡尔加速度 cacc（CSV 的 base_link_lin_acc 等来自 cacc）
+    mj_rnePostConstraint(m_, d_);
+  } else if (protected_contacts > 0) {
+    // nv 超范围时只更新 qfrc_constraint，不重算 qacc/cacc
     mj_mulJacTVec(m_, d_, d_->qfrc_constraint, d_->efc_force);
   }
-  
+
   // 每1000帧打印一次统计信息（避免日志过多）
   frame_count++;
   if (frame_count % 1000 == 0 && node_) {

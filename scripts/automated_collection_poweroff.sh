@@ -42,29 +42,49 @@ echo "实验数据将保存到: $EXPERIMENT_FOLDER"
 
 # 清理函数
 cleanup_processes() {
-    echo "强制清理所有进程..."
+    echo "开始清理所有进程..."
     
-    # 关闭MuJoCo窗口
-    pkill -f "mujoco" 2>/dev/null
-    pkill -f "simulate" 2>/dev/null
+    # 先尝试优雅关闭（发送SIGTERM信号，允许程序执行清理）
+    echo "发送SIGTERM信号，允许程序优雅关闭..."
+    pkill -TERM -f "mujoco_simulator" 2>/dev/null
+    pkill -TERM -f "rl_basic_example_XZL" 2>/dev/null
+    pkill -TERM -f "ros2 launch" 2>/dev/null
     
-    # 关闭ROS进程
-    pkill -f "rl_basic_example_XZL" 2>/dev/null
-    pkill -f "mujoco_simulator" 2>/dev/null
-    pkill -f "joint_state_converter" 2>/dev/null
-    pkill -f "robot_state_publisher" 2>/dev/null
-    pkill -f "static_transform_publisher" 2>/dev/null
+    # 等待程序优雅关闭（给异步写入线程时间完成数据写入）
+    echo "等待程序优雅关闭（最多10秒）..."
+    for i in {1..10}; do
+        if ! pgrep -f "mujoco_simulator" > /dev/null && ! pgrep -f "rl_basic_example_XZL" > /dev/null; then
+            echo "程序已优雅关闭"
+            break
+        fi
+        sleep 1
+    done
     
-    # 关闭ROS launch进程
-    pkill -f "ros2 launch" 2>/dev/null
-    
-    # 强制关闭所有相关进程
-    pkill -9 -f "mujoco" 2>/dev/null
-    pkill -9 -f "simulate" 2>/dev/null
-    pkill -9 -f "rl_basic" 2>/dev/null
+    # 如果还有进程在运行，强制关闭
+    if pgrep -f "mujoco_simulator" > /dev/null || pgrep -f "rl_basic_example_XZL" > /dev/null; then
+        echo "部分进程未响应，强制关闭..."
+        # 关闭MuJoCo窗口
+        pkill -f "mujoco" 2>/dev/null
+        pkill -f "simulate" 2>/dev/null
+        
+        # 关闭ROS进程
+        pkill -f "rl_basic_example_XZL" 2>/dev/null
+        pkill -f "mujoco_simulator" 2>/dev/null
+        pkill -f "joint_state_converter" 2>/dev/null
+        pkill -f "robot_state_publisher" 2>/dev/null
+        pkill -f "static_transform_publisher" 2>/dev/null
+        
+        # 关闭ROS launch进程
+        pkill -f "ros2 launch" 2>/dev/null
+        
+        # 最后强制关闭所有相关进程
+        pkill -9 -f "mujoco" 2>/dev/null
+        pkill -9 -f "simulate" 2>/dev/null
+        pkill -9 -f "rl_basic" 2>/dev/null
+    fi
     
     # 等待进程完全关闭
-    sleep 3
+    sleep 2
     
     echo "进程清理完成"
 }

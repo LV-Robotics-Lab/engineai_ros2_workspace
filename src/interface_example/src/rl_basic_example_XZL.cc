@@ -1,8 +1,11 @@
 #include <chrono>
+#include <cmath>
 #include <memory>
 #include <rclcpp/logging.hpp>
 #include <rclcpp/rclcpp.hpp>
 #include <thread>
+#include <limits>
+#include <yaml-cpp/yaml.h>
 
 #include "components/message_handler.hpp"
 #include "math/concatenate_vector.h"
@@ -21,7 +24,54 @@ class RlBasicRunnerXZL : public rclcpp::Node {
     RCLCPP_INFO(get_logger(), "Loading config file: %s", config_file.c_str());
     param_ = std::make_shared<RlBasicParam>(config_file);
     config_file_dir_ = config_file_dir;
+    config_file_ = config_file;
     joint_command_ = std::make_shared<interface_protocol::msg::JointCommand>();
+    
+    // 加载扭矩限制参数
+    LoadTorqueLimitParameters();
+  }
+  
+  void LoadTorqueLimitParameters() {
+    try {
+      YAML::Node config = YAML::LoadFile(config_file_);
+      
+      // 读取扭矩限制参数
+      torque_limit_enabled_ = config["torque_limit"] ? config["torque_limit"].as<bool>() : false;
+      if (config["max_torque_joint"]) {
+        max_torque_joint_ = LoadVectorArrayFromYaml(config["max_torque_joint"]);
+        RCLCPP_INFO(get_logger(), "Torque limit enabled: %s, loaded %zu groups of max_torque_joint", 
+                    torque_limit_enabled_ ? "true" : "false", max_torque_joint_.size());
+      } else {
+        RCLCPP_WARN(get_logger(), "max_torque_joint not found in config, torque limit will be disabled");
+      }
+      // 读取 soft_torque_limit（软扭矩限制系数，默认0.9）
+      soft_torque_limit_ = config["soft_torque_limit"] ? config["soft_torque_limit"].as<double>() : 0.9;
+      if (torque_limit_enabled_) {
+        RCLCPP_INFO(get_logger(), "Soft torque limit: %.2f", soft_torque_limit_);
+      }
+      // 读取 enable_damping_mode（俯仰角超阈值时是否进入 kp=0, kd=0.5，默认 true）
+      enable_damping_mode_ = config["enable_damping_mode"] ? config["enable_damping_mode"].as<bool>() : true;
+      RCLCPP_INFO(get_logger(), "Damping mode (pitch > 50 deg): %s", enable_damping_mode_ ? "enabled" : "disabled");
+    } catch (const std::exception& e) {
+      RCLCPP_WARN(get_logger(), "Failed to load torque limit parameters: %s", e.what());
+      torque_limit_enabled_ = false;
+    }
+  }
+  
+  Eigen::VectorXd LoadVectorFromYaml(const YAML::Node& node) {
+    std::vector<double> vec;
+    for (const auto& item : node) {
+      vec.push_back(item.as<double>());
+    }
+    return Eigen::Map<Eigen::VectorXd>(vec.data(), vec.size());
+  }
+  
+  std::vector<Eigen::VectorXd> LoadVectorArrayFromYaml(const YAML::Node& node) {
+    std::vector<Eigen::VectorXd> result;
+    for (const auto& item : node) {
+      result.push_back(LoadVectorFromYaml(item));
+    }
+    return result;
   }
 
   bool Initialize() {
@@ -71,6 +121,9 @@ class RlBasicRunnerXZL : public rclcpp::Node {
       global_phase_ = 0.0;
       is_first_time_ = true;
 
+      // Load IMU install bias from param (for GetCurrentPitchAngle)
+      imu_install_bias_ = param_->imu_install_bias;
+
       RCLCPP_INFO(get_logger(), "Starting control loop");
       
       // Create control timer
@@ -110,6 +163,11 @@ class RlBasicRunnerXZL : public rclcpp::Node {
     
     RCLCPP_DEBUG(get_logger(), "Calculating motor command");
     CalculateMotorCommand();
+    
+    // 应用扭矩限制（如果启用）
+    if (torque_limit_enabled_) {
+      ApplyTorqueLimits();
+    }
     
     RCLCPP_DEBUG(get_logger(), "Sending motor command");
     SendMotorCommand();
@@ -240,14 +298,110 @@ class RlBasicRunnerXZL : public rclcpp::Node {
     }
   }
 
+  // 获取当前 IMU 俯仰角度（弧度），用于 damping mode 判断
+  double GetCurrentPitchAngle() {
+    auto imu = message_handler_->GetLatestImu();
+    if (!imu) {
+      RCLCPP_WARN(get_logger(), "IMU data not available, using default pitch angle 0.0");
+      return 0.0;
+    }
+    Eigen::AngleAxisd rollAngle(imu_install_bias_.x(), Eigen::Vector3d::UnitX());
+    Eigen::AngleAxisd pitchAngle(imu_install_bias_.y(), Eigen::Vector3d::UnitY());
+    Eigen::AngleAxisd yawAngle(imu_install_bias_.z(), Eigen::Vector3d::UnitZ());
+    Eigen::Quaterniond q_install = yawAngle * pitchAngle * rollAngle;
+    Eigen::Matrix3d R_install = q_install.toRotationMatrix();
+    Eigen::Matrix3d R_local = Eigen::Quaterniond(imu->quaternion.w, imu->quaternion.x,
+                                                 imu->quaternion.y, imu->quaternion.z).toRotationMatrix();
+    Eigen::Matrix3d R_real = R_local * R_install.transpose();
+    Eigen::Vector3d rpy = math::CalcRollPitchYawFromRotationMatrix(R_real);
+    return rpy[1];  // pitch
+  }
+
+  void ApplyTorqueLimits() {
+    const int n = q_des_.size();
+    if (q_real_.size() != n || qd_real_.size() != n || joint_kp_.size() != n || joint_kd_.size() != n) {
+      RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 1000, 
+                          "Size mismatch in ApplyTorqueLimits, skipping torque limit");
+      return;
+    }
+    
+    // ---- 构造每关节扭矩上限向量 tau_limit_（参考XZL真实实现）----
+    // 在真实部署代码中，tau_limit_ 从 data_store_->joint_info.GetTorqueLimit() 获取（来自 URDF）
+    // 在这个代码库中，我们使用 max_torque_joint 作为基础（相当于从 URDF 获取的值）
+    Eigen::VectorXd tau_limit_ = Eigen::VectorXd::Zero(n);
+    if (!max_torque_joint_.empty()) {
+      int idx = 0;
+      for (const auto& group : max_torque_joint_) {
+        const int gsz = static_cast<int>(group.size());
+        const int remain = n - idx;
+        if (gsz > remain) {
+          RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 1000,
+                              "max_torque_joint total size exceeds DOF count");
+          break;
+        }
+        tau_limit_.segment(idx, gsz) = group;
+        idx += gsz;
+        if (idx >= n) break;
+      }
+      if (idx != n) {
+        RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 1000,
+                            "max_torque_joint total size (%d) does not match DOF count (%d)", idx, n);
+      }
+      for (int i = 0; i < n; ++i) {
+        if (tau_limit_(i) <= 0.0) {
+          tau_limit_(i) = std::numeric_limits<double>::infinity();
+        }
+      }
+    } else {
+      // 如果没有配置，使用无穷大（不限制）
+      tau_limit_ = Eigen::VectorXd::Constant(n, std::numeric_limits<double>::infinity());
+      RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 1000,
+                          "max_torque_joint is empty, torque limit disabled");
+      return;  // 如果没有配置，直接返回
+    }
+    
+    // ---- 应用 soft_torque_limit（参考XZL真实实现）----
+    // 在真实部署代码中：tau_limit_ = tau_limit_.cwiseProduct(soft_torque_limit)
+    // 这里 soft_torque_limit 是标量，所以直接相乘
+    tau_limit_ = tau_limit_ * soft_torque_limit_;
+    
+    // ---- 通过限制 q_des_ 范围确保扭矩不超过限制（参考XZL真实实现）----
+    // 这是 XZL 的核心实现方式：不计算 PD 扭矩，直接通过限制 q_des_ 范围来限制扭矩
+    const double kp_min_threshold = 1e-3;
+    const Eigen::VectorXd joint_kp_safe = joint_kp_.cwiseMax(kp_min_threshold);
+    Eigen::VectorXd q_des_lb = (-tau_limit_.array() + (joint_kd_.array() * qd_real_.array())).matrix();
+    Eigen::VectorXd q_des_ub = (tau_limit_.array() + (joint_kd_.array() * qd_real_.array())).matrix();
+    q_des_lb = q_des_lb.array() / joint_kp_safe.array();
+    q_des_ub = q_des_ub.array() / joint_kp_safe.array();
+    q_des_lb += q_real_;
+    q_des_ub += q_real_;
+    q_des_ = q_des_.cwiseMax(q_des_lb).cwiseMin(q_des_ub);
+  }
+
   void SendMotorCommand() {
     // Convert Eigen vectors to std::vector
     joint_command_->position = std::vector<double>(q_des_.data(), q_des_.data() + q_des_.size());
     joint_command_->velocity = std::vector<double>(q_des_.size(), 0.0);
     joint_command_->feed_forward_torque = std::vector<double>(q_des_.size(), 0.0);
     joint_command_->torque = std::vector<double>(q_des_.size(), 0.0);
-    joint_command_->stiffness = std::vector<double>(joint_kp_.data(), joint_kp_.data() + joint_kp_.size());
-    joint_command_->damping = std::vector<double>(joint_kd_.data(), joint_kd_.data() + joint_kd_.size());
+
+    // Damping mode: 当 enable_damping_mode_ 为 true 且俯仰角 > 50° 或 < -50° 时 kp=0, kd=0.5
+    const double kPitchDampingThresholdRad = 50.0 * M_PI / 180.0;  // 50°
+    bool in_damping = false;
+    if (enable_damping_mode_) {
+      double current_pitch = GetCurrentPitchAngle();
+      if (current_pitch > kPitchDampingThresholdRad || current_pitch < -kPitchDampingThresholdRad) {
+        in_damping = true;
+      }
+    }
+    if (in_damping) {
+      joint_command_->stiffness = std::vector<double>(q_des_.size(), 0.0);
+      joint_command_->damping = std::vector<double>(q_des_.size(), 0.5);
+    } else {
+      joint_command_->stiffness = std::vector<double>(joint_kp_.data(), joint_kp_.data() + joint_kp_.size());
+      joint_command_->damping = std::vector<double>(joint_kd_.data(), joint_kd_.data() + joint_kd_.size());
+    }
+
     joint_command_->parallel_parser_type = interface_protocol::msg::ParallelParserType::RL_PARSER;
     // Send command through message handler
     message_handler_->PublishJointCommand(*joint_command_);
@@ -284,7 +438,16 @@ class RlBasicRunnerXZL : public rclcpp::Node {
   // ROS timer
   rclcpp::TimerBase::SharedPtr control_timer_;
   std::string config_file_dir_;
+  std::string config_file_;  // 保存配置文件路径，用于读取扭矩限制参数
   interface_protocol::msg::JointCommand::SharedPtr joint_command_;
+  
+  // 扭矩限制参数
+  bool torque_limit_enabled_ = false;
+  std::vector<Eigen::VectorXd> max_torque_joint_;
+  double soft_torque_limit_ = 0.9;  // 软扭矩限制系数，默认0.9（参考XZL实现）
+
+  // Damping mode: 俯仰角 > 50° 或 < -50° 时是否进入 kp=0, kd=0.5（由 YAML enable_damping_mode 控制）
+  bool enable_damping_mode_ = true;
 };
 
 }  // namespace example

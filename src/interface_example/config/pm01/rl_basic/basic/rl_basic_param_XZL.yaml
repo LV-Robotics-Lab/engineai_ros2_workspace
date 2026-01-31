@@ -100,3 +100,16 @@ initial_velocity:
   linear: [1.0, 0.0, 0.0]    # 初始线速度 [x, y, z] (m/s) - 设置为0停止前进, 速度不能超过1.5m/s
   angular: [0.0, 0.0, 0.0]   # 初始角速度 [x, y, z] (rad/s)
 
+# Damping mode: 俯仰角 > 50° 或 < -50° 时进入 kp=0, kd=0.5；设为 false 则关闭
+enable_damping_mode: false
+
+# 扭矩限制
+torque_limit: True
+max_torque_joint:
+  - [164, 164, 52, 164, 52, 52]
+  - [164, 164, 52, 164, 52, 52]
+  - [52]
+  - [52, 52, 52, 52, 52]
+  - [52, 52, 52, 52, 52]
+  - [52]
+soft_torque_limit: 0.9

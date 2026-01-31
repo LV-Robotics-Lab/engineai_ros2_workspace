@@ -19,8 +19,40 @@ find_package(rclcpp REQUIRED)
 find_package(interface_protocol REQUIRED)
 find_package(yaml-cpp REQUIRED)
 find_package(Eigen3 REQUIRED)
-# Find glog for csv_loader
-find_package(glog REQUIRED)
+# Find glog for csv_loader (only needed for rl_basic_example_CHR)
+# Try to find glog, but make it optional since it might be in conda
+find_package(glog QUIET)
+# If not found via find_package, try to find it manually (e.g., in conda)
+if(NOT glog_FOUND)
+  # Try to find glog in common locations
+  find_path(GLOG_INCLUDE_DIR
+    NAMES glog/logging.h
+    PATHS
+      $ENV{CONDA_PREFIX}/include
+      /usr/include
+      /usr/local/include
+      ${ENGINEAI_ROBOTICS_THIRD_PARTY}/include
+    NO_DEFAULT_PATH
+  )
+  find_library(GLOG_LIBRARY
+    NAMES glog
+    PATHS
+      $ENV{CONDA_PREFIX}/lib
+      /usr/lib
+      /usr/local/lib
+      ${ENGINEAI_ROBOTICS_THIRD_PARTY}/lib
+    NO_DEFAULT_PATH
+  )
+  if(GLOG_INCLUDE_DIR AND GLOG_LIBRARY)
+    message(STATUS "Found glog manually: ${GLOG_INCLUDE_DIR}, ${GLOG_LIBRARY}")
+    set(glog_FOUND TRUE)
+    add_library(glog::glog UNKNOWN IMPORTED)
+    set_target_properties(glog::glog PROPERTIES
+      INTERFACE_INCLUDE_DIRECTORIES "${GLOG_INCLUDE_DIR}"
+      IMPORTED_LOCATION "${GLOG_LIBRARY}"
+    )
+  endif()
+endif()
 
 include_directories(
   include 

@@ -303,6 +303,23 @@ class RlBasicRunnerCHR : public rclcpp::Node {
         fast_fall_confirm_frames_ = fall_config["fast_fall_confirm_frames"].as<int>();
       }
     }
+    
+    // 读取扭矩限制参数
+    torque_limit_enabled_ = config_["torque_limit"] ? config_["torque_limit"].as<bool>() : false;
+    if (config_["max_torque_joint"]) {
+      max_torque_joint_ = LoadVectorArrayFromYaml(config_["max_torque_joint"]);
+      RCLCPP_INFO(get_logger(), "Torque limit enabled: %s, loaded %zu groups of max_torque_joint", 
+                  torque_limit_enabled_ ? "true" : "false", max_torque_joint_.size());
+    } else {
+      RCLCPP_WARN(get_logger(), "max_torque_joint not found in config, torque limit will be disabled");
+    }
+    max_lower_body_torque_ = config_["max_lower_body_torque"] ? config_["max_lower_body_torque"].as<double>() : 0.0;
+    // 读取 soft_torque_limit（软扭矩限制系数，默认0.9）
+    soft_torque_limit_ = config_["soft_torque_limit"] ? config_["soft_torque_limit"].as<double>() : 0.9;
+    if (torque_limit_enabled_) {
+      RCLCPP_INFO(get_logger(), "Max lower body torque: %.1f N·m, soft_torque_limit: %.2f", 
+                  max_lower_body_torque_, soft_torque_limit_);
+    }
   }
   
   std::string GetWorkspaceRoot(const std::string& config_dir) {
@@ -386,17 +403,17 @@ class RlBasicRunnerCHR : public rclcpp::Node {
     walking_observation_clip_ = config_walking_["observation_clip"] ? config_walking_["observation_clip"].as<double>() : 100.0;
     walking_transition_time_ = config_walking_["transition_time"] ? config_walking_["transition_time"].as<double>() : 0.5;
     
-    // 加载 walking 模式的 joint_kp 和 joint_kd（与 XZL yaml 匹配）
+    // 加载 walking 模式的 joint_kp 和 joint_kd（从 XZL 配置）
     if (config_walking_["joint_kp"]) {
       walking_joint_kp_ = math::ConcatenateVectors(LoadVectorArrayFromYaml(config_walking_["joint_kp"]));
     } else {
-      walking_joint_kp_ = joint_kp_;  // 如果没有配置，使用默认值
+      walking_joint_kp_ = joint_kp_;  // 回退到 CHR 配置
     }
     
     if (config_walking_["joint_kd"]) {
       walking_joint_kd_ = math::ConcatenateVectors(LoadVectorArrayFromYaml(config_walking_["joint_kd"]));
     } else {
-      walking_joint_kd_ = joint_kd_;  // 如果没有配置，使用默认值
+      walking_joint_kd_ = joint_kd_;  // 回退到 CHR 配置
     }
     
     if (config_walking_["imu_install_delta_bias"]) {
@@ -548,7 +565,7 @@ class RlBasicRunnerCHR : public rclcpp::Node {
     return "";
   }
   
-  void LoadCsvTrajectory(const std::string& workspace_root) {
+  void LoadCsvTrajectory(const std::string& /* workspace_root */) {
     if (csv_data_path_.empty()) return;
     
     std::string full_csv_path;
@@ -964,6 +981,7 @@ class RlBasicRunnerCHR : public rclcpp::Node {
       time_ = 0.0;
       is_first_time_ = true;
       is_walking_mode_ = true;
+      is_damping_mode_ = false;
       walking_start_time_ = -1.0;
       mujoco_reset_received_ = false;
       return;
@@ -1007,7 +1025,8 @@ class RlBasicRunnerCHR : public rclcpp::Node {
           double mimic_pitch = GetCurrentPitchAngle();
           size_t matched_idx = FindMatchingTrajectoryIndex(mimic_pitch);
           trajectory_index_ = matched_idx;
-          RCLCPP_INFO(get_logger(), "Matched pitch angle (%.4f rad) and set trajectory_index_ to %zu", mimic_pitch, trajectory_index_);
+          RCLCPP_INFO(get_logger(), "[摔倒检测] mimic 选取第 %zu 帧 (pitch=%.4f rad, 轨迹总帧数=%ld)", 
+                      trajectory_index_, mimic_pitch, current_traj_ ? static_cast<long>(current_traj_->rows()) : 0);
         } else {
           RCLCPP_WARN(get_logger(), "Cannot match pitch: observation_type=%s, current_traj_=%s", 
                       observation_type_.c_str(), current_traj_ ? "valid" : "null");
@@ -1028,6 +1047,12 @@ class RlBasicRunnerCHR : public rclcpp::Node {
       CalculateObservation();
     }
     CalculateMotorCommand();
+    
+    // 应用扭矩限制（如果启用）
+    if (torque_limit_enabled_) {
+      ApplyTorqueLimits();
+    }
+    
     SendMotorCommand();
     time_ += control_dt_;
   }
@@ -1193,12 +1218,24 @@ class RlBasicRunnerCHR : public rclcpp::Node {
       size_t end = current_traj_->rows() > 0 ? current_traj_->rows() - 1 : 0;
       if (trajectory_index_ < end) {
         trajectory_index_++;
+      } else if (!is_damping_mode_ && trajectory_index_ >= end) {
+        // 轨迹播放完成，进入 damping mode
+        is_damping_mode_ = true;
+        RCLCPP_INFO(get_logger(), "[mimic] 轨迹播放完成（第 %zu 帧），进入 damping mode (time=%.2f)",
+                    trajectory_index_, time_);
       }
-      // 与 rl_dance 一致：到达最后一帧后不再步进（replay=false）
     }
   }
 
   void CalculateMotorCommand() {
+    // Damping mode: mimic 轨迹播放完后，只发送阻尼命令（kp=0, kd=damping）
+    if (is_damping_mode_) {
+      // 保持当前关节位置，但不使用 kp 控制，只靠阻尼稳定关节
+      // q_des_ 设为当前实际位置，这样在 SendJointCommands 中 position 会是当前位置
+      q_des_ = q_real_;
+      return;
+    }
+    
     Eigen::VectorXd obs;
     
     if (is_walking_mode_) {
@@ -1361,6 +1398,12 @@ class RlBasicRunnerCHR : public rclcpp::Node {
         // 提取当前帧的关节位置和速度
         obs.segment(offset, num_joints) = current_traj_->row(trajectory_index_).head(num_joints);  // joint_pos
         obs.segment(offset + num_joints, num_joints) = current_traj_->row(trajectory_index_).segment(num_joints, num_joints);  // joint_vel
+        // 实时输出 command 里填的帧（节流：每 0.1s 打印一次，避免刷屏）
+        if (time_ - last_command_frame_print_time_ >= 0.1) {
+          RCLCPP_INFO(get_logger(), "[mimic] command 使用轨迹第 %zu 帧 (总帧数=%ld, time=%.2f)", 
+                      trajectory_index_, static_cast<long>(current_traj_->rows()), time_);
+          last_command_frame_print_time_ = time_;
+        }
       } else {
         // 如果轨迹不可用，使用零向量
         obs.segment(offset, command_total).setZero();
@@ -1488,14 +1531,137 @@ class RlBasicRunnerCHR : public rclcpp::Node {
     }
   }
 
+  void ApplyTorqueLimits() {
+    // 获取当前使用的 kp/kd
+    Eigen::VectorXd joint_kp, joint_kd;
+    if (is_damping_mode_) {
+      // Damping mode: kp=0, kd=0.5
+      joint_kp = Eigen::VectorXd::Zero(joint_kd_.size());
+      joint_kd = Eigen::VectorXd::Constant(joint_kd_.size(), 0.5);
+    } else if (is_walking_mode_) {
+      joint_kp = walking_joint_kp_;
+      joint_kd = walking_joint_kd_;
+    } else {
+      joint_kp = joint_kp_;
+      joint_kd = joint_kd_;
+    }
+    
+    const int n = q_des_.size();
+    if (q_real_.size() != n || qd_real_.size() != n || joint_kp.size() != n || joint_kd.size() != n) {
+      RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 1000, 
+                          "Size mismatch in ApplyTorqueLimits, skipping torque limit");
+      return;
+    }
+    
+    // ---- 构造每关节扭矩上限向量 tau_max ----
+    Eigen::VectorXd tau_max = Eigen::VectorXd::Zero(n);
+    if (!max_torque_joint_.empty()) {
+      int idx = 0;
+      for (const auto& group : max_torque_joint_) {
+        const int gsz = static_cast<int>(group.size());
+        const int remain = n - idx;
+        if (gsz > remain) {
+          RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 1000,
+                              "max_torque_joint total size exceeds DOF count");
+          break;
+        }
+        tau_max.segment(idx, gsz) = group;
+        idx += gsz;
+        if (idx >= n) break;
+      }
+      if (idx != n) {
+        RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 1000,
+                            "max_torque_joint total size (%d) does not match DOF count (%d)", idx, n);
+      }
+      for (int i = 0; i < n; ++i) {
+        if (tau_max(i) <= 0.0) {
+          tau_max(i) = std::numeric_limits<double>::infinity();
+        } else {
+          // 应用 soft_torque_limit（参考XZL实现）
+          tau_max(i) *= soft_torque_limit_;
+        }
+      }
+    } else {
+      // 如果没有配置，使用无穷大（不限制）
+      tau_max = Eigen::VectorXd::Constant(n, std::numeric_limits<double>::infinity());
+      RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 1000,
+                          "max_torque_joint is empty, torque limit disabled");
+      return;  // 如果没有配置，直接返回
+    }
+    
+    // ---- 1) PD 期望扭矩 tau_des = Kp*(q_des - q_actual) - Kd*qd ----
+    Eigen::VectorXd tau_des(n);
+    {
+      Eigen::ArrayXd Kp = joint_kp.array();
+      Eigen::ArrayXd Kd = joint_kd.array();
+      tau_des = (Kp * (q_des_ - q_real_).array() - Kd * qd_real_.array()).matrix();
+    }
+    
+    // ---- 2) 逐关节硬限幅（参考rl_dance_runner实现）----
+    Eigen::VectorXd tau = tau_des;
+    for (int i = 0; i < n; ++i) {
+      const double m = tau_max(i);
+      if (std::isfinite(m)) {
+        if (tau(i) > m) tau(i) = m;
+        if (tau(i) < -m) tau(i) = -m;
+      }
+    }
+    
+    // ---- 3) 下肢总扭矩限制（参考rl_dance_runner实现）----
+    const int lower_body_end_index = 12;  // [0, 12) 为下肢
+    if (n >= lower_body_end_index && max_lower_body_torque_ > 0.0) {
+      const double sum_abs_lower = tau.segment(0, lower_body_end_index).cwiseAbs().sum();
+      const double limit = max_lower_body_torque_;
+      if (sum_abs_lower > limit) {
+        const double scale = limit / sum_abs_lower;
+        tau.segment(0, lower_body_end_index) *= scale;
+      }
+    }
+    
+    // ---- 4) 回推 q_des'：q_des = q_actual + (tau + Kd*qd)/Kp（参考rl_dance_runner实现）----
+    const double eps = 1e-6;
+    for (int i = 0; i < n; ++i) {
+      const double kp = joint_kp(i);
+      const double kd = joint_kd(i);
+      if (std::abs(kp) > eps && std::isfinite(kp)) {
+        q_des_(i) = q_real_(i) + (tau(i) + kd * qd_real_(i)) / kp;
+      }
+      // 如果 Kp 太小，保持 q_des(i) 不变
+    }
+    
+    // ---- 5) 额外保护：通过限制 q_des_ 范围确保扭矩不超过限制（参考XZL实现）----
+    // 这提供了额外的安全保护，即使q_actual和qd_real在下一帧变化，也能确保扭矩不超过限制
+    const double kp_min_threshold = 1e-3;
+    const Eigen::VectorXd joint_kp_safe = joint_kp.cwiseMax(kp_min_threshold);
+    Eigen::VectorXd q_des_lb = (-tau_max.array() + (joint_kd.array() * qd_real_.array())).matrix();
+    Eigen::VectorXd q_des_ub = (tau_max.array() + (joint_kd.array() * qd_real_.array())).matrix();
+    q_des_lb = q_des_lb.array() / joint_kp_safe.array();
+    q_des_ub = q_des_ub.array() / joint_kp_safe.array();
+    q_des_lb += q_real_;
+    q_des_ub += q_real_;
+    q_des_ = q_des_.cwiseMax(q_des_lb).cwiseMin(q_des_ub);
+  }
+
   void SendMotorCommand() {
     // Convert Eigen vectors to std::vector
     joint_command_->position = std::vector<double>(q_des_.data(), q_des_.data() + q_des_.size());
     joint_command_->velocity = std::vector<double>(q_des_.size(), 0.0);
     joint_command_->feed_forward_torque = std::vector<double>(q_des_.size(), 0.0);
     joint_command_->torque = std::vector<double>(q_des_.size(), 0.0);
-    joint_command_->stiffness = std::vector<double>(joint_kp_.data(), joint_kp_.data() + joint_kp_.size());
-    joint_command_->damping = std::vector<double>(joint_kd_.data(), joint_kd_.data() + joint_kd_.size());
+    
+    // 根据模式选择正确的 kp/kd 参数
+    if (is_damping_mode_) {
+      // Damping mode: kp=0, kd=0.5
+      joint_command_->stiffness = std::vector<double>(q_des_.size(), 0.0);
+      joint_command_->damping = std::vector<double>(q_des_.size(), 0.5);
+    } else if (is_walking_mode_) {
+      joint_command_->stiffness = std::vector<double>(walking_joint_kp_.data(), walking_joint_kp_.data() + walking_joint_kp_.size());
+      joint_command_->damping = std::vector<double>(walking_joint_kd_.data(), walking_joint_kd_.data() + walking_joint_kd_.size());
+    } else {
+      joint_command_->stiffness = std::vector<double>(joint_kp_.data(), joint_kp_.data() + joint_kp_.size());
+      joint_command_->damping = std::vector<double>(joint_kd_.data(), joint_kd_.data() + joint_kd_.size());
+    }
+    
     joint_command_->parallel_parser_type = interface_protocol::msg::ParallelParserType::RL_PARSER;
     // Send command through message handler
     message_handler_->PublishJointCommand(*joint_command_);
@@ -1543,6 +1709,7 @@ class RlBasicRunnerCHR : public rclcpp::Node {
   std::map<std::string, Eigen::MatrixXd> interpolated_trajs_;
   std::map<std::string, Eigen::MatrixXd> interpolated_base_vel_trajs_;  // 基座速度轨迹
   size_t trajectory_index_ = 0;  // 当前轨迹索引
+  double last_command_frame_print_time_ = -1.0;  // 上次打印 command 帧的时间（节流用）
   
   // Proprioceptive history buffers (5步历史)
   Eigen::MatrixXd q_diff_history_;      // q_actual - default_joint_q (24维 × 5步)
@@ -1564,6 +1731,7 @@ class RlBasicRunnerCHR : public rclcpp::Node {
   double global_phase_;
   bool is_first_time_;
   bool is_walking_mode_;
+  bool is_damping_mode_ = false;  // damping 模式：mimic 播放完后进入
   double walking_duration_;
   double walking_start_time_;
   bool mujoco_reset_received_;
@@ -1600,6 +1768,8 @@ class RlBasicRunnerCHR : public rclcpp::Node {
   double walking_observation_clip_;
   double walking_transition_time_;
   Eigen::Vector3d walking_imu_install_bias_;
+  Eigen::VectorXd walking_joint_kp_;   // walking 模式的 kp（从 XZL 配置加载）
+  Eigen::VectorXd walking_joint_kd_;   // walking 模式的 kd（从 XZL 配置加载）
   Eigen::VectorXd mlp_net_action_walking_;
   Eigen::VectorXd q_real_;
   Eigen::VectorXd qd_real_;
@@ -1615,6 +1785,12 @@ class RlBasicRunnerCHR : public rclcpp::Node {
   Eigen::Vector3d command_scale_;
   Eigen::Vector3d command_bias_;  // 命令偏差（与 rl_dance 一致）
   Eigen::Vector3d imu_install_bias_ = Eigen::Vector3d::Zero();
+  
+  // 扭矩限制参数
+  bool torque_limit_enabled_ = false;
+  std::vector<Eigen::VectorXd> max_torque_joint_;
+  double max_lower_body_torque_ = 0.0;  // 下肢总扭矩限制（仅CHR/rl_dance使用）
+  double soft_torque_limit_ = 0.9;  // 软扭矩限制系数，默认0.9（参考XZL实现）
   
   // CSV 相关配置（从 yaml 读取或使用默认值）
   std::string csv_data_path_;  // CSV 文件路径

@@ -59,6 +59,7 @@ conda create -n engineai_ros2 python=3.10
 conda activate engineai_ros2
 # Install glog (required for rl_basic_example_CHR)
 conda install -y -c conda-forge glog
+conda install pandas 
 
 ```
 
@@ -117,9 +118,10 @@ cd /home/wang22/engineai/engineai_ros2_workspace && conda activate engineai_ros2
 ./scripts/build_nodes.sh sim    # or colcon build --packages-select mujoco_simulator , or colcon build
 ./scripts/build_nodes_4090.sh sim
 source install/setup.bash 
-# ros2 launch mujoco_simulator mujoco_simulator.launch.py
-# 修改 sim_manager.h protection_enabled_ 启用护具功能（减少冲击力）
-ros2 launch mujoco_simulator mujoco_simulator.launch.py export_contact:=true save_contact_csv:=true save_perturbation_csv:=true save_joint_forces_csv:=true 
+# ros2 launch mujoco_simulator mujoco_simulator.launch.py csv_format:=csv or binary
+# 修改 pm_v2.yaml protection: enabled:true 启用护具功能（thickness:设置厚度）
+# 修改 rl_basic_param_XZL.yaml 的 enable_damping_mode, 启用摔倒damping mode 
+ros2 launch mujoco_simulator mujoco_simulator.launch.py save_contact_csv:=true save_joint_state_csv:=true save_sensor_vibration_csv:=true save_joint_forces_csv:=true save_link_kinetic_energy_csv:=true csv_format:=csv
 
 # # 推倒采样仿真器 - 支持交互式干扰力控制
 # # 基本启动
@@ -137,7 +139,7 @@ ros2 launch interface_example rl_basic_example_CHR.launch.py
 ## ground.xml friction="0.1"
 ## serial_pm_v2_mesh.xml foot 和 toe 的 friction=0.1
 ## pm_v2.yaml default_force_magnitude = 0.0, auto_sampling = true
-## rl_basic_param_XZL.yaml linear velocity = 2.0
+## rl_basic_param_XZL.yaml linear velocity = 1.0
 
 ## 绊倒采样
 ## pm_v2_mesh.xml, 取消 terrain.xml的注释
@@ -178,8 +180,10 @@ chmod +x /home/wang22/engineai/engineai_ros2_workspace/scripts/automated_collect
 # 加护具仿真
 # 修改 sim_manager.h 中最后两行 protection_enabled_  ，  protection_thickness_
 # 修改 sim_manager.cc 中的排除列表 excluded_contact_pairs_
-
-
+# 说明：启用护具后，ApplyProtectionToContactForces 会：
+#   1. 只对 > 800N 的接触力做防护衰减（躺着时小力不处理，仿真正常）
+#   2. 缩放 efc_force 并重算 qacc/cacc（CSV 中 contact_force 与 link_acc 一致）
+# 注意：修改 qacc 会影响仿真行为，可能导致弹跳等问题（约束一致性被破坏）。
 
 # terminal 3
 # choose mesh or geometry: in src/simulation/mujoco/assets/config/pm_v2.yaml
@@ -460,16 +464,123 @@ sudo apt update
 sudo apt install ffmpeg -y
 
 ffmpeg -i input.webm output.mp4
+ffmpeg -i "input.webm" -vf "scale=trunc(iw/2)*2:trunc(ih/2)*2" -c:v libx264 -crf 23 -preset fast -c:a aac output.mp4
 ```
 
 
 # 碰撞点viewer
 ## 启动必要的节点
+```bash
 cd /home/wang22/engineai/engineai_ros2_workspace && source install/setup.bash && ros2 launch launch_urdf_only.launch.py
+```
 
 ## 在另一个终端启动RViz
+```bash
 cd /home/wang22/engineai/engineai_ros2_workspace/src/simulation/mujoco/assets/resource/robot/pm_v2/urdf && rviz2 -d robot.rviz
+```
 
 # 查看urdf collision
 # 使用外部URDF文件，自动启动RViz
+```bash
 ros2 launch launch_urdf_only.launch.py urdf_file:=/home/wang22/engineai/engineai_rl_workspace/engineai_gym/engineai_gym/resources/robots/biped/pm01/urdf/serial_pm_v2_primitive.urdf
+```
+
+
+# Risk 计算
+## 单次采样的数据处理
+```bash
+# active using mimic
+python3 scripts/calculate_fall_risk.py \
+  --contact /home/wang22/data/mujoco_logs/active_mimic/contact_data_20260128_211558.csv \
+  --sensor-vibration /home/wang22/data/mujoco_logs/active_mimic/sensor_vibration_data_20260128_211558.csv \
+  --joint-state /home/wang22/data/mujoco_logs/active_mimic/joint_state_data_20260128_211558.csv \
+  --joint-forces /home/wang22/data/mujoco_logs/active_mimic/joint_forces_data_20260128_211558.csv \
+  --output /home/wang22/data/mujoco_logs/active_mimic/risk_results_20260128_211558 \
+  --plot
+
+# --plot 会自动查找同目录下的 link_kinetic_energy_data_*.csv 并绘制能量曲线
+# 需要仿真时开启 save_link_kinetic_energy_csv: true 才会生成该文件
+python3 scripts/calculate_fall_risk.py \
+  --contact /home/wang22/data/mujoco_logs/contact_data_20260131_192508.csv \
+  --sensor-vibration /home/wang22/data/mujoco_logs/sensor_vibration_data_20260131_192508.csv \
+  --joint-state /home/wang22/data/mujoco_logs/joint_state_data_20260131_192508.csv \
+  --joint-forces /home/wang22/data/mujoco_logs/joint_forces_data_20260131_192508.csv \
+  --output /home/wang22/data/mujoco_logs/risk_results_20260131_192508 \
+  --plot
+
+
+
+# non_stumble
+python3 scripts/calculate_fall_risk.py \
+  --contact /home/wang22/data/mujoco_logs/non_stumble/contact_data_20260130_130908.csv \
+  --sensor-vibration /home/wang22/data/mujoco_logs/non_stumble/sensor_vibration_data_20260130_130908.csv \
+  --joint-state /home/wang22/data/mujoco_logs/non_stumble/joint_state_data_20260130_130908.csv \
+  --joint-forces /home/wang22/data/mujoco_logs/non_stumble/joint_forces_data_20260130_130908.csv \
+  --output /home/wang22/data/mujoco_logs/non_stumble/risk_results_20260130_130908 \
+  --plot
+
+# non_slip
+python3 scripts/calculate_fall_risk.py \
+  --contact /home/wang22/data/mujoco_logs/non_slip/contact_data_20260130_133543.csv \
+  --sensor-vibration /home/wang22/data/mujoco_logs/non_slip/sensor_vibration_data_20260130_133543.csv \
+  --joint-state /home/wang22/data/mujoco_logs/non_slip/joint_state_data_20260130_133543.csv \
+  --joint-forces /home/wang22/data/mujoco_logs/non_slip/joint_forces_data_20260130_133543.csv \
+  --output /home/wang22/data/mujoco_logs/non_slip/risk_results_20260130_133543 \
+  --plot
+
+# non_poweroff
+python3 scripts/calculate_fall_risk.py \
+  --contact /home/wang22/data/mujoco_logs/non_poweroff/contact_data_20260130_131602.csv \
+  --sensor-vibration /home/wang22/data/mujoco_logs/non_poweroff/sensor_vibration_data_20260130_131602.csv \
+  --joint-state /home/wang22/data/mujoco_logs/non_poweroff/joint_state_data_20260130_131602.csv \
+  --joint-forces /home/wang22/data/mujoco_logs/non_poweroff/joint_forces_data_20260130_131602.csv \
+  --output /home/wang22/data/mujoco_logs/non_poweroff/risk_results_20260130_131602 \
+  --plot
+
+# non_push
+python3 scripts/calculate_fall_risk.py \
+  --contact /home/wang22/data/mujoco_logs/non_push/contact_data_20260130_132708.csv \
+  --sensor-vibration /home/wang22/data/mujoco_logs/non_push/sensor_vibration_data_20260130_132708.csv \
+  --joint-state /home/wang22/data/mujoco_logs/non_push/joint_state_data_20260130_132708.csv \
+  --joint-forces /home/wang22/data/mujoco_logs/non_push/joint_forces_data_20260130_132708.csv \
+  --output /home/wang22/data/mujoco_logs/non_push/risk_results_20260130_132708 \
+  --plot
+
+# passive using risk-guided manner
+
+
+
+# passive using heuristic manner
+python3 scripts/calculate_fall_risk.py \
+  --contact /home/wang22/data/mujoco_logs/passive_heuristic/contact_data_20260129_192350.csv \
+  --sensor-vibration /home/wang22/data/mujoco_logs/passive_heuristic/sensor_vibration_data_20260129_192350.csv \
+  --joint-state /home/wang22/data/mujoco_logs/passive_heuristic/joint_state_data_20260129_192350.csv \
+  --joint-forces /home/wang22/data/mujoco_logs/passive_heuristic/joint_forces_data_20260129_192350.csv \
+  --output /home/wang22/data/mujoco_logs/passive_heuristic/risk_results_20260129_192350 \
+  --plot
+
+# passive using rigid reinforcement strategies
+
+
+# active using damping mode 
+python3 scripts/calculate_fall_risk.py \
+  --contact /home/wang22/data/mujoco_logs/active_damping/contact_data_20260129_192809.csv \
+  --sensor-vibration /home/wang22/data/mujoco_logs/active_damping/sensor_vibration_data_20260129_192809.csv \
+  --joint-state /home/wang22/data/mujoco_logs/active_damping/joint_state_data_20260129_192809.csv \
+  --joint-forces /home/wang22/data/mujoco_logs/active_damping/joint_forces_data_20260129_192809.csv \
+  --output /home/wang22/data/mujoco_logs/active_damping/risk_results_20260129_192809 \
+  --plot
+
+# active + passive
+python3 scripts/calculate_fall_risk.py \
+  --contact /home/wang22/data/mujoco_logs/active_passive/contact_data_20260129_193636.csv \
+  --sensor-vibration /home/wang22/data/mujoco_logs/active_passive/sensor_vibration_data_20260129_193636.csv \
+  --joint-state /home/wang22/data/mujoco_logs/active_passive/joint_state_data_20260129_193636.csv \
+  --joint-forces /home/wang22/data/mujoco_logs/active_passive/joint_forces_data_20260129_193636.csv \
+  --output /home/wang22/data/mujoco_logs/active_passive/risk_results_20260129_193636 \
+  --plot
+
+# 
+
+```
+

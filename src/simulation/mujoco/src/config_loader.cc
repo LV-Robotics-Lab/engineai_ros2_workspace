@@ -156,6 +156,17 @@ bool ConfigLoader::LoadConfig() {
       }
     }
 
+    // 加载防护功能配置
+    if (config["protection"]) {
+      YAML::Node protection = config["protection"];
+      if (protection["enabled"]) {
+        protection_enabled_ = protection["enabled"].as<bool>();
+      }
+      if (protection["thickness"]) {
+        protection_thickness_ = protection["thickness"].as<double>();
+      }
+    }
+
     // 解析初始速度配置
     if (config["initial_velocity"]) {
       YAML::Node initial_velocity = config["initial_velocity"];
