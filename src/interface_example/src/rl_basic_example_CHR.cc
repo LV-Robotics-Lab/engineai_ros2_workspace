@@ -309,6 +309,18 @@ class RlBasicRunnerCHR : public rclcpp::Node {
       }
     }
 
+    // 测试用：reset 后先走 XZL，等 test_force_fall_delay 秒后强制切到指定方向 mimic（如 "left"）
+    if (config_["test_force_fall_direction"]) {
+      test_force_fall_direction_ = config_["test_force_fall_direction"].as<std::string>();
+      if (config_["test_force_fall_delay"]) {
+        test_force_fall_delay_ = config_["test_force_fall_delay"].as<double>();
+      }
+      if (!test_force_fall_direction_.empty()) {
+        RCLCPP_INFO(get_logger(), "test_force_fall_direction: %s, delay %.1fs (walk XZL then switch)",
+                    test_force_fall_direction_.c_str(), test_force_fall_delay_);
+      }
+    }
+
     // 稳定性检测（mimic 中不稳定则提前切 damping，可选）
     mimic_stability_to_damping_enable_ = config_["mimic_stability_to_damping_enable"] ?
         config_["mimic_stability_to_damping_enable"].as<bool>() : false;
@@ -917,6 +929,7 @@ class RlBasicRunnerCHR : public rclcpp::Node {
     mujoco_reset_received_ = true;
     walking_start_time_ = time_;
     reset_time_ = time_;  // 记录 reset 时间，用于摔倒检测延迟
+    test_force_fall_triggered_ = false;  // 允许本次 reset 后再次强制触发（若配置了 test_force_fall_direction）
     is_walking_mode_ = true;
     is_damping_mode_ = false;
     global_phase_ = 0.0;
@@ -1172,16 +1185,40 @@ class RlBasicRunnerCHR : public rclcpp::Node {
     }
 
     // 摔倒检测：在 walking 模式下，使用倾斜角+角速度+防抖机制检测摔倒
-    // Reset 后需要等待 fall_detection_delay_ 秒才开始检测，让机器人先稳定
-    if (is_walking_mode_ && mujoco_reset_received_ && (time_ - reset_time_) > fall_detection_delay_) {
-      MimicDirection fall_direction;
-      if (DetectFall(fall_direction)) {
+    // 若配置了 test_force_fall_direction，则 reset 后先走 XZL，等 test_force_fall_delay 秒后强制切到该方向 mimic
+    // 否则等 fall_detection_delay_ 秒后才开始 DetectFall
+    double delay_for_switch = test_force_fall_direction_.empty() ? fall_detection_delay_ : test_force_fall_delay_;
+    if (is_walking_mode_ && mujoco_reset_received_ && (time_ - reset_time_) > delay_for_switch) {
+      bool do_switch_to_mimic = false;
+      MimicDirection fall_direction = MimicDirection::FORWARD;
+
+      if (!test_force_fall_direction_.empty() && !test_force_fall_triggered_) {
+        for (size_t i = 0; i < static_cast<size_t>(MimicDirection::COUNT); ++i) {
+          if (test_force_fall_direction_ == kMimicDirectionNames[i]) {
+            test_force_fall_triggered_ = true;
+            fall_direction = static_cast<MimicDirection>(i);
+            do_switch_to_mimic = true;
+            RCLCPP_INFO(get_logger(), "[test_force_fall] Forcing mimic direction: %s (no push, time=%.2f)",
+                        kMimicDirectionNames[i].c_str(), time_);
+            break;
+          }
+        }
+        if (!do_switch_to_mimic) {
+          RCLCPP_WARN(get_logger(), "test_force_fall_direction invalid: '%s', use e.g. left/forward/right",
+                      test_force_fall_direction_.c_str());
+        }
+      }
+      if (!do_switch_to_mimic && DetectFall(fall_direction)) {
+        do_switch_to_mimic = true;
+      }
+
+      if (do_switch_to_mimic) {
         is_walking_mode_ = false;
-        
+
         // 根据检测到的摔倒方向选择 mimic Policy
         current_mimic_direction_ = fall_direction;
         int dir_idx = static_cast<int>(fall_direction);
-        
+
         if (mlp_net_mimic_directions_[dir_idx]) {
           mlp_net_ = mlp_net_mimic_directions_[dir_idx].get();
           RCLCPP_INFO(get_logger(), "Switching from walking to mimic mode at time: %.2f", time_);
@@ -1200,20 +1237,20 @@ class RlBasicRunnerCHR : public rclcpp::Node {
             }
           }
         }
-        
+
         // 切换到对应方向的轨迹
         SwitchToDirectionalTrajectory(current_mimic_direction_);
-        
+
         // 匹配 IMU 俯仰角度并设置 trajectory_index_
         if (observation_type_ == "mimic_future" && current_traj_ != nullptr) {
           // 切换到 mimic 模式后，使用 mimic 模式的 IMU bias 重新计算俯仰角
           double mimic_pitch = GetCurrentPitchAngle();
           size_t matched_idx = FindMatchingTrajectoryIndex(mimic_pitch);
           trajectory_index_ = matched_idx;
-          RCLCPP_INFO(get_logger(), "[摔倒检测] mimic 选取第 %zu 帧 (pitch=%.4f rad, 轨迹总帧数=%ld)", 
+          RCLCPP_INFO(get_logger(), "[摔倒检测] mimic 选取第 %zu 帧 (pitch=%.4f rad, 轨迹总帧数=%ld)",
                       trajectory_index_, mimic_pitch, current_traj_ ? static_cast<long>(current_traj_->rows()) : 0);
         } else {
-          RCLCPP_WARN(get_logger(), "Cannot match pitch: observation_type=%s, current_traj_=%s", 
+          RCLCPP_WARN(get_logger(), "Cannot match pitch: observation_type=%s, current_traj_=%s",
                       observation_type_.c_str(), current_traj_ ? "valid" : "null");
           trajectory_index_ = 0;
         }
@@ -1953,6 +1990,11 @@ class RlBasicRunnerCHR : public rclcpp::Node {
   int fast_fall_confirm_frames_ = 2;        // 快速摔倒确认帧数
   double fall_detection_delay_ = 1.0;       // Reset 后摔倒检测延迟时间 (秒)
   double reset_time_ = -100.0;              // 上次 reset 时间
+
+  // 测试用：reset 后先走 XZL，等 test_force_fall_delay 秒后强制切到该方向 mimic（如 "left"）
+  std::string test_force_fall_direction_;
+  double test_force_fall_delay_ = 3.0;      // 秒，仅当 test_force_fall_direction_ 非空时有效
+  bool test_force_fall_triggered_ = false;  // 每次 reset 后只强制触发一次
 
   // 稳定性检测（mimic 中不稳定则提前切 damping，可选）
   bool mimic_stability_to_damping_enable_ = false;

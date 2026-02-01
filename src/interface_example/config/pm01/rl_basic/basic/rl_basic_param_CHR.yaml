@@ -249,7 +249,7 @@ max_lower_body_torque: 550.0
 # 步态周期（CHR walking 使用）
 default_dynamic_cycle_time: 0.8
 
-# 稳定性检测（mimic 播放过程中若检测到不稳定则提前切到 damping；与 rl_dance 同逻辑）
+# mimic 稳定性检测（mimic 播放过程中若检测到不稳定则提前切到 damping；与 rl_dance 同逻辑）
 mimic_stability_to_damping_enable: false   # 是否开启：mimic 中不稳定则切 damping
 stability_detection:
   ang_vel_threshold: 0.4           # 角速度阈值 (rad/s)，超过认为不稳定
@@ -257,10 +257,15 @@ stability_detection:
   stability_smoothing_threshold: 0.6   # 历史稳定比例超过此值才认为稳定
   stability_history_length: 10    # 历史帧数
 
-# 摔倒检测参数（walking 下超阈值则切 mimic）
+# 测试用：reset 后先走 XZL，等 test_force_fall_delay 秒后强制切到指定方向 mimic（不跑摔倒检测）
+# 若 test_force_fall_direction 留空，则使用下方 fall_detection 进行真实摔倒检测
+test_force_fall_direction: "forward"   # 可选: forward/forward_left/left/backward_left/backward/backward_right/right/forward_right
+test_force_fall_delay: 3.0      # 仅当 test_force_fall_direction 非空时有效：reset 后先走 XZL 再等该时间(秒)后切到上述方向
+
+# 摔倒检测参数（仅当 test_force_fall_direction 留空时使用：walking 下 tilt/omega 超阈值则切 mimic）
 fall_detection:
-  tilt_threshold: 0.5           # 倾斜角阈值 (rad) 0.5
-  omega_threshold: 1.8          # 角速度阈值 (rad/s) 1.8
+  tilt_threshold: 0.5            # 倾斜角阈值 (rad)，改小易误触、方向仍由重力判定
+  omega_threshold: 1.8          # 角速度阈值 (rad/s)
   confirm_frames: 8             # 确认帧数
   fast_fall_omega: 2.5          # 快速摔倒角速度阈值 (rad/s)
   fast_fall_confirm_frames: 2   # 快速摔倒确认帧数

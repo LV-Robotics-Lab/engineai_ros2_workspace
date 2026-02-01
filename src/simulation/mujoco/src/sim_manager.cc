@@ -477,7 +477,8 @@ void SimManager::ApplyPerturbationForces() {
     if (d_->time - auto_start_time_ >= config_loader_->GetAutoDelay()) {
       std::string direction = config_loader_->GetAutoDirection();
       
-      // 根据方向设置推力
+      // 根据方向设置推力（含斜向 45°：左前/右前/左后/右后）
+      const double s = perturb_force_magnitude_ / std::sqrt(2.0);
       if (direction == "forward") {
         perturb_force_ = Eigen::Vector3d(perturb_force_magnitude_, 0, 0);
       } else if (direction == "backward") {
@@ -486,6 +487,14 @@ void SimManager::ApplyPerturbationForces() {
         perturb_force_ = Eigen::Vector3d(0, perturb_force_magnitude_, 0);
       } else if (direction == "right") {
         perturb_force_ = Eigen::Vector3d(0, -perturb_force_magnitude_, 0);
+      } else if (direction == "left_forward") {
+        perturb_force_ = Eigen::Vector3d(s, s, 0);
+      } else if (direction == "right_forward") {
+        perturb_force_ = Eigen::Vector3d(s, -s, 0);
+      } else if (direction == "left_backward") {
+        perturb_force_ = Eigen::Vector3d(-s, s, 0);
+      } else if (direction == "right_backward") {
+        perturb_force_ = Eigen::Vector3d(-s, -s, 0);
       }
       
       // 应用推力
