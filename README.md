@@ -159,9 +159,10 @@ ros2 launch interface_example rl_basic_example_CHR.launch.py
 #     perturb_body_name:=LINK_TORSO_YAW
 
 # 推倒采样键盘控制说明：
-# Shift + F/B: 前后向干扰力
-# Shift + L/R: 左右向干扰力  
-# Shift + U/D: 上下向干扰力
+# Shift + W/S: 前后向干扰力
+# Shift + A/D: 左右向干扰力
+# Shift + Q/E/Z/C: 左前/右前/左后/右后（斜 45° 干扰力）
+# Shift + U/K: 上下向干扰力
 # Shift + G/J: X轴干扰力矩
 # Shift + Y/H: Y轴干扰力矩
 # Shift + [/]: Z轴干扰力矩

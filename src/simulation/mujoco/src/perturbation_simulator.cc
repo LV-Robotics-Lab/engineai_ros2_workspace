@@ -5,6 +5,7 @@
 #include "config_loader.h"
 #include "ros_interface.h"
 #include <Eigen/Dense>
+#include <cmath>
 #include <iostream>
 #include <chrono>
 #include <thread>
@@ -457,8 +458,6 @@ void PhysicsThread(mujoco::Simulate* sim, const char* filename, std::shared_ptr<
  */
 class CustomGlfwAdapter : public mujoco::GlfwAdapter {
  protected:
-  bool shift_pressed = false;  // Shift键状态
-  
   /**
    * @brief 键盘事件处理函数
    * @param key 按键代码
@@ -466,9 +465,10 @@ class CustomGlfwAdapter : public mujoco::GlfwAdapter {
    * @param act 按键动作（按下/释放）
    * 
    * 实现推倒采样的键盘控制：
-   * - Shift + F/B: 前后向干扰力
-   * - Shift + L/R: 左右向干扰力  
-   * - Shift + U/D: 上下向干扰力
+   * - Shift + W/S: 前后向干扰力
+   * - Shift + A/D: 左右向干扰力
+   * - Shift + Q/E/Z/C: 左前/右前/左后/右后（斜 45° 干扰力）
+   * - Shift + U/K: 上下向干扰力
    * - Shift + G/J: X轴干扰力矩
    * - Shift + Y/H: Y轴干扰力矩
    * - Shift + [/]: Z轴干扰力矩
@@ -476,56 +476,90 @@ class CustomGlfwAdapter : public mujoco::GlfwAdapter {
    * - Shift + +/-: 调整干扰力大小
    * - Shift + ,/.: 调整干扰力持续时间
    */
-  void OnKey(int key, int scancode, int act) override {
+  void OnKey(int key, int scancode, int act, int mods) override {
     // 首先调用父类的OnKey方法，保持原有功能
-    mujoco::GlfwAdapter::OnKey(key, scancode, act);
-
-    // 更新Shift键状态
-    if (key == GLFW_KEY_LEFT_SHIFT || key == GLFW_KEY_RIGHT_SHIFT) {
-      if (act == GLFW_PRESS) {
-        shift_pressed = true;
-      } else if (act == GLFW_RELEASE) {
-        shift_pressed = false;
-      }
-      return;
-    }
+    mujoco::GlfwAdapter::OnKey(key, scancode, act, mods);
 
     // 只处理按下事件
     if (act != GLFW_PRESS) return;
 
-    // 只有在Shift键按下时才处理推倒采样控制
-    if (shift_pressed) {
+    // 使用 mods 判断 Shift，不依赖按键顺序
+    if ((mods & GLFW_MOD_SHIFT) != 0) {
       // 重置干扰力和力矩
       perturb_force = Eigen::Vector3d::Zero();
       perturb_torque = Eigen::Vector3d::Zero();
       
       switch (key) {
-        case GLFW_KEY_F:  // Shift + F: 前向干扰力
+        case GLFW_KEY_W:  // Shift + W: 前向干扰力
           apply_perturb = true;
           perturb_force.x() = perturb_force_magnitude;
           perturb_start_time = -1.0;
           std::cout << "触发前向干扰力: " << perturb_force.x() << std::endl;
           break;
 
-        case GLFW_KEY_B:  // Shift + B: 后向干扰力
+        case GLFW_KEY_S:  // Shift + S: 后向干扰力
           apply_perturb = true;
           perturb_force.x() = -perturb_force_magnitude;
           perturb_start_time = -1.0;
           std::cout << "触发后向干扰力: " << perturb_force.x() << std::endl;
           break;
 
-        case GLFW_KEY_L:  // Shift + L: 左向干扰力
+        case GLFW_KEY_A:  // Shift + A: 左向干扰力
           apply_perturb = true;
           perturb_force.y() = perturb_force_magnitude;
           perturb_start_time = -1.0;
           std::cout << "触发左向干扰力: " << perturb_force.y() << std::endl;
           break;
 
-        case GLFW_KEY_R:  // Shift + R: 右向干扰力
+        case GLFW_KEY_D:  // Shift + D: 右向干扰力
           apply_perturb = true;
           perturb_force.y() = -perturb_force_magnitude;
           perturb_start_time = -1.0;
           std::cout << "触发右向干扰力: " << perturb_force.y() << std::endl;
+          break;
+
+        case GLFW_KEY_Q:  // Shift + Q: 左前（斜 45°）
+          apply_perturb = true;
+          {
+            const double s = perturb_force_magnitude / std::sqrt(2.0);
+            perturb_force.x() = s;
+            perturb_force.y() = s;
+          }
+          perturb_start_time = -1.0;
+          std::cout << "触发左前干扰力: (" << perturb_force.x() << ", " << perturb_force.y() << ")" << std::endl;
+          break;
+
+        case GLFW_KEY_E:  // Shift + E: 右前（斜 45°）
+          apply_perturb = true;
+          {
+            const double s = perturb_force_magnitude / std::sqrt(2.0);
+            perturb_force.x() = s;
+            perturb_force.y() = -s;
+          }
+          perturb_start_time = -1.0;
+          std::cout << "触发右前干扰力: (" << perturb_force.x() << ", " << perturb_force.y() << ")" << std::endl;
+          break;
+
+        case GLFW_KEY_Z:  // Shift + Z: 左后（斜 45°）
+          apply_perturb = true;
+          {
+            const double s = perturb_force_magnitude / std::sqrt(2.0);
+            perturb_force.x() = -s;
+            perturb_force.y() = s;
+          }
+          perturb_start_time = -1.0;
+          std::cout << "触发左后干扰力: (" << perturb_force.x() << ", " << perturb_force.y() << ")" << std::endl;
+          break;
+
+        case GLFW_KEY_C:  // Shift + C: 右后（斜 45°）
+          apply_perturb = true;
+          {
+            const double s = perturb_force_magnitude / std::sqrt(2.0);
+            perturb_force.x() = -s;
+            perturb_force.y() = -s;
+          }
+          perturb_start_time = -1.0;
+          std::cout << "触发右后干扰力: (" << perturb_force.x() << ", " << perturb_force.y() << ")" << std::endl;
           break;
 
         case GLFW_KEY_U:  // Shift + U: 上向干扰力
@@ -535,7 +569,7 @@ class CustomGlfwAdapter : public mujoco::GlfwAdapter {
           std::cout << "触发上向干扰力: " << perturb_force.z() << std::endl;
           break;
 
-        case GLFW_KEY_D:  // Shift + D: 下向干扰力
+        case GLFW_KEY_K:  // Shift + K: 下向干扰力
           apply_perturb = true;
           perturb_force.z() = -perturb_force_magnitude;
           perturb_start_time = -1.0;

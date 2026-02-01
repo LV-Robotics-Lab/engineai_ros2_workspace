@@ -30,9 +30,10 @@ int main(int argc, char** argv) {
   // 打印推外力控制说明
   std::cout << "=== MuJoCo 仿真器启动 ===" << std::endl;
   std::cout << "推外力控制快捷键：" << std::endl;
-  std::cout << "  Shift + F/B: 前后向干扰力" << std::endl;
-  std::cout << "  Shift + L/R: 左右向干扰力" << std::endl;
-  std::cout << "  Shift + U/D: 上下向干扰力" << std::endl;
+  std::cout << "  Shift + W/S: 前后向干扰力" << std::endl;
+  std::cout << "  Shift + A/D: 左右向干扰力" << std::endl;
+  std::cout << "  Shift + Q/E/Z/C: 左前/右前/左后/右后（斜 45°）" << std::endl;
+  std::cout << "  Shift + U/K: 上下向干扰力" << std::endl;
   std::cout << "  Shift + G/J: X轴干扰力矩" << std::endl;
   std::cout << "  Shift + Y/H: Y轴干扰力矩" << std::endl;
   std::cout << "  Shift + [/]: Z轴干扰力矩" << std::endl;

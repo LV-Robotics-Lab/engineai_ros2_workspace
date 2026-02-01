@@ -61,18 +61,18 @@ static void TorqueControllerWrapper(const mjModel* m, mjData* d) {
  */
 class CustomGlfwAdapter : public mj::GlfwAdapter {
  protected:
-  bool shift_pressed_ = false;  // Shift键状态
-  
   /**
    * @brief 键盘事件处理函数
    * @param key 按键代码
    * @param scancode 扫描码
    * @param act 按键动作（按下/释放）
+   * @param mods 修饰键状态（GLFW 传入），用于判断 Shift 是否按下，不依赖按键顺序
    * 
    * 实现推倒采样的键盘控制：
-   * - Shift + F/B: 前后向干扰力
-   * - Shift + L/R: 左右向干扰力  
-   * - Shift + U/D: 上下向干扰力
+   * - Shift + W/S: 前后向干扰力
+   * - Shift + A/D: 左右向干扰力
+   * - Shift + Q/E/Z/C: 左前/右前/左后/右后（斜 45°）
+   * - Shift + U/K: 上下向干扰力
    * - Shift + G/J: X轴干扰力矩
    * - Shift + Y/H: Y轴干扰力矩
    * - Shift + [/]: Z轴干扰力矩
@@ -80,27 +80,20 @@ class CustomGlfwAdapter : public mj::GlfwAdapter {
    * - Shift + +/-: 调整干扰力大小
    * - Shift + ,/.: 调整干扰力持续时间
    */
-  void OnKey(int key, int scancode, int act) override {
+  void OnKey(int key, int scancode, int act, int mods) override {
     // 首先调用父类的OnKey方法，保持原有功能
-    mj::GlfwAdapter::OnKey(key, scancode, act);
+    mj::GlfwAdapter::OnKey(key, scancode, act, mods);
 
-    // 更新Shift键状态
-    if (key == GLFW_KEY_LEFT_SHIFT || key == GLFW_KEY_RIGHT_SHIFT) {
-      if (act == GLFW_PRESS) {
-        shift_pressed_ = true;
-      } else if (act == GLFW_RELEASE) {
-        shift_pressed_ = false;
-      }
-      return;
-    }
+    // 使用 mods 判断 Shift：按下时 GLFW 会传入修饰键状态，不依赖先按 Shift 再按 W 的顺序
+    const bool shift_held = (mods & GLFW_MOD_SHIFT) != 0;
 
     // 处理按下和释放事件
     SimManager& sim_manager = SimManager::GetInstance();
     
-    if (act == GLFW_PRESS && shift_pressed_) {
+    if (act == GLFW_PRESS && shift_held) {
       // 处理按键按下事件（启动干扰力）
       switch (key) {
-        case GLFW_KEY_F:  // Shift + F: 前向干扰力
+        case GLFW_KEY_W:  // Shift + W: 前向干扰力
           {
             double current_force = sim_manager.GetPerturbationForceMagnitude();
             const auto& force_vec = sim_manager.GetPerturbationForce("forward", current_force);
@@ -111,7 +104,7 @@ class CustomGlfwAdapter : public mj::GlfwAdapter {
           }
           break;
 
-        case GLFW_KEY_B:  // Shift + B: 后向干扰力
+        case GLFW_KEY_S:  // Shift + S: 后向干扰力
           {
             double current_force = sim_manager.GetPerturbationForceMagnitude();
             const auto& force_vec = sim_manager.GetPerturbationForce("backward", current_force);
@@ -122,19 +115,19 @@ class CustomGlfwAdapter : public mj::GlfwAdapter {
           }
           break;
 
-        case GLFW_KEY_L:  // Shift + L: 左向干扰力
+        case GLFW_KEY_A:  // Shift + A: 左向干扰力
           {
             double current_force = sim_manager.GetPerturbationForceMagnitude();
             const auto& force_vec = sim_manager.GetPerturbationForce("left", current_force);
             sim_manager.SetPerturbationForce(Eigen::Vector3d(force_vec[0], force_vec[1], force_vec[2]));
             sim_manager.SetPerturbationTorque(Eigen::Vector3d::Zero());  // 清除力矩
             sim_manager.ApplyPerturbation(true);
-            std::cout << "触发左向干扰力: 力大小=" << sim_manager.GetPerturbationForceMagnitude() 
+            std::cout << "触发左向干扰力: 力大小=" << sim_manager.GetPerturbationForceMagnitude()
                       << "N, 目标物体=" << sim_manager.GetPerturbationBodyName() << " (推力可视化已启用)" << std::endl;
           }
           break;
 
-        case GLFW_KEY_R:  // Shift + R: 右向干扰力
+        case GLFW_KEY_D:  // Shift + D: 右向干扰力
           {
             double current_force = sim_manager.GetPerturbationForceMagnitude();
             const auto& force_vec = sim_manager.GetPerturbationForce("right", current_force);
@@ -142,6 +135,50 @@ class CustomGlfwAdapter : public mj::GlfwAdapter {
             sim_manager.SetPerturbationTorque(Eigen::Vector3d::Zero());  // 清除力矩
             sim_manager.ApplyPerturbation(true);
             std::cout << "触发右向干扰力" << std::endl;
+          }
+          break;
+
+        case GLFW_KEY_Q:  // Shift + Q: 左前（斜 45°）
+          {
+            double current_force = sim_manager.GetPerturbationForceMagnitude();
+            const double s = current_force / std::sqrt(2.0);
+            sim_manager.SetPerturbationForce(Eigen::Vector3d(s, s, 0));
+            sim_manager.SetPerturbationTorque(Eigen::Vector3d::Zero());
+            sim_manager.ApplyPerturbation(true);
+            std::cout << "触发左前干扰力 (斜 45°)" << std::endl;
+          }
+          break;
+
+        case GLFW_KEY_E:  // Shift + E: 右前（斜 45°）
+          {
+            double current_force = sim_manager.GetPerturbationForceMagnitude();
+            const double s = current_force / std::sqrt(2.0);
+            sim_manager.SetPerturbationForce(Eigen::Vector3d(s, -s, 0));
+            sim_manager.SetPerturbationTorque(Eigen::Vector3d::Zero());
+            sim_manager.ApplyPerturbation(true);
+            std::cout << "触发右前干扰力 (斜 45°)" << std::endl;
+          }
+          break;
+
+        case GLFW_KEY_Z:  // Shift + Z: 左后（斜 45°）
+          {
+            double current_force = sim_manager.GetPerturbationForceMagnitude();
+            const double s = current_force / std::sqrt(2.0);
+            sim_manager.SetPerturbationForce(Eigen::Vector3d(-s, s, 0));
+            sim_manager.SetPerturbationTorque(Eigen::Vector3d::Zero());
+            sim_manager.ApplyPerturbation(true);
+            std::cout << "触发左后干扰力 (斜 45°)" << std::endl;
+          }
+          break;
+
+        case GLFW_KEY_C:  // Shift + C: 右后（斜 45°）
+          {
+            double current_force = sim_manager.GetPerturbationForceMagnitude();
+            const double s = current_force / std::sqrt(2.0);
+            sim_manager.SetPerturbationForce(Eigen::Vector3d(-s, -s, 0));
+            sim_manager.SetPerturbationTorque(Eigen::Vector3d::Zero());
+            sim_manager.ApplyPerturbation(true);
+            std::cout << "触发右后干扰力 (斜 45°)" << std::endl;
           }
           break;
 
@@ -156,7 +193,7 @@ class CustomGlfwAdapter : public mj::GlfwAdapter {
           }
           break;
 
-        case GLFW_KEY_D:  // Shift + D: 下向干扰力
+        case GLFW_KEY_K:  // Shift + K: 下向干扰力
           {
             double current_force = sim_manager.GetPerturbationForceMagnitude();
             const auto& force_vec = sim_manager.GetPerturbationForce("down", current_force);
@@ -273,12 +310,16 @@ class CustomGlfwAdapter : public mj::GlfwAdapter {
     } else if (act == GLFW_RELEASE) {
       // 处理按键释放事件（停止干扰力）
       switch (key) {
-        case GLFW_KEY_F:  // 释放F键：停止前向干扰力
-        case GLFW_KEY_B:  // 释放B键：停止后向干扰力
-        case GLFW_KEY_L:  // 释放L键：停止左向干扰力
-        case GLFW_KEY_R:  // 释放R键：停止右向干扰力
+        case GLFW_KEY_W:  // 释放W键：停止前向干扰力
+        case GLFW_KEY_S:  // 释放S键：停止后向干扰力
+        case GLFW_KEY_A:  // 释放A键：停止左向干扰力
+        case GLFW_KEY_D:  // 释放D键：停止右向干扰力
+        case GLFW_KEY_Q:  // 释放Q键：停止左前干扰力
+        case GLFW_KEY_E:  // 释放E键：停止右前干扰力
+        case GLFW_KEY_Z:  // 释放Z键：停止左后干扰力
+        case GLFW_KEY_C:  // 释放C键：停止右后干扰力
         case GLFW_KEY_U:  // 释放U键：停止上向干扰力
-        case GLFW_KEY_D:  // 释放D键：停止下向干扰力
+        case GLFW_KEY_K:  // 释放K键：停止下向干扰力
           sim_manager.ApplyPerturbation(false);
           std::cout << "停止推力干扰力" << std::endl;
           break;

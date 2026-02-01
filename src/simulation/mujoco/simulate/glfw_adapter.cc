@@ -76,7 +76,7 @@ GlfwAdapter::GlfwAdapter() {
       });
   Glfw().glfwSetKeyCallback(
       window_, +[](GLFWwindow* window, int key, int scancode, int act, int mods) {
-        GlfwAdapterFromWindow(window).OnKey(key, scancode, act);
+        GlfwAdapterFromWindow(window).OnKey(key, scancode, act, mods);
       });
   Glfw().glfwSetMouseButtonCallback(
       window_, +[](GLFWwindow* window, int button, int act, int mods) {

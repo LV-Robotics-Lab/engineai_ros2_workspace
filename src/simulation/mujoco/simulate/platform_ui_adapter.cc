@@ -54,7 +54,8 @@ void PlatformUIAdapter::OnFilesDrop(int count, const char** paths) {
   state_.droppaths = nullptr;
 }
 
-void PlatformUIAdapter::OnKey(int key, int scancode, int act) {
+void PlatformUIAdapter::OnKey(int key, int scancode, int act, int mods) {
+  (void)mods;
   // translate API-specific key code
   int mj_key = TranslateKeyCode(key);
 

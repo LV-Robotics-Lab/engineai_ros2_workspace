@@ -77,7 +77,7 @@ class PlatformUIAdapter {
 
   // Event handlers
   void OnFilesDrop(int count, const char** paths);
-  virtual void OnKey(int key, int scancode, int act);
+  virtual void OnKey(int key, int scancode, int act, int mods = 0);
   void OnMouseButton(int button, int act);
   void OnMouseMove(double x, double y);
   void OnScroll(double xoffset, double yoffset);
