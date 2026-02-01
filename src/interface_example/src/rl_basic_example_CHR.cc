@@ -1271,8 +1271,8 @@ class RlBasicRunnerCHR : public rclcpp::Node {
       }
     }
     
-    // 在 mimic 模式下，根据重力投影方向动态切换 Policy
-    if (!is_walking_mode_) {
+    // 在 mimic 模式下，根据重力投影方向动态切换 Policy（测试模式 test_force_fall_direction 下不覆盖，保持用户指定方向）
+    if (!is_walking_mode_ && test_force_fall_direction_.empty()) {
       UpdateMimicPolicySelection();
     }
 
