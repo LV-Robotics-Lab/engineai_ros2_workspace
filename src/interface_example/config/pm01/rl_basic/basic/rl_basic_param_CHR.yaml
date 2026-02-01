@@ -262,7 +262,7 @@ stability_detection:
 
 # 测试用：reset 后先走 XZL，等 test_force_fall_delay 秒后强制切到指定方向 mimic（不跑摔倒检测）
 # 若 test_force_fall_direction 留空，则使用下方 fall_detection 进行真实摔倒检测
-test_force_fall_direction: "left"   # 可选: forward/forward_left/left/backward_left/backward/backward_right/right/forward_right
+test_force_fall_direction: ""   # 可选: forward/forward_left/left/backward_left/backward/backward_right/right/forward_right
 test_force_fall_delay: 3.0      # 仅当 test_force_fall_direction 非空时有效：reset 后先走 XZL 再等该时间(秒)后切到上述方向
 
 # 摔倒检测参数（仅当 test_force_fall_direction 留空时使用：walking 下 tilt/omega 超阈值则切 mimic）

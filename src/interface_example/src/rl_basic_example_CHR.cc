@@ -163,7 +163,7 @@ class RlBasicRunnerCHR : public rclcpp::Node {
       gravity_history_ = Eigen::MatrixXd::Zero(3, num_include_obs_steps_);
       
       if (observation_type_ == "mimic_future") {
-        goal_buffer_ = Eigen::MatrixXd::Zero(432, 1);
+        goal_buffer_ = Eigen::MatrixXd::Zero(480, 1);  // 10帧 × 24关节 × 2(pos+vel) = 480
       }
       
       if (current_profile_.use_quat_error) {
@@ -1438,11 +1438,11 @@ class RlBasicRunnerCHR : public rclcpp::Node {
     }
     
     if (current_traj_ != nullptr) {
-      const int num_future_frames = 9;
+      const int num_future_frames = 10;  // 10帧：当前帧 + 未来9帧（与 rl_dance 一致）
       const size_t max_idx = current_traj_->rows() - 1;
-      Eigen::VectorXd goal_obs(432);
+      Eigen::VectorXd goal_obs(480);  // 10帧 × 24关节 × 2(pos+vel) = 480
       for (int frame = 0; frame < num_future_frames; ++frame) {
-        size_t traj_idx = std::min(trajectory_index_ + frame + 1, max_idx);
+        size_t traj_idx = std::min(trajectory_index_ + frame, max_idx);  // 包含当前帧（frame=0）
         int obs_offset = frame * 2 * num_joints;
         goal_obs.segment(obs_offset, num_joints) = current_traj_->row(traj_idx).head(num_joints);
         goal_obs.segment(obs_offset + num_joints, num_joints) = 
@@ -1521,19 +1521,19 @@ class RlBasicRunnerCHR : public rclcpp::Node {
     }
     
     if (observation_type_ == "mimic_future") {
-      // 构建 mimic_future 的完整 observation（根据正确的 observation 结构）
-      // 结构: [proprioceptive_history (390维), quat_error_history (30维，如果启用), command (48维), future_frames (432维)]
-      // 如果 use_quat_error=true: 390 + 30 + 48 + 432 = 900维
-      // 如果 use_quat_error=false: 390 + 0 + 48 + 432 = 870维
+      // 构建 mimic_future 的完整 observation（与 rl_dance 一致）
+      // 结构: [proprioceptive_history (390维), quat_error_history (30维，如果启用), future_frames (480维)]
+      // 如果 use_quat_error=true: 390 + 30 + 480 = 900维
+      // 如果 use_quat_error=false: 390 + 0 + 480 = 870维
+      // 注意：rl_dance 没有 command 部分，future_frames 包含当前帧 + 未来9帧 = 10帧
       
       const int num_joints = static_cast<int>(active_joint_names_.size());
       const int proprio_dim = num_joints + num_joints + num_joints + 3 + 3;  // q_diff + qd + action + w + gravity = 78
       const int proprio_total = proprio_dim * num_include_obs_steps_;  // 78 * 5 = 390
       const int quat_error_total = current_profile_.use_quat_error ? 6 * num_include_obs_steps_ : 0;  // 6 * 5 = 30 或 0
-      const int command_total = 48;  // 16步历史 × 3维命令 = 48
-      const int future_frames_total = 432;  // 9帧 × 24关节 × 2(pos+vel) = 432
+      const int future_frames_total = 480;  // 10帧 × 24关节 × 2(pos+vel) = 480（当前帧 + 未来9帧）
       
-      obs = Eigen::VectorXd::Zero(proprio_total + quat_error_total + command_total + future_frames_total);
+      obs = Eigen::VectorXd::Zero(proprio_total + quat_error_total + future_frames_total);
       
       int offset = 0;
       
@@ -1634,26 +1634,8 @@ class RlBasicRunnerCHR : public rclcpp::Node {
         offset += quat_error_total;
       }
       
-      // 3. Command (48维 = joint_pos 24维 + joint_vel 24维)
-      // 从当前轨迹帧提取：command = [joint_pos, joint_vel]
-      if (current_traj_ != nullptr && trajectory_index_ < static_cast<size_t>(current_traj_->rows())) {
-        const int num_joints = static_cast<int>(active_joint_names_.size());
-        // 提取当前帧的关节位置和速度
-        obs.segment(offset, num_joints) = current_traj_->row(trajectory_index_).head(num_joints);  // joint_pos
-        obs.segment(offset + num_joints, num_joints) = current_traj_->row(trajectory_index_).segment(num_joints, num_joints);  // joint_vel
-        // 实时输出 command 里填的帧（节流：每 0.1s 打印一次，避免刷屏）
-        if (time_ - last_command_frame_print_time_ >= 0.1) {
-          RCLCPP_INFO(get_logger(), "[mimic] command 使用轨迹第 %zu 帧 (总帧数=%ld, time=%.2f)", 
-                      trajectory_index_, static_cast<long>(current_traj_->rows()), time_);
-          last_command_frame_print_time_ = time_;
-        }
-      } else {
-        // 如果轨迹不可用，使用零向量
-        obs.segment(offset, command_total).setZero();
-      }
-      offset += command_total;
-      
-      // 4. Future frames (432维 = 9帧 × 24关节 × 2(pos+vel))
+      // 3. Future frames (480维 = 10帧 × 24关节 × 2(pos+vel))
+      // 包含当前帧 + 未来9帧，与 rl_dance 一致
       obs.segment(offset, future_frames_total) = goal_buffer_.col(0);
       offset += future_frames_total;
       
@@ -1668,19 +1650,12 @@ class RlBasicRunnerCHR : public rclcpp::Node {
         obs.segment(proprio_total, quat_error_total) *= quat_error_scale;
       }
       
-      // 应用 command scaling（如果配置了）
-      double command_scale = 1.0;
-      if (config_["observations"] && config_["observations"]["observation_scale"] && 
-          config_["observations"]["observation_scale"]["observation_scale_command"]) {
-        command_scale = config_["observations"]["observation_scale"]["observation_scale_command"].as<double>();
-      }
-      obs.segment(proprio_total + quat_error_total, command_total) *= command_scale;
-      
       // 应用 goal scaling（对于 mimic_future: pos_scale=1.0, vel_scale=0.05）
-      const int num_future_frames = 9;  // 9帧，不是10帧
+      // 与 rl_dance 一致：10帧（当前帧 + 未来9帧）
+      const int num_future_frames = 10;
       const double goal_pos_scale = 1.0;
       const double goal_vel_scale = 0.05;
-      int goal_start_idx = proprio_total + quat_error_total + command_total;
+      int goal_start_idx = proprio_total + quat_error_total;
       for (int frame = 0; frame < num_future_frames; ++frame) {
         int frame_offset = goal_start_idx + frame * 2 * num_joints;
         // Scale position part
@@ -1692,7 +1667,7 @@ class RlBasicRunnerCHR : public rclcpp::Node {
       // 应用 clip（与 rl_dance 一致：最后应用）
       obs = obs.cwiseMax(-observation_clip_).cwiseMin(observation_clip_);
       
-      // 正确的 observation 结构：包含 command (48维) 和 future_frames (432维，9帧)
+      // 正确的 observation 结构：future_frames (480维，10帧：当前帧 + 未来9帧)
       
       int expected_dim = current_profile_.use_quat_error ? 900 : 870;
       RCLCPP_DEBUG(get_logger(), "CalculateMotorCommand: mimic_future observation built, size: %ld (expected: %d, use_quat_error=%s)", 
@@ -1964,7 +1939,7 @@ class RlBasicRunnerCHR : public rclcpp::Node {
   Eigen::MatrixXd gravity_history_;     // 重力历史 (3维 × 5步)
   Eigen::MatrixXd quat_error_history_; // 四元数误差历史 (6维 × 5步，当 use_quat_error 启用时)
   
-  // Goal observation buffer (mimic_future: 432维 × 1步) - 9帧，不是10帧
+  // Goal observation buffer (mimic_future: 480维 × 1步) - 10帧（当前帧 + 未来9帧，与 rl_dance 一致）
   Eigen::MatrixXd goal_buffer_;         // 目标观察缓冲区
   
   // Quaternion error calculation state
