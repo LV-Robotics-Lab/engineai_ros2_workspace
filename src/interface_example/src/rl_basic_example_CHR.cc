@@ -1,5 +1,6 @@
 #include <array>
 #include <chrono>
+#include <deque>
 #include <memory>
 #include <rclcpp/logging.hpp>
 #include <rclcpp/rclcpp.hpp>
@@ -307,6 +308,20 @@ class RlBasicRunnerCHR : public rclcpp::Node {
         fall_detection_delay_ = fall_config["detection_delay"].as<double>();
       }
     }
+
+    // 稳定性检测（mimic 中不稳定则提前切 damping，可选）
+    mimic_stability_to_damping_enable_ = config_["mimic_stability_to_damping_enable"] ?
+        config_["mimic_stability_to_damping_enable"].as<bool>() : false;
+    if (config_["stability_detection"]) {
+      const YAML::Node& stab = config_["stability_detection"];
+      if (stab["ang_vel_threshold"]) ang_vel_threshold_ = stab["ang_vel_threshold"].as<double>();
+      if (stab["gravity_dev_threshold"]) gravity_dev_threshold_ = stab["gravity_dev_threshold"].as<double>();
+      if (stab["stability_smoothing_threshold"]) stability_smoothing_threshold_ = stab["stability_smoothing_threshold"].as<double>();
+      if (stab["stability_history_length"]) stability_history_length_ = stab["stability_history_length"].as<int>();
+    }
+    stability_history_.clear();
+    stability_history_.resize(std::max(1, stability_history_length_), true);
+    RCLCPP_INFO(get_logger(), "mimic_stability_to_damping_enable: %s", mimic_stability_to_damping_enable_ ? "true" : "false");
     
     // 读取扭矩限制参数
     torque_limit_enabled_ = config_["torque_limit"] ? config_["torque_limit"].as<bool>() : false;
@@ -1013,6 +1028,36 @@ class RlBasicRunnerCHR : public rclcpp::Node {
       }
     }
   }
+
+  // 稳定性检测（mimic 播放中）：与 rl_dance 同逻辑，角速度+重力偏差+历史平滑
+  // 返回 true 表示当前稳定，false 表示不稳定（可提前切 damping）
+  bool CheckMimicStability() {
+    auto imu = message_handler_->GetLatestImu();
+    if (!imu || stability_history_.empty()) return true;
+    Eigen::AngleAxisd rollAngle(walking_imu_install_bias_.x(), Eigen::Vector3d::UnitX());
+    Eigen::AngleAxisd pitchAngle(walking_imu_install_bias_.y(), Eigen::Vector3d::UnitY());
+    Eigen::AngleAxisd yawAngle(walking_imu_install_bias_.z(), Eigen::Vector3d::UnitZ());
+    Eigen::Quaterniond q_install = yawAngle * pitchAngle * rollAngle;
+    Eigen::Matrix3d R_install = q_install.toRotationMatrix();
+    Eigen::Matrix3d R_local = Eigen::Quaterniond(imu->quaternion.w, imu->quaternion.x,
+                                                 imu->quaternion.y, imu->quaternion.z).toRotationMatrix();
+    Eigen::Matrix3d R_real = R_local * R_install.transpose();
+    Eigen::Vector3d w_real = R_real.transpose() * R_local *
+        Eigen::Vector3d(imu->angular_velocity.x, imu->angular_velocity.y, imu->angular_velocity.z);
+    Eigen::Vector3d projected_gravity = -R_real.transpose() * Eigen::Vector3d::UnitZ();
+    Eigen::Vector2d ang_vel_xy = w_real.head<2>();
+    bool ang_vel_stable = ang_vel_xy.norm() < ang_vel_threshold_;
+    Eigen::Vector3d g0(0.0, 0.0, -1.0);
+    double grav_dev = (projected_gravity.normalized() - g0).norm();
+    bool gravity_stable = grav_dev < gravity_dev_threshold_;
+    bool current_stable = ang_vel_stable && gravity_stable;
+    stability_history_.push_back(current_stable);
+    stability_history_.pop_front();
+    int stable_count = 0;
+    for (bool s : stability_history_) if (s) stable_count++;
+    double stable_ratio = static_cast<double>(stable_count) / static_cast<int>(stability_history_.size());
+    return stable_ratio > stability_smoothing_threshold_;
+  }
   
   // 摔倒检测：基于倾斜角度和角速度，带防抖机制
   // 返回 true 表示检测到摔倒，同时设置 detected_direction
@@ -1172,6 +1217,20 @@ class RlBasicRunnerCHR : public rclcpp::Node {
                       observation_type_.c_str(), current_traj_ ? "valid" : "null");
           trajectory_index_ = 0;
         }
+        // 若开启了 mimic 中不稳定切 damping，进入 mimic 时重置稳定性历史，避免刚切就触发
+        if (mimic_stability_to_damping_enable_) {
+          stability_history_.clear();
+          stability_history_.resize(std::max(1, stability_history_length_), true);
+        }
+      }
+    }
+
+    // mimic 播放过程中：若开启稳定性检测且检测到不稳定，提前切到 damping
+    if (!is_walking_mode_ && !is_damping_mode_ && mimic_stability_to_damping_enable_) {
+      if (!CheckMimicStability()) {
+        is_damping_mode_ = true;
+        mujoco_reset_received_ = false;
+        RCLCPP_INFO(get_logger(), "[mimic] 检测到不稳定，提前进入 damping mode (time=%.2f)", time_);
       }
     }
     
@@ -1894,6 +1953,14 @@ class RlBasicRunnerCHR : public rclcpp::Node {
   int fast_fall_confirm_frames_ = 2;        // 快速摔倒确认帧数
   double fall_detection_delay_ = 1.0;       // Reset 后摔倒检测延迟时间 (秒)
   double reset_time_ = -100.0;              // 上次 reset 时间
+
+  // 稳定性检测（mimic 中不稳定则提前切 damping，可选）
+  bool mimic_stability_to_damping_enable_ = false;
+  double ang_vel_threshold_ = 0.4;
+  double gravity_dev_threshold_ = 0.15;
+  double stability_smoothing_threshold_ = 0.6;
+  int stability_history_length_ = 10;
+  std::deque<bool> stability_history_;
   
   // MuJoCo reset subscription
   rclcpp::Subscription<std_msgs::msg::Empty>::SharedPtr mujoco_reset_sub_;

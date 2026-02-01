@@ -246,21 +246,18 @@ max_torque_joint:
 
 max_lower_body_torque: 550.0
 
-# 稳定性检测参数
-ang_vel_threshold: 0.4
-gravity_dev_threshold: 0.15
-stability_smoothing_threshold: 0.6
-stability_history_length: 10
-
-# 速度阈值
-lin_vel_set_zero_threshold: 0.3
-ang_vel_set_zero_threshold: 0.314
-
-# 步态相位参数
-unstable_cycle_time_scale: 0.5
+# 步态周期（CHR walking 使用）
 default_dynamic_cycle_time: 0.8
 
-# 摔倒检测参数
+# 稳定性检测（mimic 播放过程中若检测到不稳定则提前切到 damping；与 rl_dance 同逻辑）
+mimic_stability_to_damping_enable: false   # 是否开启：mimic 中不稳定则切 damping
+stability_detection:
+  ang_vel_threshold: 0.4           # 角速度阈值 (rad/s)，超过认为不稳定
+  gravity_dev_threshold: 0.15      # 重力方向偏差阈值，与 (0,0,-1) 的偏差
+  stability_smoothing_threshold: 0.6   # 历史稳定比例超过此值才认为稳定
+  stability_history_length: 10    # 历史帧数
+
+# 摔倒检测参数（walking 下超阈值则切 mimic）
 fall_detection:
   tilt_threshold: 0.5           # 倾斜角阈值 (rad) 0.5
   omega_threshold: 1.8          # 角速度阈值 (rad/s) 1.8
