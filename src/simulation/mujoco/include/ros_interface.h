@@ -89,6 +89,9 @@ class RosInterface {
   mjModel* model_;
   mjData* data_;
 
+  // 上一帧仿真时间，用于检测用户/GUI 触发的 reset（时间回退时发布 reset_complete）
+  double last_sim_time_ = -1.0;
+
   // Timer for publishing motion state
   rclcpp::TimerBase::SharedPtr motion_state_timer_;
   

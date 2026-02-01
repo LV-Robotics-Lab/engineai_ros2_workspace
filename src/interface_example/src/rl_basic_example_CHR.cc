@@ -167,6 +167,7 @@ class RlBasicRunnerCHR : public rclcpp::Node {
       }
       
       LoadCsvTrajectory(workspace_root);
+      LoadMimicDirectionalTrajectories();  // 加载8个方向的 mimic 轨迹
       trajectory_index_ = 0;
       time_ = 0.0;
       global_phase_ = 0.0;
@@ -301,6 +302,9 @@ class RlBasicRunnerCHR : public rclcpp::Node {
       }
       if (fall_config["fast_fall_confirm_frames"]) {
         fast_fall_confirm_frames_ = fall_config["fast_fall_confirm_frames"].as<int>();
+      }
+      if (fall_config["detection_delay"]) {
+        fall_detection_delay_ = fall_config["detection_delay"].as<double>();
       }
     }
     
@@ -470,10 +474,32 @@ class RlBasicRunnerCHR : public rclcpp::Node {
   
   // 加载8个方向的 mimic Policy
   void LoadMimicDirectionalPolicies(const std::string& workspace_root) {
-    // 检查是否有 mimic_policies 配置节点
-    if (config_["mimic_policies"]) {
-      const YAML::Node& mimic_policies = config_["mimic_policies"];
-      
+    // 首先从 motion_states 下的启用 profile 中查找 mimic_policies
+    YAML::Node mimic_policies;
+    bool found_mimic_policies = false;
+    
+    if (config_["motion_states"]) {
+      const YAML::Node& motion_states = config_["motion_states"];
+      for (const auto& state : motion_states) {
+        const YAML::Node& profile_node = state.second;
+        if (profile_node["enable"] && profile_node["enable"].as<bool>()) {
+          if (profile_node["mimic_policies"]) {
+            mimic_policies = profile_node["mimic_policies"];
+            found_mimic_policies = true;
+            RCLCPP_INFO(get_logger(), "Found mimic_policies in motion_states profile");
+          }
+          break;
+        }
+      }
+    }
+    
+    // 回退：检查根节点是否有 mimic_policies
+    if (!found_mimic_policies && config_["mimic_policies"]) {
+      mimic_policies = config_["mimic_policies"];
+      found_mimic_policies = true;
+    }
+    
+    if (found_mimic_policies) {
       for (size_t i = 0; i < static_cast<size_t>(MimicDirection::COUNT); ++i) {
         const std::string& dir_name = kMimicDirectionNames[i];
         if (mimic_policies[dir_name]) {
@@ -592,6 +618,88 @@ class RlBasicRunnerCHR : public rclcpp::Node {
     }
     
     current_traj_ = &interpolated_trajs_["default_profile"];
+  }
+  
+  // 加载8个方向的 mimic 轨迹
+  void LoadMimicDirectionalTrajectories() {
+    // 从 motion_states 下的启用 profile 中查找 mimic_trajectories
+    YAML::Node mimic_trajectories;
+    bool found = false;
+    
+    if (config_["motion_states"]) {
+      const YAML::Node& motion_states = config_["motion_states"];
+      for (const auto& state : motion_states) {
+        const YAML::Node& profile_node = state.second;
+        if (profile_node["enable"] && profile_node["enable"].as<bool>()) {
+          if (profile_node["mimic_trajectories"]) {
+            mimic_trajectories = profile_node["mimic_trajectories"];
+            found = true;
+            RCLCPP_INFO(get_logger(), "Found mimic_trajectories in motion_states profile");
+          }
+          break;
+        }
+      }
+    }
+    
+    if (!found) {
+      RCLCPP_INFO(get_logger(), "No mimic_trajectories config found, using default trajectory for all directions");
+      return;
+    }
+    
+    for (size_t i = 0; i < static_cast<size_t>(MimicDirection::COUNT); ++i) {
+      const std::string& dir_name = kMimicDirectionNames[i];
+      if (mimic_trajectories[dir_name]) {
+        std::string traj_file = mimic_trajectories[dir_name].as<std::string>();
+        std::string full_path;
+        
+        if (traj_file[0] == '/') {
+          full_path = traj_file;
+        } else {
+          full_path = config_file_dir_ + "/" + traj_file;
+        }
+        
+        std::ifstream test(full_path);
+        if (!test.good()) {
+          RCLCPP_WARN(get_logger(), "Trajectory file not found for direction %s: %s", 
+                      dir_name.c_str(), full_path.c_str());
+          continue;
+        }
+        test.close();
+        
+        try {
+          Eigen::MatrixXd traj = rl_dance::CsvLoader::LoadAndInterpolateJointTrajectoryWithVelAndQuat(
+              full_path, active_joint_names_, csv_dt_, control_dt_,
+              traj_frame_.empty() ? 0 : traj_frame_[0],
+              traj_frame_.size() > 1 ? traj_frame_[1] : -1);
+          mimic_trajs_directions_[i] = traj;
+          mimic_trajs_loaded_[i] = true;
+          RCLCPP_INFO(get_logger(), "Loaded mimic trajectory for direction %s: %s (%ld frames)", 
+                      dir_name.c_str(), full_path.c_str(), traj.rows());
+        } catch (const std::exception& e) {
+          RCLCPP_ERROR(get_logger(), "Failed to load trajectory for direction %s: %s", 
+                       dir_name.c_str(), e.what());
+        }
+      }
+    }
+    
+    // 默认使用 forward 方向的轨迹作为 current_traj_
+    if (mimic_trajs_loaded_[static_cast<int>(MimicDirection::FORWARD)]) {
+      current_traj_ = &mimic_trajs_directions_[static_cast<int>(MimicDirection::FORWARD)];
+      RCLCPP_INFO(get_logger(), "Set default trajectory to forward direction");
+    }
+  }
+  
+  // 切换到指定方向的轨迹
+  void SwitchToDirectionalTrajectory(MimicDirection direction) {
+    int dir_idx = static_cast<int>(direction);
+    if (mimic_trajs_loaded_[dir_idx]) {
+      current_traj_ = &mimic_trajs_directions_[dir_idx];
+      RCLCPP_INFO(get_logger(), "Switched to trajectory for direction %s (%ld frames)", 
+                  kMimicDirectionNames[dir_idx].c_str(), current_traj_->rows());
+    } else {
+      RCLCPP_WARN(get_logger(), "Trajectory for direction %s not loaded, keeping current trajectory", 
+                  kMimicDirectionNames[dir_idx].c_str());
+    }
   }
   
   // 从 CSV 文件中读取四元数并计算俯仰角度（考虑 traj_frame_ 范围）
@@ -790,11 +898,25 @@ class RlBasicRunnerCHR : public rclcpp::Node {
   
   void MujocoResetCallback(const std_msgs::msg::Empty::SharedPtr msg) {
     (void)msg;
-    if (!mujoco_reset_received_) {
-      mujoco_reset_received_ = true;
-      walking_start_time_ = time_;
-      RCLCPP_INFO(get_logger(), "Received MuJoCo reset signal, starting walking timer from time: %.2f", time_);
+    // 每次收到 reset 信号都重新初始化状态
+    mujoco_reset_received_ = true;
+    walking_start_time_ = time_;
+    reset_time_ = time_;  // 记录 reset 时间，用于摔倒检测延迟
+    is_walking_mode_ = true;
+    is_damping_mode_ = false;
+    global_phase_ = 0.0;
+    fall_stable_count_ = 0;
+    trajectory_index_ = 0;
+    
+    // 重置 mlp_net_ 指向 walking policy
+    mlp_net_ = mlp_net_walking_.get();
+    
+    // 重置 current_traj_ 到默认（forward）轨迹
+    if (mimic_trajs_loaded_[static_cast<int>(MimicDirection::FORWARD)]) {
+      current_traj_ = &mimic_trajs_directions_[static_cast<int>(MimicDirection::FORWARD)];
     }
+    
+    RCLCPP_INFO(get_logger(), "Received MuJoCo reset signal, restarting walking from time: %.2f", time_);
   }
   
   // 根据重力投影方向选择 mimic Policy
@@ -990,8 +1112,23 @@ class RlBasicRunnerCHR : public rclcpp::Node {
     auto joint_state = message_handler_->GetLatestJointState();
     if (!joint_state) return;
 
+    // 仅当处于 damping 模式（mimic 轨迹已播完）且收到 reset 时，在本周期内恢复走路；
+    // mimic 播放期间不强制恢复，否则会每帧被拉回 walking 再触发摔倒，轨迹永远播不完、进不了 damping
+    if (mujoco_reset_received_ && !is_walking_mode_ && is_damping_mode_) {
+      is_walking_mode_ = true;
+      is_damping_mode_ = false;
+      global_phase_ = 0.0;
+      fall_stable_count_ = 0;
+      trajectory_index_ = 0;
+      mlp_net_ = mlp_net_walking_.get();
+      if (mimic_trajs_loaded_[static_cast<int>(MimicDirection::FORWARD)]) {
+        current_traj_ = &mimic_trajs_directions_[static_cast<int>(MimicDirection::FORWARD)];
+      }
+    }
+
     // 摔倒检测：在 walking 模式下，使用倾斜角+角速度+防抖机制检测摔倒
-    if (is_walking_mode_ && mujoco_reset_received_) {
+    // Reset 后需要等待 fall_detection_delay_ 秒才开始检测，让机器人先稳定
+    if (is_walking_mode_ && mujoco_reset_received_ && (time_ - reset_time_) > fall_detection_delay_) {
       MimicDirection fall_direction;
       if (DetectFall(fall_direction)) {
         is_walking_mode_ = false;
@@ -1018,6 +1155,9 @@ class RlBasicRunnerCHR : public rclcpp::Node {
             }
           }
         }
+        
+        // 切换到对应方向的轨迹
+        SwitchToDirectionalTrajectory(current_mimic_direction_);
         
         // 匹配 IMU 俯仰角度并设置 trajectory_index_
         if (observation_type_ == "mimic_future" && current_traj_ != nullptr) {
@@ -1219,8 +1359,9 @@ class RlBasicRunnerCHR : public rclcpp::Node {
       if (trajectory_index_ < end) {
         trajectory_index_++;
       } else if (!is_damping_mode_ && trajectory_index_ >= end) {
-        // 轨迹播放完成，进入 damping mode
+        // 轨迹播放完成，进入 damping mode；清除 reset 标志，避免本周期内误判为“刚收到 reset”而恢复走路
         is_damping_mode_ = true;
+        mujoco_reset_received_ = false;
         RCLCPP_INFO(get_logger(), "[mimic] 轨迹播放完成（第 %zu 帧），进入 damping mode (time=%.2f)",
                     trajectory_index_, time_);
       }
@@ -1708,6 +1849,8 @@ class RlBasicRunnerCHR : public rclcpp::Node {
   Eigen::MatrixXd* current_traj_base_vel_ = nullptr;  // 基座速度轨迹 (N × 3: vx, vy, wz)
   std::map<std::string, Eigen::MatrixXd> interpolated_trajs_;
   std::map<std::string, Eigen::MatrixXd> interpolated_base_vel_trajs_;  // 基座速度轨迹
+  std::array<Eigen::MatrixXd, 8> mimic_trajs_directions_;  // 8个方向的轨迹
+  std::array<bool, 8> mimic_trajs_loaded_ = {false};  // 轨迹是否已加载
   size_t trajectory_index_ = 0;  // 当前轨迹索引
   double last_command_frame_print_time_ = -1.0;  // 上次打印 command 帧的时间（节流用）
   
@@ -1749,6 +1892,8 @@ class RlBasicRunnerCHR : public rclcpp::Node {
   int fall_confirm_frames_ = 8;             // 确认帧数
   double fast_fall_omega_ = 2.5;            // 快速摔倒角速度阈值 (rad/s)
   int fast_fall_confirm_frames_ = 2;        // 快速摔倒确认帧数
+  double fall_detection_delay_ = 1.0;       // Reset 后摔倒检测延迟时间 (秒)
+  double reset_time_ = -100.0;              // 上次 reset 时间
   
   // MuJoCo reset subscription
   rclcpp::Subscription<std_msgs::msg::Empty>::SharedPtr mujoco_reset_sub_;

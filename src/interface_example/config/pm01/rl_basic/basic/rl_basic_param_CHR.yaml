@@ -22,11 +22,9 @@ motion_states:
     observation_type: "mimic_future"  # 新增类型：当前+未来10帧参考数据
     # data_path: "rl_dance/trajectories/dance2.csv"
     # data_path: "rl_dance/trajectories/kf_robot_0.8_320.csv"
-    data_path: "trajectories/toFront_1_converted_50fps.csv"
-    # data_path: "rl_dance/trajectories/kf_robot1.csv"
-    # policy_path: "rl_dance/policies/wbst/robot_44000.mnn"
-    # policy_path: "rl_dance/policies/40000begin_wbst_450/model_60000.mnn"
-    policy_path: "policies/toFront_3.mnn"
+    # data_path 和 policy_path 已由 mimic_trajectories 和 mimic_policies 替代
+    # data_path: "trajectories/toFront_1_converted_50fps.csv"
+    # policy_path: "policies/toFront_3.mnn"
     mimic_policies:
       forward: "policies/toFront_3.mnn"
       forward_left: "policies/toLeftFront_3.mnn"
@@ -36,6 +34,15 @@ motion_states:
       backward_right: "policies/toRightBack_3.mnn"
       right: "policies/toRight_3.mnn"
       forward_right: "policies/toRightFront_3.mnn"
+    mimic_trajectories:
+      forward: "trajectories/toFront_1_converted_50fps.csv"
+      forward_left: "trajectories/toLeftFront_1_converted_50fps.csv"
+      left: "trajectories/toLeft_1_converted_50fps.csv"
+      backward_left: "trajectories/toLeftBack_1_converted_50fps.csv"
+      backward: "trajectories/toBack_1_converted_50fps.csv"
+      backward_right: "trajectories/toRightBack_1_converted_50fps.csv"
+      right: "trajectories/toRight_1_converted_50fps.csv"
+      forward_right: "trajectories/toRightFront_1_converted_50fps.csv"
     # policy_path: "rl_dance/policies/new_kf_addrand/model_70000.mnn"
     # policy_path: "rl_dance/policies/wbst/kf3_85.mnn"
     # data_path: "rl_dance/trajectories/wbst_best.csv"
@@ -255,8 +262,8 @@ default_dynamic_cycle_time: 0.8
 
 # 摔倒检测参数
 fall_detection:
-  tilt_threshold: 0.5           # 倾斜角阈值 (rad)
-  omega_threshold: 1.8          # 角速度阈值 (rad/s)
+  tilt_threshold: 0.5           # 倾斜角阈值 (rad) 0.5
+  omega_threshold: 1.8          # 角速度阈值 (rad/s) 1.8
   confirm_frames: 8             # 确认帧数
   fast_fall_omega: 2.5          # 快速摔倒角速度阈值 (rad/s)
   fast_fall_confirm_frames: 2   # 快速摔倒确认帧数

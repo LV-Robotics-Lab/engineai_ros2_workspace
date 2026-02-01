@@ -535,7 +535,17 @@ void RosInterface::UpdateSimState(const mjModel* m, mjData* d) {
   if (!m || !d) {
     return;
   }
-  
+
+  // 检测用户/GUI 触发的 reset：仿真时间回退表示发生了 reset，发布 reset_complete 让 CHR 等节点恢复走路
+  const double kTimeRollbackThreshold = 0.01;
+  if (last_sim_time_ >= 0 && d->time < last_sim_time_ - kTimeRollbackThreshold) {
+    std_msgs::msg::Empty reset_msg;
+    mujoco_reset_pub_->publish(reset_msg);
+    RCLCPP_INFO(node_->get_logger(), "MuJoCo reset detected (sim time %.3f -> %.3f), published /mujoco/reset_complete",
+                last_sim_time_, d->time);
+  }
+  last_sim_time_ = d->time;
+
   // ==================== 统一的CSV延迟和reset逻辑 ====================
   // 检查是否有任何CSV需要保存
   bool any_csv_enabled = save_contact_csv_ || save_perturbation_csv_ || 
