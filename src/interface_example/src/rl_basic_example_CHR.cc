@@ -104,6 +104,10 @@ class RlBasicRunnerCHR : public rclcpp::Node {
       default_joint_q_ = math::ConcatenateVectors(LoadVectorArrayFromYaml(config_["default_joint_q"]));
       joint_kp_ = math::ConcatenateVectors(LoadVectorArrayFromYaml(config_["joint_kp"]));
       joint_kd_ = math::ConcatenateVectors(LoadVectorArrayFromYaml(config_["joint_kd"]));
+      mimic_start_from_zero_ = config_["mimic_start_from_zero"] ? config_["mimic_start_from_zero"].as<bool>() : false;
+      if (mimic_start_from_zero_) {
+        RCLCPP_INFO(get_logger(), "mimic_start_from_zero: true (trajectory always start from frame 0)");
+      }
       action_scale_ = math::ConcatenateVectors(LoadVectorArrayFromYaml(config_["action_scale"]));
       command_scale_ = command_scale_vec_;
 
@@ -1022,7 +1026,7 @@ class RlBasicRunnerCHR : public rclcpp::Node {
     return projected_gravity;
   }
   
-  // 更新 mimic Policy 选择（基于当前重力投影方向）
+  // 更新 mimic Policy 选择（基于当前重力投影方向）；当前逻辑下进入 mimic 后不再调用，仅保留供将来可选使用
   void UpdateMimicPolicySelection() {
     Eigen::Vector3d projected_gravity = GetCurrentProjectedGravity();
     MimicDirection new_direction = SelectMimicDirectionFromGravity(projected_gravity);
@@ -1104,8 +1108,8 @@ class RlBasicRunnerCHR : public rclcpp::Node {
     w_real_cached_ = w_real;
     projected_gravity_cached_ = projected_gravity;
     
-    const double gx = projected_gravity.x();
-    const double gy = projected_gravity.y();
+    double gx = projected_gravity.x();
+    double gy = projected_gravity.y();
     const double gz = projected_gravity.z();
     const double gxy = std::hypot(gx, gy);
     
@@ -1215,7 +1219,7 @@ class RlBasicRunnerCHR : public rclcpp::Node {
       if (do_switch_to_mimic) {
         is_walking_mode_ = false;
 
-        // 根据检测到的摔倒方向选择 mimic Policy
+        // 根据检测到的摔倒方向选择 mimic Policy（进入 mimic 后不再切换方向）
         current_mimic_direction_ = fall_direction;
         int dir_idx = static_cast<int>(fall_direction);
 
@@ -1241,14 +1245,19 @@ class RlBasicRunnerCHR : public rclcpp::Node {
         // 切换到对应方向的轨迹
         SwitchToDirectionalTrajectory(current_mimic_direction_);
 
-        // 匹配 IMU 俯仰角度并设置 trajectory_index_
+        // 匹配 IMU 俯仰角度并设置 trajectory_index_（或 mimic_start_from_zero 时固定从第 0 帧开始）
         if (observation_type_ == "mimic_future" && current_traj_ != nullptr) {
-          // 切换到 mimic 模式后，使用 mimic 模式的 IMU bias 重新计算俯仰角
-          double mimic_pitch = GetCurrentPitchAngle();
-          size_t matched_idx = FindMatchingTrajectoryIndex(mimic_pitch);
-          trajectory_index_ = matched_idx;
-          RCLCPP_INFO(get_logger(), "[摔倒检测] mimic 选取第 %zu 帧 (pitch=%.4f rad, 轨迹总帧数=%ld)",
-                      trajectory_index_, mimic_pitch, current_traj_ ? static_cast<long>(current_traj_->rows()) : 0);
+          if (mimic_start_from_zero_) {
+            trajectory_index_ = 0;
+            RCLCPP_INFO(get_logger(), "[mimic] 从第 0 帧开始 (mimic_start_from_zero=true, 轨迹总帧数=%ld)",
+                        static_cast<long>(current_traj_->rows()));
+          } else {
+            double mimic_pitch = GetCurrentPitchAngle();
+            size_t matched_idx = FindMatchingTrajectoryIndex(mimic_pitch);
+            trajectory_index_ = matched_idx;
+            RCLCPP_INFO(get_logger(), "[摔倒检测] mimic 选取第 %zu 帧 (pitch=%.4f rad, 轨迹总帧数=%ld)",
+                        trajectory_index_, mimic_pitch, static_cast<long>(current_traj_->rows()));
+          }
         } else {
           RCLCPP_WARN(get_logger(), "Cannot match pitch: observation_type=%s, current_traj_=%s",
                       observation_type_.c_str(), current_traj_ ? "valid" : "null");
@@ -1271,10 +1280,7 @@ class RlBasicRunnerCHR : public rclcpp::Node {
       }
     }
     
-    // 在 mimic 模式下，根据重力投影方向动态切换 Policy（测试模式 test_force_fall_direction 下不覆盖，保持用户指定方向）
-    if (!is_walking_mode_ && test_force_fall_direction_.empty()) {
-      UpdateMimicPolicySelection();
-    }
+    // 进入 mimic 后不根据重力再切换方向，保持摔倒检测/测试选定的方向直至播完或 damping
 
     UpdateState(joint_state);
     if (is_walking_mode_) {
@@ -2033,6 +2039,7 @@ class RlBasicRunnerCHR : public rclcpp::Node {
   Eigen::VectorXd default_joint_q_;
   Eigen::VectorXd joint_kp_;
   Eigen::VectorXd joint_kd_;
+  bool mimic_start_from_zero_ = false;  // true 时进入 mimic 从第 0 帧开始，不按俯仰匹配
   Eigen::VectorXd action_scale_;
   Eigen::VectorXd action_scale85_;  // 用于特定 profile（如 dance_2）
   Eigen::VectorXd qd_mask_;  // 速度掩码（与 rl_dance 一致）

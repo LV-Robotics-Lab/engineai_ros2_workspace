@@ -28,7 +28,7 @@ contact_visualization:
 
 # 防护功能配置 - 控制碰撞时的虚拟护具
 protection:
-  enabled: true              # 是否启用防护功能（虚拟护具）
+  enabled: false              # 是否启用防护功能（虚拟护具）
   thickness: 12.0             # 护具厚度（mm），默认12mm
 
 # 模型参数 - 定义机器人的基本结构参数

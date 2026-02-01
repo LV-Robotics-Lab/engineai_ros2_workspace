@@ -159,6 +159,9 @@ joint_kd:
   - [1.7, 1.7, 1.7, 1.7, 1.7]
   - [1.7, 1.7, 1.7, 1.7, 1.7]
   - [1.7]
+
+# 进入 mimic 时从轨迹第 0 帧开始，不按俯仰匹配；可减轻 left 等动作因起跳帧不匹配导致的不稳定
+mimic_start_from_zero: true
 # 1.0
 action_scale:
   - [0.229, 0.229, 0.491, 0.229, 0.418, 0.418]
@@ -259,7 +262,7 @@ stability_detection:
 
 # 测试用：reset 后先走 XZL，等 test_force_fall_delay 秒后强制切到指定方向 mimic（不跑摔倒检测）
 # 若 test_force_fall_direction 留空，则使用下方 fall_detection 进行真实摔倒检测
-test_force_fall_direction: "backward"   # 可选: forward/forward_left/left/backward_left/backward/backward_right/right/forward_right
+test_force_fall_direction: "left"   # 可选: forward/forward_left/left/backward_left/backward/backward_right/right/forward_right
 test_force_fall_delay: 3.0      # 仅当 test_force_fall_direction 非空时有效：reset 后先走 XZL 再等该时间(秒)后切到上述方向
 
 # 摔倒检测参数（仅当 test_force_fall_direction 留空时使用：walking 下 tilt/omega 超阈值则切 mimic）
