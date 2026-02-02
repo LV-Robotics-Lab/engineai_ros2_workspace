@@ -27,7 +27,7 @@ motion_states:
     # policy_path: "policies/toFront_3.mnn"
     mimic_policies:
       forward: "policies/toFront_3_force.mnn"
-      forward_left: "policies/toLeftFront_3_force.mnn"
+      forward_left: "policies/toLeftFront_3.mnn"
       left: "policies/toLeft_3_force.mnn"
       backward_left: "policies/toLeftBack_3_force.mnn"
       backward: "policies/toBack_3_force.mnn"
