@@ -31,7 +31,7 @@ motion_states:
       left: "policies/toLeft_3_force.mnn"
       backward_left: "policies/toLeftBack_3_force.mnn"
       backward: "policies/toBack_3_force.mnn"
-      backward_right: "policies/toRightBack_3_force.mnn"
+      backward_right: "policies/toRightBack_3.mnn"
       right: "policies/toRight_3.mnn"
       forward_right: "policies/toRightFront_3.mnn"
     mimic_trajectories:
