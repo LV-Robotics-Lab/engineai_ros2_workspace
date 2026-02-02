@@ -502,11 +502,11 @@ python3 scripts/calculate_fall_risk.py \
 # --plot 会自动查找同目录下的 link_kinetic_energy_data_*.csv 并绘制能量曲线
 # 需要仿真时开启 save_link_kinetic_energy_csv: true 才会生成该文件
 python3 scripts/calculate_fall_risk.py \
-  --contact /home/wang22/data/mujoco_logs/contact_data_20260131_192508.csv \
-  --sensor-vibration /home/wang22/data/mujoco_logs/sensor_vibration_data_20260131_192508.csv \
-  --joint-state /home/wang22/data/mujoco_logs/joint_state_data_20260131_192508.csv \
-  --joint-forces /home/wang22/data/mujoco_logs/joint_forces_data_20260131_192508.csv \
-  --output /home/wang22/data/mujoco_logs/risk_results_20260131_192508 \
+  --contact /home/wang22/data/mujoco_logs/contact_data_20260202_161817.csv \
+  --sensor-vibration /home/wang22/data/mujoco_logs/sensor_vibration_data_20260202_161817.csv \
+  --joint-state /home/wang22/data/mujoco_logs/joint_state_data_20260202_161817.csv \
+  --joint-forces /home/wang22/data/mujoco_logs/joint_forces_data_20260202_161817.csv \
+  --output /home/wang22/data/mujoco_logs/risk_results_20260202_161817 \
   --plot
 
 

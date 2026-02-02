@@ -43,6 +43,22 @@ const std::array<std::string, 8> kMimicDirectionNames = {
   "backward", "backward_right", "right", "forward_right"
 };
 
+// 8 方向角度边界（度），便于调试；theta=atan2(gy,gx)，0°=前(+X)，90°=左(+Y)
+// 顺序：[0]前起 [1]前左 [2]左 [3]后左 [4]后 [5]后右 [6]右 [7]前右 [8]前(下一圈)
+// 前=[337.5,22.5)，前左=[22.5,67.5)，左=[67.5,112.5)，…，前右=[292.5,337.5)
+const double kFallDirectionBoundariesDeg[9] = {
+  337.5, 22.5, 77.5, 102.5, 157.5, 202.5, 257.5, 282.5, 337.5
+};
+
+// 根据角度(度，[0,360))返回 8 方向 bin [0,7]，与 kFallDirectionBoundariesDeg 一致
+static int AngleDegToFallBin8(double angle_deg) {
+  if (angle_deg >= kFallDirectionBoundariesDeg[0] || angle_deg < kFallDirectionBoundariesDeg[1]) return 0;
+  for (int i = 1; i <= 7; ++i) {
+    if (angle_deg >= kFallDirectionBoundariesDeg[i] && angle_deg < kFallDirectionBoundariesDeg[i + 1]) return i;
+  }
+  return 0;
+}
+
 class RlBasicRunnerCHR : public rclcpp::Node {
  public:
   explicit RlBasicRunnerCHR(const std::string& config_file_dir, const std::string& config_file_name = "rl_basic_param_CHR.yaml") : Node("rl_basic_runner_CHR") {
@@ -959,43 +975,12 @@ class RlBasicRunnerCHR : public rclcpp::Node {
     double gx = projected_gravity.x();  // 前后方向
     double gy = projected_gravity.y();  // 左右方向
     
-    // 计算在XY平面的角度（以+X轴为0度，逆时针为正）
+    // 计算在XY平面的角度（以+X轴为0度，逆时针为正），转 [0,360) 度
     double angle = std::atan2(gy, gx);  // 范围 [-π, π]
-    
-    // 将角度转换为0-360度
     double angle_deg = angle * 180.0 / M_PI;
     if (angle_deg < 0) angle_deg += 360.0;
-    
-    // 8个方向，每个方向占45度
-    // 前 (Forward): -22.5° ~ 22.5° (或 337.5° ~ 360° 和 0° ~ 22.5°)
-    // 前左: 22.5° ~ 67.5°
-    // 左: 67.5° ~ 112.5°
-    // 后左: 112.5° ~ 157.5°
-    // 后: 157.5° ~ 202.5°
-    // 后右: 202.5° ~ 247.5°
-    // 右: 247.5° ~ 292.5°
-    // 前右: 292.5° ~ 337.5°
-    
-    MimicDirection dir;
-    if (angle_deg >= 337.5 || angle_deg < 22.5) {
-      dir = MimicDirection::FORWARD;
-    } else if (angle_deg >= 22.5 && angle_deg < 67.5) {
-      dir = MimicDirection::FORWARD_LEFT;
-    } else if (angle_deg >= 67.5 && angle_deg < 112.5) {
-      dir = MimicDirection::LEFT;
-    } else if (angle_deg >= 112.5 && angle_deg < 157.5) {
-      dir = MimicDirection::BACKWARD_LEFT;
-    } else if (angle_deg >= 157.5 && angle_deg < 202.5) {
-      dir = MimicDirection::BACKWARD;
-    } else if (angle_deg >= 202.5 && angle_deg < 247.5) {
-      dir = MimicDirection::BACKWARD_RIGHT;
-    } else if (angle_deg >= 247.5 && angle_deg < 292.5) {
-      dir = MimicDirection::RIGHT;
-    } else {  // 292.5° ~ 337.5°
-      dir = MimicDirection::FORWARD_RIGHT;
-    }
-    
-    return dir;
+    int bin8 = AngleDegToFallBin8(angle_deg);
+    return static_cast<MimicDirection>(bin8);
   }
   
   // 获取当前 IMU 重力投影（使用 mimic 模式的 IMU bias）
@@ -1119,10 +1104,11 @@ class RlBasicRunnerCHR : public rclcpp::Node {
       return false;
     }
     
-    // 8方向分类：theta: 0=前(+X), 90°=左(+Y)
+    // 8 方向分类，与 kFallDirectionBoundariesDeg 一致
     double theta = std::atan2(gy, gx);  // [-π, π]
-    int bin8 = static_cast<int>(std::llround(theta / (M_PI / 4.0)));
-    bin8 = ((bin8 % 8) + 8) % 8;  // 归一化到 0..7
+    double angle_deg = theta * 180.0 / M_PI;
+    if (angle_deg < 0) angle_deg += 360.0;
+    int bin8 = AngleDegToFallBin8(angle_deg);
     
     // 计算倾斜角和 XY 平面角速度
     double tilt = std::acos(std::clamp(-gz, -1.0, 1.0));

@@ -26,12 +26,12 @@ motion_states:
     # data_path: "trajectories/toFront_1_converted_50fps.csv"
     # policy_path: "policies/toFront_3.mnn"
     mimic_policies:
-      forward: "policies/toFront_3.mnn"
-      forward_left: "policies/toLeftFront_3.mnn"
-      left: "policies/toLeft_3.mnn"
-      backward_left: "policies/toLeftBack_3.mnn"
-      backward: "policies/toBack_3.mnn"
-      backward_right: "policies/toRightBack_3.mnn"
+      forward: "policies/toFront_3_force.mnn"
+      forward_left: "policies/toLeftFront_3_force.mnn"
+      left: "policies/toLeft_3_force.mnn"
+      backward_left: "policies/toLeftBack_3_force.mnn"
+      backward: "policies/toBack_3_force.mnn"
+      backward_right: "policies/toRightBack_3_force.mnn"
       right: "policies/toRight_3.mnn"
       forward_right: "policies/toRightFront_3.mnn"
     mimic_trajectories:
@@ -161,7 +161,7 @@ joint_kd:
   - [1.7]
 
 # 进入 mimic 时从轨迹第 0 帧开始，不按俯仰匹配；可减轻 left 等动作因起跳帧不匹配导致的不稳定
-mimic_start_from_zero: true
+mimic_start_from_zero: false
 # 1.0
 action_scale:
   - [0.229, 0.229, 0.491, 0.229, 0.418, 0.418]
