@@ -2155,7 +2155,8 @@ def get_link_group(body_name: str) -> str:
     return 'Other'
 
 
-def plot_link_energy_curves(energy_df: pd.DataFrame, output_path: Optional[str] = None):
+def plot_link_energy_curves(energy_df: pd.DataFrame, output_path: Optional[str] = None,
+                           contact_df: Optional[pd.DataFrame] = None):
     """
     绘制link能量曲线（动能、势能、总能量）
     
@@ -2169,6 +2170,8 @@ def plot_link_energy_curves(energy_df: pd.DataFrame, output_path: Optional[str] 
             - total_PE: 总重力势能
             - total_energy: 总机械能
         output_path: 图片保存路径（可选）
+        contact_df: 接触力数据 DataFrame（可选），应包含 timestamp, force_magnitude。
+                   若提供，第一个子图将绘制 Total PE + Total contact force，并从 0 时刻开始。
     """
     if energy_df.empty:
         print("警告: link能量数据为空，无法绑图")
@@ -2188,6 +2191,14 @@ def plot_link_energy_curves(energy_df: pd.DataFrame, output_path: Optional[str] 
     max_t = timestamps.max()
     t_range = max_t - min_t
     x_margin = max(0.01, t_range * 0.02)
+    # 从 0 时刻开始的相对时间，t0 为两者最早时间
+    t0 = min_t
+    contact_by_time = None   # 总图用：每帧 contact force 最大值
+    if contact_df is not None and not contact_df.empty and 'timestamp' in contact_df.columns and 'force_magnitude' in contact_df.columns:
+        # 总图：每帧取最大值
+        contact_by_time = contact_df.groupby('timestamp')['force_magnitude'].max().reset_index()
+        contact_by_time.columns = ['timestamp', 'max_contact_force']
+        t0 = min(t0, contact_by_time['timestamp'].min())
     
     # 提取所有 body 名称（从列名中提取）
     # 列名格式: {body_name}_vel_x, {body_name}_vel_y, {body_name}_vel_z, 
@@ -2224,6 +2235,15 @@ def plot_link_energy_curves(energy_df: pd.DataFrame, output_path: Optional[str] 
     print(f"  分组结果:")
     for g in groups:
         print(f"    {g}: {group_bodies[g]}")
+    
+    # 各 body 各自 contact force（每帧该 body 参与接触时的最大力），供各部位子图使用
+    per_body_contact = {}
+    if contact_df is not None and not contact_df.empty and 'body1_name' in contact_df.columns and 'body2_name' in contact_df.columns and 'force_magnitude' in contact_df.columns:
+        for body_name in body_names:
+            mask = (contact_df['body1_name'] == body_name) | (contact_df['body2_name'] == body_name)
+            if mask.any():
+                df_b = contact_df.loc[mask].groupby('timestamp')['force_magnitude'].max().reset_index()
+                per_body_contact[body_name] = df_b
     
     # 计算每组的能量（KE 和 PE）
     # 优先使用 linear_KE、angular_KE、PE 列，如果不存在则用 v^2 近似
@@ -2272,7 +2292,7 @@ def plot_link_energy_curves(energy_df: pd.DataFrame, output_path: Optional[str] 
         group_angular_ke[group] = angular_ke_sum
         group_pe[group] = pe_sum
     
-    # 创建子图：1个总能量图 + len(groups) 个分组图
+    # 创建子图：len(groups) 个分组图 + 1个总能量图（总图放最后以便显示 Time 坐标轴）
     n_groups = len(groups)
     n_subplots = 1 + n_groups
     fig, axes = plt.subplots(n_subplots, 1, figsize=(14, 3.5 * n_subplots), sharex=True)
@@ -2289,59 +2309,60 @@ def plot_link_energy_curves(energy_df: pd.DataFrame, output_path: Optional[str] 
         'Other': '#95A5A6',     # 灰色
     }
     
-    # ===== 子图1：总能量（KE、PE、ME）=====
-    ax_total = axes[0]
-    ax_total.plot(timestamps, energy_df['total_KE'], 'r-', label='Total KE', linewidth=1.5)
-    ax_total.plot(timestamps, energy_df['total_PE'], 'b-', label='Total PE', linewidth=1.5)
-    ax_total.plot(timestamps, energy_df['total_energy'], 'k-', label='Total ME (KE+PE)', linewidth=2)
-    ax_total.set_xlim(min_t - x_margin, max_t + x_margin)
-    ax_total.set_ylabel('Energy (J)', fontsize=11)
-    ax_total.legend(loc='upper right')
-    ax_total.grid(True, alpha=0.3)
-    ax_total.set_title('Total Energy: KE (Kinetic), PE (Potential), ME (Mechanical)', fontsize=12)
-    
-    # ===== 子图2~N：各分组的能量（KE 和 PE）=====
+    # 相对时间（从 0 开始），供所有子图统一 x 轴
+    t_rel = timestamps - t0
+    x_max_rel = (max_t - t0) + x_margin
+
+    # ===== 子图 1~N：各分组 PE（求和）+ contact force（各 body 各自一条曲线）=====
+    import matplotlib.cm as mcm
     for i, group in enumerate(groups):
-        ax = axes[i + 1]
+        ax = axes[i]
         color = colors.get(group, '#333333')
-        
-        linear_ke = group_linear_ke[group]
-        angular_ke = group_angular_ke[group]
-        total_ke = linear_ke + angular_ke
         pe = group_pe[group]
-        
-        if use_real_energy:
-            # 绘制真正的能量曲线（双Y轴：左轴KE，右轴PE）
-            ax.plot(timestamps, total_ke, color=color, linewidth=1.5, label=f'Total KE')
-            ax.fill_between(timestamps, 0, total_ke, color=color, alpha=0.2)
-            ax.set_ylabel('Kinetic Energy (J)', fontsize=11, color=color)
-            ax.tick_params(axis='y', labelcolor=color)
-            
-            # 创建右侧Y轴显示PE
-            ax2 = ax.twinx()
-            ax2.plot(timestamps, pe, color='#1ABC9C', linewidth=1.5, label=f'PE', linestyle='--')
-            ax2.set_ylabel('Potential Energy (J)', fontsize=11, color='#1ABC9C')
-            ax2.tick_params(axis='y', labelcolor='#1ABC9C')
-            
-            # 合并图例
-            lines1, labels1 = ax.get_legend_handles_labels()
-            lines2, labels2 = ax2.get_legend_handles_labels()
-            ax.legend(lines1 + lines2, labels1 + labels2, loc='upper right')
-        else:
-            # 绘制 v^2 近似曲线
-            ax.plot(timestamps, linear_ke, color=color, linewidth=1.5, label=f'{group} Σv²')
-            ax.fill_between(timestamps, 0, linear_ke, color=color, alpha=0.2)
-            ax.set_ylabel('Σv² (m²/s²)', fontsize=11)
-        
-        ax.set_xlim(min_t - x_margin, max_t + x_margin)
-        ax.legend(loc='upper right')
+        # 左 Y：该组 PE 求和
+        ax.plot(t_rel, pe, color='#1ABC9C', linewidth=1.5, label=f'PE (sum)', linestyle='-')
+        ax.set_ylabel('PE (J)', fontsize=11, color='#1ABC9C')
+        ax.tick_params(axis='y', labelcolor='#1ABC9C')
+        ax.set_xlim(0, x_max_rel)
         ax.grid(True, alpha=0.3)
-        
-        # 显示该组包含的 body
+        # 右 Y：该组内每个 body 的 contact force 各自一条曲线（不求和）
+        ax2 = ax.twinx()
+        bodies_in_group = group_bodies[group]
+        cmap = mcm.get_cmap('tab10')
+        for j, body_name in enumerate(bodies_in_group):
+            if body_name not in per_body_contact:
+                continue
+            df_b = per_body_contact[body_name]
+            t_rel_b = df_b['timestamp'].values - t0
+            ax2.plot(t_rel_b, df_b['force_magnitude'].values, color=cmap(j % 10), linewidth=1.0, label=body_name, alpha=0.9)
+        ax2.set_ylabel('Contact force (N)', fontsize=11, color='#333333')
+        ax2.tick_params(axis='y', labelcolor='#333333')
+        lines1, labels1 = ax.get_legend_handles_labels()
+        lines2, labels2 = ax2.get_legend_handles_labels()
+        ax.legend(lines1 + lines2, labels1 + labels2, loc='upper right', fontsize=8)
         body_list = ', '.join(group_bodies[group])
-        ax.set_title(f'{group} Group: {body_list}', fontsize=11)
+        ax.set_title(f'{group} Group: PE (sum) + Contact force (per link): {body_list}', fontsize=10)
     
-    # 设置最后一个子图的 x 轴标签
+    # ===== 最后一个子图：Total PE + Contact force，从 0 时刻开始，带 Time 坐标轴 =====
+    ax_total = axes[n_groups]
+    t_rel_energy = timestamps - t0
+    ax_total.plot(t_rel_energy, energy_df['total_PE'], 'b-', label='Total PE', linewidth=1.5)
+    ax_total.set_xlim(0, x_max_rel)
+    ax_total.set_ylabel('Total PE (J)', fontsize=11)
+    if contact_by_time is not None:
+        t_rel_contact = contact_by_time['timestamp'].values - t0
+        ax_force = ax_total.twinx()
+        ax_force.plot(t_rel_contact, contact_by_time['max_contact_force'].values, 'r-', label='Contact force (max per frame)', linewidth=1.5)
+        ax_force.set_ylabel('Contact force (N)', fontsize=11, color='r')
+        ax_force.tick_params(axis='y', labelcolor='r')
+        lines1, labels1 = ax_total.get_legend_handles_labels()
+        lines2, labels2 = ax_force.get_legend_handles_labels()
+        ax_total.legend(lines1 + lines2, labels1 + labels2, loc='upper right')
+        ax_total.set_title('Total PE (all links sum) + Contact force (max per frame)', fontsize=12)
+    else:
+        ax_total.legend(loc='upper right')
+        ax_total.set_title('Total PE (from t=0)', fontsize=12)
+    ax_total.grid(True, alpha=0.3)
     axes[-1].set_xlabel('Time (s)', fontsize=11)
     
     plt.tight_layout()
@@ -2734,6 +2755,14 @@ def main():
     )
     
     parser.add_argument(
+        '--link-energy',
+        type=str,
+        default=None,
+        help='Link 动能/势能数据文件路径 (CSV或BIN格式，可选)。'
+             '若不指定，将根据 contact 文件路径自动查找同目录下的 link_kinetic_energy_data_YYYYMMDD_HHMMSS.*'
+    )
+    
+    parser.add_argument(
         '--a-thr',
         type=float,
         default=None,
@@ -2934,30 +2963,33 @@ def main():
     
     # ==================== Link Energy 绘图（独立于 risk 计算） ====================
     if args.plot:
-        # 根据 contact 文件路径自动查找对应的 link_kinetic_energy_data 文件
-        contact_path = Path(args.contact)
-        contact_dir = contact_path.parent
-        contact_stem = contact_path.stem  # e.g., contact_data_20260131_183505
-        
-        # 提取时间戳部分（假设格式为 xxx_data_YYYYMMDD_HHMMSS）
-        import re
-        timestamp_match = re.search(r'(\d{8}_\d{6})', contact_stem)
-        if timestamp_match:
-            timestamp_str = timestamp_match.group(1)
-            # 尝试查找对应的 link_kinetic_energy_data 文件
-            for ext in ['.csv', '.bin']:
-                link_energy_path = contact_dir / f"link_kinetic_energy_data_{timestamp_str}{ext}"
-                if link_energy_path.exists():
-                    print(f"\n找到 Link Energy 数据文件: {link_energy_path}")
-                    link_energy_df = load_data_file(str(link_energy_path))
-                    if not link_energy_df.empty:
-                        print(f"  Link能量数据: {len(link_energy_df)} 条记录")
-                        energy_plot_path = f"{output_base}_link_energy_curves.png"
-                        try:
-                            plot_link_energy_curves(link_energy_df, energy_plot_path)
-                        except Exception as e:
-                            print(f"警告: 绘制 link energy 曲线失败: {e}")
-                    break  # 找到并处理后退出循环
+        link_energy_path = None
+        if args.link_energy:
+            link_energy_path = Path(args.link_energy)
+        if link_energy_path is None or not link_energy_path.exists():
+            # 根据 contact 文件路径自动查找对应的 link_kinetic_energy_data 文件
+            contact_path = Path(args.contact)
+            contact_dir = contact_path.parent
+            contact_stem = contact_path.stem  # e.g., contact_data_20260131_183505
+            import re
+            timestamp_match = re.search(r'(\d{8}_\d{6})', contact_stem)
+            if timestamp_match:
+                timestamp_str = timestamp_match.group(1)
+                for ext in ['.csv', '.bin']:
+                    candidate = contact_dir / f"link_kinetic_energy_data_{timestamp_str}{ext}"
+                    if candidate.exists():
+                        link_energy_path = candidate
+                        break
+        if link_energy_path is not None and link_energy_path.exists():
+            print(f"\n找到 Link Energy 数据文件: {link_energy_path}")
+            link_energy_df = load_data_file(str(link_energy_path))
+            if not link_energy_df.empty:
+                print(f"  Link能量数据: {len(link_energy_df)} 条记录")
+                energy_plot_path = f"{output_base}_link_energy_curves.png" if output_base else None
+                try:
+                    plot_link_energy_curves(link_energy_df, energy_plot_path, contact_df=contact_df)
+                except Exception as e:
+                    print(f"警告: 绘制 link energy 曲线失败: {e}")
 
 
 if __name__ == '__main__':

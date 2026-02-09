@@ -27,13 +27,13 @@ motion_states:
     # policy_path: "policies/toFront_3.mnn"
     mimic_policies:
       forward: "policies/toFront_3_force.mnn"
-      forward_left: "policies/toLeftFront_3.mnn"
+      forward_left: "policies/toLeftFront_3_force.mnn"
       left: "policies/toLeft_3_force.mnn"
       backward_left: "policies/toLeftBack_3_force.mnn"
       backward: "policies/toBack_3_force.mnn"
-      backward_right: "policies/toRightBack_3.mnn"
-      right: "policies/toRight_3.mnn"
-      forward_right: "policies/toRightFront_3.mnn"
+      backward_right: "policies/toRightBack_3_force.mnn"
+      right: "policies/toRight_3_force.mnn"
+      forward_right: "policies/toRightFront_3_force.mnn"
     mimic_trajectories:
       forward: "trajectories/toFront_1_converted_50fps.csv"
       forward_left: "trajectories/toLeftFront_1_converted_50fps.csv"
@@ -42,7 +42,7 @@ motion_states:
       backward: "trajectories/toBack_1_converted_50fps.csv"
       backward_right: "trajectories/toRightBack_1_converted_50fps.csv"
       right: "trajectories/toRight_1_converted_50fps.csv"
-      forward_right: "trajectories/toRightFront_1_converted_50fps.csv"
+      forward_right: "trajectories/toRightFront_1_converted_50fps.csv" # 轨迹开头脚滑
     # policy_path: "rl_dance/policies/new_kf_addrand/model_70000.mnn"
     # policy_path: "rl_dance/policies/wbst/kf3_85.mnn"
     # data_path: "rl_dance/trajectories/wbst_best.csv"
@@ -136,10 +136,7 @@ active_joint_names:
   - "J22_ELBOW_YAW_R"
   - "J23_HEAD_YAW"
 
-default_joint_q:
-  - [-0.06, 0.0, 0.0, 0.12, -0.06, 0.0]  # 左腿
-  - [-0.06, 0.0, 0.0, 0.12, -0.06, 0.0]  # 右腿
-  - [0.0]  # 腰部
+default_joint_q:right
   - [0.0, 0.15, 0.0, -0.25, 0.0]  # 左臂
   - [0.0, -0.15, 0.0, -0.25, 0.0]  # 右臂
   - [0.0]  # 头部
