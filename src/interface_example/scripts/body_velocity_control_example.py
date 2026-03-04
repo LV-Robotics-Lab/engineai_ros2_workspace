@@ -4,20 +4,17 @@ import rclpy
 from rclpy.node import Node
 from std_msgs.msg import Header
 from interface_protocol.msg import BodyVelCmd
-import numpy as np
-import math
-import time
 
 
 class BodyVelocityPublisher(Node):
     def __init__(self):
-        super().__init__('body_velocity_publisher')
+        super().__init__("body_velocity_publisher")
 
         # Create publisher for body velocity commands
         self.publisher_ = self.create_publisher(
             BodyVelCmd,
-            '/motion/body_vel_cmd',
-            10  # QoS profile depth
+            "/motion/body_vel_cmd",
+            10,  # QoS profile depth
         )
 
         # Set timer to publish at 100Hz (10ms)
@@ -28,7 +25,7 @@ class BodyVelocityPublisher(Node):
         self.linear_vel = [0.0, 0.0]  # [x, y] velocities in m/s
         self.yaw_vel = 0.0  # yaw velocity in rad/s
 
-        self.get_logger().info('Body Velocity Publisher started')
+        self.get_logger().info("Body Velocity Publisher started")
 
     def timer_callback(self):
         # Create message
@@ -37,11 +34,11 @@ class BodyVelocityPublisher(Node):
         # Fill header
         msg.header = Header()
         msg.header.stamp = self.get_clock().now().to_msg()
-        msg.header.frame_id = 'body'
+        msg.header.frame_id = "body"
 
         # Set linear velocity - you can modify these values for testing
         # For example, set a forward velocity of 0.1 m/s
-        self.linear_vel[0] = 0.4  # Forward velocity (x-axis)
+        self.linear_vel[0] = 0.5  # Forward velocity (x-axis)
         self.linear_vel[1] = 0.0  # Lateral velocity (y-axis)
 
         # Set yaw velocity - rotate at 0.1 rad/s (about 5.7 degrees/s)
@@ -63,12 +60,14 @@ def main(args=None):
     try:
         rclpy.spin(body_velocity_publisher)
     except KeyboardInterrupt:
-        body_velocity_publisher.get_logger().info('Node stopped by keyboard interrupt')
+        body_velocity_publisher.get_logger().info("Node stopped by keyboard interrupt")
     finally:
         # Destroy the node explicitly
         body_velocity_publisher.destroy_node()
-        rclpy.shutdown()
+        # Check if context is still valid before shutting down
+        if rclpy.ok():
+            rclpy.shutdown()
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()

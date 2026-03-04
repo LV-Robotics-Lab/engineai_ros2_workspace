@@ -21,6 +21,9 @@ uint8 RIGHT_STICK_Y = 5
 
 std_msgs/Header header
 
+# Marks whether the hardware gamepad is connected
+bool hardware_connected
+
 # Digital buttons (0 = released, 1 = pressed)
 int32[12] digital_states  # Fixed size array of 12 elements
 

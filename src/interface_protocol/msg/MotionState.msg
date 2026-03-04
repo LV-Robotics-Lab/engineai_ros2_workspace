@@ -1,1 +1,2 @@
 string current_motion_task
+string[] available_transition_motions
