@@ -2122,7 +2122,7 @@ def get_link_group(body_name: str) -> str:
     - Shoulder: 包含 shoulder
     - Elbow: 包含 elbow
     - Hip: 包含 hip
-    - Knee: 包含 knee 或 ankle
+    - Knee: 仅包含 knee
     - Skip: foot（质量几乎为零，忽略）、world
     """
     name_lower = body_name.lower()
@@ -2147,8 +2147,8 @@ def get_link_group(body_name: str) -> str:
     if 'hip' in name_lower:
         return 'Hip'
     
-    # Knee 组（包括 ankle）
-    if 'knee' in name_lower or 'ankle' in name_lower:
+    # Knee 组（不包含 ankle）
+    if 'knee' in name_lower:
         return 'Knee'
     
     # 其他归入 Other
@@ -2245,11 +2245,24 @@ def plot_link_energy_curves(energy_df: pd.DataFrame, output_path: Optional[str] 
                 df_b = contact_df.loc[mask].groupby('timestamp')['force_magnitude'].max().reset_index()
                 per_body_contact[body_name] = df_b
     
+    # 预计算每个 body 的速度平方和（用于速度二范数）
+    body_speed_sq = {}  # body_name -> array(vx^2 + vy^2 + vz^2)
+    for body_name in body_names:
+        vel_x_col = f'{body_name}_vel_x'
+        vel_y_col = f'{body_name}_vel_y'
+        vel_z_col = f'{body_name}_vel_z'
+        if all(col in energy_df.columns for col in [vel_x_col, vel_y_col, vel_z_col]):
+            vel_x = energy_df[vel_x_col].values
+            vel_y = energy_df[vel_y_col].values
+            vel_z = energy_df[vel_z_col].values
+            body_speed_sq[body_name] = vel_x**2 + vel_y**2 + vel_z**2
+
     # 计算每组的能量（KE 和 PE）
     # 优先使用 linear_KE、angular_KE、PE 列，如果不存在则用 v^2 近似
     group_linear_ke = {}   # group_name -> array of linear KE for each timestamp
     group_angular_ke = {}  # group_name -> array of angular KE for each timestamp
     group_pe = {}          # group_name -> array of PE for each timestamp
+    group_speed_norm = {}  # group_name -> array of ||v||_2 for each timestamp
     use_real_energy = False    # 是否使用真正的能量列
     
     # 检查是否有能量列
@@ -2266,7 +2279,10 @@ def plot_link_energy_curves(energy_df: pd.DataFrame, output_path: Optional[str] 
         linear_ke_sum = np.zeros(len(energy_df))
         angular_ke_sum = np.zeros(len(energy_df))
         pe_sum = np.zeros(len(energy_df))
+        speed_sq_sum = np.zeros(len(energy_df))
         for body_name in group_bodies[group]:
+            if body_name in body_speed_sq:
+                speed_sq_sum += body_speed_sq[body_name]
             if use_real_energy:
                 # 使用真正的能量列
                 linear_ke_col = f'{body_name}_linear_KE'
@@ -2291,6 +2307,12 @@ def plot_link_energy_curves(energy_df: pd.DataFrame, output_path: Optional[str] 
         group_linear_ke[group] = linear_ke_sum
         group_angular_ke[group] = angular_ke_sum
         group_pe[group] = pe_sum
+        group_speed_norm[group] = np.sqrt(speed_sq_sum)
+
+    total_speed_sq = np.zeros(len(energy_df))
+    for speed_sq in body_speed_sq.values():
+        total_speed_sq += speed_sq
+    total_speed_norm = np.sqrt(total_speed_sq)
     
     # 创建子图：len(groups) 个分组图 + 1个总能量图（总图放最后以便显示 Time 坐标轴）
     n_groups = len(groups)
@@ -2325,6 +2347,16 @@ def plot_link_energy_curves(energy_df: pd.DataFrame, output_path: Optional[str] 
         ax.tick_params(axis='y', labelcolor='#1ABC9C')
         ax.set_xlim(0, x_max_rel)
         ax.grid(True, alpha=0.3)
+        # 左 Y（外侧）：该组速度二范数
+        ax_speed = ax.twinx()
+        ax_speed.spines['left'].set_position(('outward', 55))
+        ax_speed.spines['left'].set_visible(True)
+        ax_speed.spines['right'].set_visible(False)
+        ax_speed.yaxis.set_label_position('left')
+        ax_speed.yaxis.tick_left()
+        ax_speed.plot(t_rel, group_speed_norm[group], color='#8E44AD', linewidth=1.3, linestyle='--', label='||v||_2')
+        ax_speed.set_ylabel('Speed norm (m/s)', fontsize=10, color='#8E44AD')
+        ax_speed.tick_params(axis='y', labelcolor='#8E44AD')
         # 右 Y：该组内每个 body 的 contact force 各自一条曲线（不求和）
         ax2 = ax.twinx()
         bodies_in_group = group_bodies[group]
@@ -2338,17 +2370,28 @@ def plot_link_energy_curves(energy_df: pd.DataFrame, output_path: Optional[str] 
         ax2.set_ylabel('Contact force (N)', fontsize=11, color='#333333')
         ax2.tick_params(axis='y', labelcolor='#333333')
         lines1, labels1 = ax.get_legend_handles_labels()
+        lines_speed, labels_speed = ax_speed.get_legend_handles_labels()
         lines2, labels2 = ax2.get_legend_handles_labels()
-        ax.legend(lines1 + lines2, labels1 + labels2, loc='upper right', fontsize=8)
+        ax.legend(lines1 + lines_speed + lines2, labels1 + labels_speed + labels2, loc='upper right', fontsize=8)
         body_list = ', '.join(group_bodies[group])
-        ax.set_title(f'{group} Group: PE (sum) + Contact force (per link): {body_list}', fontsize=10)
+        ax.set_title(f'{group} Group: PE (sum) + Speed norm + Contact force (per link): {body_list}', fontsize=10)
     
     # ===== 最后一个子图：Total PE + Contact force，从 0 时刻开始，带 Time 坐标轴 =====
     ax_total = axes[n_groups]
     t_rel_energy = timestamps - t0
     ax_total.plot(t_rel_energy, energy_df['total_PE'], 'b-', label='Total PE', linewidth=1.5)
     ax_total.set_xlim(0, x_max_rel)
-    ax_total.set_ylabel('Total PE (J)', fontsize=11)
+    ax_total.set_ylabel('Total PE (J)', fontsize=11, color='b')
+    ax_total.tick_params(axis='y', labelcolor='b')
+    ax_total_speed = ax_total.twinx()
+    ax_total_speed.spines['left'].set_position(('outward', 55))
+    ax_total_speed.spines['left'].set_visible(True)
+    ax_total_speed.spines['right'].set_visible(False)
+    ax_total_speed.yaxis.set_label_position('left')
+    ax_total_speed.yaxis.tick_left()
+    ax_total_speed.plot(t_rel_energy, total_speed_norm, color='#8E44AD', linewidth=1.3, linestyle='--', label='Total ||v||_2')
+    ax_total_speed.set_ylabel('Speed norm (m/s)', fontsize=10, color='#8E44AD')
+    ax_total_speed.tick_params(axis='y', labelcolor='#8E44AD')
     if contact_by_time is not None:
         t_rel_contact = contact_by_time['timestamp'].values - t0
         ax_force = ax_total.twinx()
@@ -2356,16 +2399,19 @@ def plot_link_energy_curves(energy_df: pd.DataFrame, output_path: Optional[str] 
         ax_force.set_ylabel('Contact force (N)', fontsize=11, color='r')
         ax_force.tick_params(axis='y', labelcolor='r')
         lines1, labels1 = ax_total.get_legend_handles_labels()
+        lines_speed, labels_speed = ax_total_speed.get_legend_handles_labels()
         lines2, labels2 = ax_force.get_legend_handles_labels()
-        ax_total.legend(lines1 + lines2, labels1 + labels2, loc='upper right')
-        ax_total.set_title('Total PE (all links sum) + Contact force (max per frame)', fontsize=12)
+        ax_total.legend(lines1 + lines_speed + lines2, labels1 + labels_speed + labels2, loc='upper right')
+        ax_total.set_title('Total PE (all links sum) + Speed norm + Contact force (max per frame)', fontsize=12)
     else:
-        ax_total.legend(loc='upper right')
-        ax_total.set_title('Total PE (from t=0)', fontsize=12)
+        lines1, labels1 = ax_total.get_legend_handles_labels()
+        lines_speed, labels_speed = ax_total_speed.get_legend_handles_labels()
+        ax_total.legend(lines1 + lines_speed, labels1 + labels_speed, loc='upper right')
+        ax_total.set_title('Total PE + Speed norm (from t=0)', fontsize=12)
     ax_total.grid(True, alpha=0.3)
     axes[-1].set_xlabel('Time (s)', fontsize=11)
     
-    plt.tight_layout()
+    plt.tight_layout(rect=(0.08, 0.0, 1.0, 1.0))
     
     if output_path:
         plt.savefig(output_path, dpi=150, bbox_inches='tight')
