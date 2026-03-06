@@ -40,13 +40,13 @@ model_param:
 
 # 干扰力配置 - 定义默认的推力大小
 perturbation:
-  default_force_magnitude: 00.0    # 默认推力大小（牛顿），系统会自动按前后左右方向分配
+  default_force_magnitude: 200.0    # 默认推力大小（牛顿），系统会自动按前后左右方向分配
   default_torque_magnitude: 0.0     # 默认扭矩大小（牛·米）
   force_step: 20.0                  # 推力调整步长（牛顿），用于+/-键调整推力大小
   torque_step: 0.0                  # 扭矩调整步长（牛·米），用于+/-键调整推力大小
   force_duration: 0.3               # 推力持续时间（秒），按下键盘后推力持续的时间
   auto_sampling: true
-  auto_direction: "left"         # 施加推力时的推力方向（forward/backward/left/right，左前 left_forward/右前 right_forward/左后 left_backward/右后 right_backward）
+  auto_direction: "forward"         # 施加推力时的推力方向（forward/backward/left/right，左前 left_forward/右前 right_forward/左后 left_backward/右后 right_backward）
   auto_delay: 2.0                   # 施加推力等待时间（秒）
 
 # 传感器配置 - 定义传感器数据的话题

@@ -100,8 +100,10 @@ initial_velocity:
   linear: [0.0, 0.0, 0.0]    # 初始线速度 [x, y, z] (m/s) - 设置为0停止前进, 速度不能超过1.5m/s
   angular: [0.0, 0.0, 0.0]   # 初始角速度 [x, y, z] (rad/s)
 
-# Damping mode: 俯仰角 > 50° 或 < -50° 时进入 kp=0, kd=0.5；设为 false 则关闭
-enable_damping_mode: false
+# 摔倒检测后进入 damping mode：俯仰角 > 50° 或 < -50° 时 kp=0, kd=0.5
+# enable_falling_switch: true 启用；falling_detect_after_sec 内不检测，避免落地/复位瞬间误触发
+enable_falling_switch: true
+falling_detect_after_sec: 1.0   # 控制运行超过此时间(秒)后才根据俯仰角切 damping（与仿真 3s reset + 2s auto_delay 后推力 对齐）
 
 # 扭矩限制
 torque_limit: True

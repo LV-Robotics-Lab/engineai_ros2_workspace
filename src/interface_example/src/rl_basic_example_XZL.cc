@@ -49,9 +49,10 @@ class RlBasicRunnerXZL : public rclcpp::Node {
       if (torque_limit_enabled_) {
         RCLCPP_INFO(get_logger(), "Soft torque limit: %.2f", soft_torque_limit_);
       }
-      // 读取 enable_damping_mode（俯仰角超阈值时是否进入 kp=0, kd=0.5，默认 true）
-      enable_damping_mode_ = config["enable_damping_mode"] ? config["enable_damping_mode"].as<bool>() : true;
-      RCLCPP_INFO(get_logger(), "Damping mode (pitch > 50 deg): %s", enable_damping_mode_ ? "enabled" : "disabled");
+      // 读取 enable_falling_switch（摔倒检测后进入 kp=0, kd=0.5）
+      enable_falling_switch_ = config["enable_falling_switch"] ? config["enable_falling_switch"].as<bool>() : true;
+      falling_detect_after_sec_ = config["falling_detect_after_sec"] ? config["falling_detect_after_sec"].as<double>() : 5.0;
+      RCLCPP_INFO(get_logger(), "Enable falling switch: %s, detect after %.1fs", enable_falling_switch_ ? "enabled" : "disabled", falling_detect_after_sec_);
     } catch (const std::exception& e) {
       RCLCPP_WARN(get_logger(), "Failed to load torque limit parameters: %s", e.what());
       torque_limit_enabled_ = false;
@@ -385,10 +386,10 @@ class RlBasicRunnerXZL : public rclcpp::Node {
     joint_command_->feed_forward_torque = std::vector<double>(q_des_.size(), 0.0);
     joint_command_->torque = std::vector<double>(q_des_.size(), 0.0);
 
-    // Damping mode: 当 enable_damping_mode_ 为 true 且俯仰角 > 50° 或 < -50° 时 kp=0, kd=0.5
+    // 摔倒检测后进入 damping：仅在 time_ >= falling_detect_after_sec_ 后才根据俯仰角切 kp=0, kd=0.5，避免落地/复位瞬间误触发
     const double kPitchDampingThresholdRad = 50.0 * M_PI / 180.0;  // 50°
     bool in_damping = false;
-    if (enable_damping_mode_) {
+    if (enable_falling_switch_ && time_ >= falling_detect_after_sec_) {
       double current_pitch = GetCurrentPitchAngle();
       if (current_pitch > kPitchDampingThresholdRad || current_pitch < -kPitchDampingThresholdRad) {
         in_damping = true;
@@ -446,8 +447,9 @@ class RlBasicRunnerXZL : public rclcpp::Node {
   std::vector<Eigen::VectorXd> max_torque_joint_;
   double soft_torque_limit_ = 0.9;  // 软扭矩限制系数，默认0.9（参考XZL实现）
 
-  // Damping mode: 俯仰角 > 50° 或 < -50° 时是否进入 kp=0, kd=0.5（由 YAML enable_damping_mode 控制）
-  bool enable_damping_mode_ = true;
+  // 摔倒检测后进入 damping（YAML enable_falling_switch）；falling_detect_after_sec_ 内不检测
+  bool enable_falling_switch_ = true;
+  double falling_detect_after_sec_ = 5.0;
 };
 
 }  // namespace example
