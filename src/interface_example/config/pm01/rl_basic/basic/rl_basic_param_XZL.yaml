@@ -104,6 +104,32 @@ initial_velocity:
 # enable_falling_switch: true 启用；falling_detect_after_sec 内不检测，避免落地/复位瞬间误触发
 enable_falling_switch: true
 falling_detect_after_sec: 1.0   # 控制运行超过此时间(秒)后才根据俯仰角切 damping（与仿真 3s reset + 2s auto_delay 后推力 对齐）
+falling_switch: none   # pdstand / damping / none
+
+# falling_switch 为 pdstand 时使用（参考 pd_stand，五阶插值到目标姿态）
+falling_pd_stand:
+  desired_joint_position:
+    - [0, 0, 0, 0, 0, 0]
+    - [0, 0, 0, 0, 0, 0]
+    - [0]
+    - [0, 0.08, 0, -0.128, 0]
+    - [0, -0.08, 0, -0.128, 0]
+    - [0]
+  stiffness:
+    - [200, 200, 380, 450, 400, 200]
+    - [200, 200, 380, 450, 400, 200]
+    - [200]
+    - [250, 250, 250, 250, 250]
+    - [250, 250, 250, 250, 250]
+    - [100]
+  damping:
+    - [5, 5, 5, 5, 2, 2]
+    - [5, 5, 5, 5, 2, 2]
+    - [1]
+    - [1, 1, 1, 1, 1]
+    - [1, 1, 1, 1, 1]
+    - [1]
+  duration: 3.0
 
 # 扭矩限制
 torque_limit: True

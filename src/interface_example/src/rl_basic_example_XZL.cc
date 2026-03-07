@@ -3,6 +3,7 @@
 #include <memory>
 #include <rclcpp/logging.hpp>
 #include <rclcpp/rclcpp.hpp>
+#include <std_msgs/msg/empty.hpp>
 #include <thread>
 #include <limits>
 #include <yaml-cpp/yaml.h>
@@ -26,7 +27,14 @@ class RlBasicRunnerXZL : public rclcpp::Node {
     config_file_dir_ = config_file_dir;
     config_file_ = config_file;
     joint_command_ = std::make_shared<interface_protocol::msg::JointCommand>();
-    
+
+    // 订阅 mujoco reset，reset 后下次摔倒时重新打印
+    mujoco_reset_sub_ = create_subscription<std_msgs::msg::Empty>(
+        "/mujoco/reset_complete", 10, [this](const std_msgs::msg::Empty::SharedPtr) {
+          fall_switch_entered_logged_ = false;
+          in_pd_stand_fall_ = false;
+        });
+
     // 加载扭矩限制参数
     LoadTorqueLimitParameters();
   }
@@ -49,10 +57,33 @@ class RlBasicRunnerXZL : public rclcpp::Node {
       if (torque_limit_enabled_) {
         RCLCPP_INFO(get_logger(), "Soft torque limit: %.2f", soft_torque_limit_);
       }
-      // 读取 enable_falling_switch（摔倒检测后进入 kp=0, kd=0.5）
+      // 读取摔倒策略相关
       enable_falling_switch_ = config["enable_falling_switch"] ? config["enable_falling_switch"].as<bool>() : true;
       falling_detect_after_sec_ = config["falling_detect_after_sec"] ? config["falling_detect_after_sec"].as<double>() : 5.0;
-      RCLCPP_INFO(get_logger(), "Enable falling switch: %s, detect after %.1fs", enable_falling_switch_ ? "enabled" : "disabled", falling_detect_after_sec_);
+      falling_switch_ = config["falling_switch"] ? config["falling_switch"].as<std::string>() : "damping";
+      if (falling_switch_ != "none" && falling_switch_ != "damping" && falling_switch_ != "pdstand") {
+        RCLCPP_WARN(get_logger(), "falling_switch '%s' unknown, use damping", falling_switch_.c_str());
+        falling_switch_ = "damping";
+      }
+      RCLCPP_INFO(get_logger(), "Enable falling switch: %s, detect after %.1fs, strategy: %s",
+                  enable_falling_switch_ ? "enabled" : "disabled", falling_detect_after_sec_, falling_switch_.c_str());
+      // pdstand 时加载 falling_pd_stand 参数
+      if (falling_switch_ == "pdstand" && config["falling_pd_stand"]) {
+        const YAML::Node& pd = config["falling_pd_stand"];
+        if (pd["desired_joint_position"]) {
+          q_pd_des_ = math::ConcatenateVectors(LoadVectorArrayFromYaml(pd["desired_joint_position"]));
+          kp_pd_ = math::ConcatenateVectors(LoadVectorArrayFromYaml(pd["stiffness"]));
+          kd_pd_ = math::ConcatenateVectors(LoadVectorArrayFromYaml(pd["damping"]));
+          pd_stand_duration_ = pd["duration"] ? pd["duration"].as<double>() : 3.0;
+          pd_stand_loaded_ = true;
+          RCLCPP_INFO(get_logger(), "Loaded falling_pd_stand: %zd joints, duration %.2fs", q_pd_des_.size(), pd_stand_duration_);
+        } else {
+          RCLCPP_WARN(get_logger(), "falling_pd_stand.desired_joint_position not found, pdstand disabled");
+          pd_stand_loaded_ = false;
+        }
+      } else {
+        pd_stand_loaded_ = false;
+      }
     } catch (const std::exception& e) {
       RCLCPP_WARN(get_logger(), "Failed to load torque limit parameters: %s", e.what());
       torque_limit_enabled_ = false;
@@ -379,32 +410,91 @@ class RlBasicRunnerXZL : public rclcpp::Node {
     q_des_ = q_des_.cwiseMax(q_des_lb).cwiseMin(q_des_ub);
   }
 
-  void SendMotorCommand() {
-    // Convert Eigen vectors to std::vector
-    joint_command_->position = std::vector<double>(q_des_.data(), q_des_.data() + q_des_.size());
-    joint_command_->velocity = std::vector<double>(q_des_.size(), 0.0);
-    joint_command_->feed_forward_torque = std::vector<double>(q_des_.size(), 0.0);
-    joint_command_->torque = std::vector<double>(q_des_.size(), 0.0);
+  // 五阶插值：phase in [0, duration]，输出 q_cmd, qd_cmd（与 pd_stand_runner 一致）
+  void QuinticInterpolate(const Eigen::VectorXd& q_init, const Eigen::VectorXd& q_des,
+                          double duration, double phase, Eigen::VectorXd& q_cmd, Eigen::VectorXd& qd_cmd) {
+    const int n = static_cast<int>(q_init.size());
+    if (q_des.size() != n || duration <= 0) {
+      q_cmd = q_init;
+      qd_cmd.setZero(n);
+      return;
+    }
+    double s = std::min(phase / duration, 1.0);
+    double f = 10.0 * std::pow(s, 3) - 15.0 * std::pow(s, 4) + 6.0 * std::pow(s, 5);
+    double df_ds = 30.0 * s * s - 60.0 * std::pow(s, 3) + 30.0 * std::pow(s, 4);
+    q_cmd = q_init + (q_des - q_init) * f;
+    qd_cmd = (q_des - q_init) * (df_ds / duration);
+  }
 
-    // 摔倒检测后进入 damping：仅在 time_ >= falling_detect_after_sec_ 后才根据俯仰角切 kp=0, kd=0.5，避免落地/复位瞬间误触发
+  void SendMotorCommand() {
+    const int n = static_cast<int>(q_des_.size());
+    joint_command_->position = std::vector<double>(q_des_.data(), q_des_.data() + n);
+    joint_command_->velocity = std::vector<double>(n, 0.0);
+    joint_command_->feed_forward_torque = std::vector<double>(n, 0.0);
+    joint_command_->torque = std::vector<double>(n, 0.0);
+
     const double kPitchDampingThresholdRad = 50.0 * M_PI / 180.0;  // 50°
-    bool in_damping = false;
-    if (enable_falling_switch_ && time_ >= falling_detect_after_sec_) {
+    bool fall_detected = enable_falling_switch_ && time_ >= falling_detect_after_sec_;
+    if (fall_detected) {
       double current_pitch = GetCurrentPitchAngle();
-      if (current_pitch > kPitchDampingThresholdRad || current_pitch < -kPitchDampingThresholdRad) {
-        in_damping = true;
+      if (current_pitch <= kPitchDampingThresholdRad && current_pitch >= -kPitchDampingThresholdRad) {
+        fall_detected = false;
       }
     }
-    if (in_damping) {
-      joint_command_->stiffness = std::vector<double>(q_des_.size(), 0.0);
-      joint_command_->damping = std::vector<double>(q_des_.size(), 0.5);
-    } else {
+
+    bool use_fall_command = false;
+    if (falling_switch_ == "none") {
+      use_fall_command = false;
+    } else if (falling_switch_ == "damping" && fall_detected) {
+      use_fall_command = true;
+      if (!fall_switch_entered_logged_) {
+        RCLCPP_INFO(get_logger(), "Fall detected, switching to damping mode");
+        fall_switch_entered_logged_ = true;
+      }
+      joint_command_->stiffness = std::vector<double>(n, 0.0);
+      joint_command_->damping = std::vector<double>(n, 0.5);
+    } else if (falling_switch_ == "pdstand" && pd_stand_loaded_) {
+      if (fall_detected && !in_pd_stand_fall_) {
+        in_pd_stand_fall_ = true;
+        q_pd_fall_init_ = q_real_;
+        pd_stand_phase_ = 0.0;
+        if (q_pd_fall_init_.size() != q_pd_des_.size()) {
+          RCLCPP_WARN(get_logger(), "pd_stand size mismatch: q_real %zd vs q_pd_des %zd, disable pdstand",
+                      q_pd_fall_init_.size(), q_pd_des_.size());
+          in_pd_stand_fall_ = false;
+        }
+      }
+      if (in_pd_stand_fall_ && q_pd_fall_init_.size() == q_pd_des_.size()) {
+        if (!fall_switch_entered_logged_) {
+          RCLCPP_INFO(get_logger(), "Fall detected, switching to pdstand mode");
+          fall_switch_entered_logged_ = true;
+        }
+        use_fall_command = true;
+        pd_stand_phase_ += param_->control_dt;
+        const int np = static_cast<int>(q_pd_des_.size());
+        if (pd_stand_phase_ < pd_stand_duration_) {
+          Eigen::VectorXd q_cmd(np), qd_cmd(np);
+          QuinticInterpolate(q_pd_fall_init_, q_pd_des_, pd_stand_duration_, pd_stand_phase_, q_cmd, qd_cmd);
+          joint_command_->position = std::vector<double>(q_cmd.data(), q_cmd.data() + np);
+          joint_command_->velocity = std::vector<double>(qd_cmd.data(), qd_cmd.data() + np);
+          joint_command_->stiffness = std::vector<double>(kp_pd_.data(), kp_pd_.data() + np);
+          joint_command_->damping = std::vector<double>(kd_pd_.data(), kd_pd_.data() + np);
+        } else {
+          joint_command_->position = std::vector<double>(q_pd_des_.data(), q_pd_des_.data() + np);
+          joint_command_->velocity = std::vector<double>(np, 0.0);
+          joint_command_->stiffness = std::vector<double>(kp_pd_.data(), kp_pd_.data() + np);
+          joint_command_->damping = std::vector<double>(kd_pd_.data(), kd_pd_.data() + np);
+        }
+      }
+    }
+
+    if (!use_fall_command) {
+      fall_switch_entered_logged_ = false;  // 恢复后下次摔倒再打印
       joint_command_->stiffness = std::vector<double>(joint_kp_.data(), joint_kp_.data() + joint_kp_.size());
       joint_command_->damping = std::vector<double>(joint_kd_.data(), joint_kd_.data() + joint_kd_.size());
     }
 
     joint_command_->parallel_parser_type = interface_protocol::msg::ParallelParserType::RL_PARSER;
-    // Send command through message handler
     message_handler_->PublishJointCommand(*joint_command_);
   }
 
@@ -447,9 +537,23 @@ class RlBasicRunnerXZL : public rclcpp::Node {
   std::vector<Eigen::VectorXd> max_torque_joint_;
   double soft_torque_limit_ = 0.9;  // 软扭矩限制系数，默认0.9（参考XZL实现）
 
-  // 摔倒检测后进入 damping（YAML enable_falling_switch）；falling_detect_after_sec_ 内不检测
+  // 摔倒策略（YAML enable_falling_switch, falling_detect_after_sec, falling_switch）
   bool enable_falling_switch_ = true;
   double falling_detect_after_sec_ = 5.0;
+  std::string falling_switch_ = "damping";  // none / damping / pdstand
+
+  // pdstand 策略：从 YAML falling_pd_stand 加载
+  bool pd_stand_loaded_ = false;
+  Eigen::VectorXd q_pd_des_;
+  Eigen::VectorXd kp_pd_;
+  Eigen::VectorXd kd_pd_;
+  double pd_stand_duration_ = 3.0;
+  bool in_pd_stand_fall_ = false;
+  Eigen::VectorXd q_pd_fall_init_;
+  double pd_stand_phase_ = 0.0;
+  bool fall_switch_entered_logged_ = false;
+
+  rclcpp::Subscription<std_msgs::msg::Empty>::SharedPtr mujoco_reset_sub_;
 };
 
 }  // namespace example

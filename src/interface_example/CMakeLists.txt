@@ -140,6 +140,7 @@ target_link_libraries(rl_basic_example_XZL
 ament_target_dependencies(rl_basic_example_XZL
   rclcpp
   interface_protocol
+  std_msgs
 )
 
 # Add rl_basic_example_CHR executable

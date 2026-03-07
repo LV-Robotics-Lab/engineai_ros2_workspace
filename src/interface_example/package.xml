@@ -11,6 +11,7 @@
 
   <depend>rclcpp</depend>
   <depend>interface_protocol</depend>
+  <depend>std_msgs</depend>
   <depend>visualization_msgs</depend>
 
   <export>

@@ -120,7 +120,7 @@ cd /home/wang22/engineai/engineai_ros2_workspace && conda activate engineai_ros2
 source install/setup.bash 
 # ros2 launch mujoco_simulator mujoco_simulator.launch.py csv_format:=csv or binary
 # 修改 pm_v2.yaml protection: enabled:true 启用护具功能（thickness:设置厚度）
-# 修改 rl_basic_param_XZL.yaml 的 enable_damping_mode, 启用摔倒damping mode 
+# 修改 rl_basic_param_XZL.yaml 的 enable_falling_switch 和 falling_switch，启用摔倒时切换 damping / pdstand
 ros2 launch mujoco_simulator mujoco_simulator.launch.py save_contact_csv:=true save_joint_state_csv:=true save_sensor_vibration_csv:=true save_joint_forces_csv:=true save_link_kinetic_energy_csv:=true csv_format:=csv
 
 # # 推倒采样仿真器 - 支持交互式干扰力控制
@@ -502,15 +502,25 @@ python3 scripts/calculate_fall_risk.py \
 
 # --plot 会绘制 link energy 曲线；若不指定 --link-energy，则根据 contact 同目录自动查找 link_kinetic_energy_data_*.csv
 # 仿真时需开启 save_link_kinetic_energy_csv: true 才会生成该文件
+# test_passive
 python3 scripts/calculate_fall_risk.py \
-  --contact /home/wang22/data/mujoco_logs/contact_data_20260203_140022.csv \
-  --sensor-vibration /home/wang22/data/mujoco_logs/sensor_vibration_data_20260203_140022.csv \
-  --joint-state /home/wang22/data/mujoco_logs/joint_state_data_20260203_140022.csv \
-  --joint-forces /home/wang22/data/mujoco_logs/joint_forces_data_20260203_140022.csv \
-  --link-energy /home/wang22/data/mujoco_logs/link_kinetic_energy_data_20260203_140022.csv \
-  --output /home/wang22/data/mujoco_logs/risk_results_20260203_140022 \
+  --contact /home/wang22/data/mujoco_logs/test_passive/Left/contact_data_20260305_203637.csv \
+  --sensor-vibration /home/wang22/data/mujoco_logs/test_passive/Left/sensor_vibration_data_20260305_203637.csv \
+  --joint-state /home/wang22/data/mujoco_logs/test_passive/Left/joint_state_data_20260305_203637.csv \
+  --joint-forces /home/wang22/data/mujoco_logs/test_passive/Left/joint_forces_data_20260305_203637.csv \
+  --link-energy /home/wang22/data/mujoco_logs/test_passive/Left/link_kinetic_energy_data_20260305_203637.csv \
+  --output /home/wang22/data/mujoco_logs/test_passive/Left/risk_results_20260305_203637 \
   --plot
 
+# test_active
+python3 scripts/calculate_fall_risk.py \
+  --contact /home/wang22/data/mujoco_logs/test_active/Left/contact_data_20260306_141257.csv \
+  --sensor-vibration /home/wang22/data/mujoco_logs/test_active/Left/sensor_vibration_data_20260306_141257.csv \
+  --joint-state /home/wang22/data/mujoco_logs/test_active/Left/joint_state_data_20260306_141257.csv \
+  --joint-forces /home/wang22/data/mujoco_logs/test_active/Left/joint_forces_data_20260306_141257.csv \
+  --link-energy /home/wang22/data/mujoco_logs/test_active/Left/link_kinetic_energy_data_20260306_141257.csv \
+  --output /home/wang22/data/mujoco_logs/test_active/Left/risk_results_20260306_141257 \
+  --plot
 
 
 # non_stumble   20260203_140022
