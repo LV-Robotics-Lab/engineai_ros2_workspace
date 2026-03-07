@@ -102,11 +102,15 @@ initial_velocity:
 
 # 摔倒检测后进入 damping mode：俯仰角 > 50° 或 < -50° 时 kp=0, kd=0.5
 # enable_falling_switch: true 启用；falling_detect_after_sec 内不检测，避免落地/复位瞬间误触发
-enable_falling_switch: true
-falling_detect_after_sec: 1.0   # 控制运行超过此时间(秒)后才根据俯仰角切 damping（与仿真 3s reset + 2s auto_delay 后推力 对齐）
-falling_switch: none   # pdstand / damping / none
+enable_falling_switch: false
+falling_detect_after_sec: 1.0   # 控制运行超过此时间(秒)后才开启摔倒检测（根据俯仰角切换 damping/pdstand，与仿真 3s reset + 2s auto_delay 后推力 对齐）
+falling_switch: damping   # pdstand / damping / none
 
-# falling_switch 为 pdstand 时使用（参考 pd_stand，五阶插值到目标姿态）
+enable_pdstand_switch: false   # true 时：XZL walk 后按时间切换到 pdstand，仿真器推力前接上
+pdstand_after_sec: 1.0   # 控制运行超过此时间(秒)后才开启定时 pdstand（与 falling_detect_after_sec 逻辑一致）
+
+
+# falling_switch 为 pdstand 时使用（参考 pd_stand_ref，五阶插值到目标姿态）
 falling_pd_stand:
   desired_joint_position:
     - [0, 0, 0, 0, 0, 0]

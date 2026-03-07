@@ -33,6 +33,7 @@ class RlBasicRunnerXZL : public rclcpp::Node {
         "/mujoco/reset_complete", 10, [this](const std_msgs::msg::Empty::SharedPtr) {
           fall_switch_entered_logged_ = false;
           in_pd_stand_fall_ = false;
+          in_pdstand_timed_ = false;
         });
 
     // 加载扭矩限制参数
@@ -67,8 +68,11 @@ class RlBasicRunnerXZL : public rclcpp::Node {
       }
       RCLCPP_INFO(get_logger(), "Enable falling switch: %s, detect after %.1fs, strategy: %s",
                   enable_falling_switch_ ? "enabled" : "disabled", falling_detect_after_sec_, falling_switch_.c_str());
-      // pdstand 时加载 falling_pd_stand 参数
-      if (falling_switch_ == "pdstand" && config["falling_pd_stand"]) {
+      // 定时 pdstand 或 摔倒 pdstand 时加载 falling_pd_stand 参数
+      enable_pdstand_switch_ = config["enable_pdstand_switch"] ? config["enable_pdstand_switch"].as<bool>() : false;
+      pdstand_after_sec_ = config["pdstand_after_sec"] ? config["pdstand_after_sec"].as<double>() : 1.0;
+      RCLCPP_INFO(get_logger(), "Enable pdstand switch: %s, after %.1fs", enable_pdstand_switch_ ? "enabled" : "disabled", pdstand_after_sec_);
+      if ((enable_pdstand_switch_ || falling_switch_ == "pdstand") && config["falling_pd_stand"]) {
         const YAML::Node& pd = config["falling_pd_stand"];
         if (pd["desired_joint_position"]) {
           q_pd_des_ = math::ConcatenateVectors(LoadVectorArrayFromYaml(pd["desired_joint_position"]));
@@ -442,7 +446,9 @@ class RlBasicRunnerXZL : public rclcpp::Node {
       }
     }
 
+    // 优先级：摔倒检测 > 定时 pdstand > 正常 RL
     bool use_fall_command = false;
+    bool use_pdstand_timed = false;
     if (falling_switch_ == "none") {
       use_fall_command = false;
     } else if (falling_switch_ == "damping" && fall_detected) {
@@ -488,8 +494,42 @@ class RlBasicRunnerXZL : public rclcpp::Node {
       }
     }
 
-    if (!use_fall_command) {
+    // 定时 pdstand：enable_pdstand_switch 且 time >= pdstand_after_sec，且未摔倒
+    if (!use_fall_command && enable_pdstand_switch_ && pd_stand_loaded_ && time_ >= pdstand_after_sec_) {
+      if (!in_pdstand_timed_) {
+        in_pdstand_timed_ = true;
+        q_pd_timed_init_ = q_real_;
+        pd_stand_timed_phase_ = 0.0;
+        if (q_pd_timed_init_.size() != q_pd_des_.size()) {
+          RCLCPP_WARN(get_logger(), "pd_stand timed size mismatch: q_real %zd vs q_pd_des %zd", q_pd_timed_init_.size(), q_pd_des_.size());
+          in_pdstand_timed_ = false;
+        } else {
+          RCLCPP_INFO(get_logger(), "Switching to pdstand (timed) at %.1fs", time_);
+        }
+      }
+      if (in_pdstand_timed_ && q_pd_timed_init_.size() == q_pd_des_.size()) {
+        use_pdstand_timed = true;
+        pd_stand_timed_phase_ += param_->control_dt;
+        const int np = static_cast<int>(q_pd_des_.size());
+        if (pd_stand_timed_phase_ < pd_stand_duration_) {
+          Eigen::VectorXd q_cmd(np), qd_cmd(np);
+          QuinticInterpolate(q_pd_timed_init_, q_pd_des_, pd_stand_duration_, pd_stand_timed_phase_, q_cmd, qd_cmd);
+          joint_command_->position = std::vector<double>(q_cmd.data(), q_cmd.data() + np);
+          joint_command_->velocity = std::vector<double>(qd_cmd.data(), qd_cmd.data() + np);
+          joint_command_->stiffness = std::vector<double>(kp_pd_.data(), kp_pd_.data() + np);
+          joint_command_->damping = std::vector<double>(kd_pd_.data(), kd_pd_.data() + np);
+        } else {
+          joint_command_->position = std::vector<double>(q_pd_des_.data(), q_pd_des_.data() + np);
+          joint_command_->velocity = std::vector<double>(np, 0.0);
+          joint_command_->stiffness = std::vector<double>(kp_pd_.data(), kp_pd_.data() + np);
+          joint_command_->damping = std::vector<double>(kd_pd_.data(), kd_pd_.data() + np);
+        }
+      }
+    }
+
+    if (!use_fall_command && !use_pdstand_timed) {
       fall_switch_entered_logged_ = false;  // 恢复后下次摔倒再打印
+      in_pdstand_timed_ = false;  // 回到 RL 时重置
       joint_command_->stiffness = std::vector<double>(joint_kp_.data(), joint_kp_.data() + joint_kp_.size());
       joint_command_->damping = std::vector<double>(joint_kd_.data(), joint_kd_.data() + joint_kd_.size());
     }
@@ -552,6 +592,13 @@ class RlBasicRunnerXZL : public rclcpp::Node {
   Eigen::VectorXd q_pd_fall_init_;
   double pd_stand_phase_ = 0.0;
   bool fall_switch_entered_logged_ = false;
+
+  // 定时 pdstand：XZL walk 后按时间切换到 pdstand
+  bool enable_pdstand_switch_ = false;
+  double pdstand_after_sec_ = 1.0;
+  bool in_pdstand_timed_ = false;
+  Eigen::VectorXd q_pd_timed_init_;
+  double pd_stand_timed_phase_ = 0.0;
 
   rclcpp::Subscription<std_msgs::msg::Empty>::SharedPtr mujoco_reset_sub_;
 };

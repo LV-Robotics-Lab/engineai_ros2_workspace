@@ -120,7 +120,6 @@ cd /home/wang22/engineai/engineai_ros2_workspace && conda activate engineai_ros2
 source install/setup.bash 
 # ros2 launch mujoco_simulator mujoco_simulator.launch.py csv_format:=csv or binary
 # 修改 pm_v2.yaml protection: enabled:true 启用护具功能（thickness:设置厚度）
-# 修改 rl_basic_param_XZL.yaml 的 enable_falling_switch 和 falling_switch，启用摔倒时切换 damping / pdstand
 ros2 launch mujoco_simulator mujoco_simulator.launch.py save_contact_csv:=true save_joint_state_csv:=true save_sensor_vibration_csv:=true save_joint_forces_csv:=true save_link_kinetic_energy_csv:=true csv_format:=csv
 
 # # 推倒采样仿真器 - 支持交互式干扰力控制
@@ -130,6 +129,8 @@ ros2 launch mujoco_simulator mujoco_simulator.launch.py save_contact_csv:=true s
 # terminal 2 开RL
 ## XZL policy from engineai, 先开RL控制器，再开mujoco
 source install/setup.bash
+# 修改 rl_basic_param_XZL.yaml 的 enable_falling_switch 和 falling_switch，启用摔倒时切换 damping / pdstand/ non
+# 修改 rl_basic_param_XZL.yaml 的 enable_pdstand_switch 可以选择是 走路policy or PDstand
 ros2 launch interface_example rl_basic_example_XZL.launch.py
 ros2 launch interface_example rl_basic_example_CHR.launch.py
 ## 通过修改 pm_v2.yaml 里 perturbation 组参数来改变推力大小； src/simulation/mujoco/assets/config/pm_v2.yaml
@@ -492,12 +493,12 @@ ros2 launch launch_urdf_only.launch.py urdf_file:=/home/wang22/engineai/engineai
 ```bash
 # active using mimic 20260203_135754
 python3 scripts/calculate_fall_risk.py \
-  --contact /home/wang22/data/mujoco_logs/active_mimic/contact_data_20260203_131146.csv \
-  --sensor-vibration /home/wang22/data/mujoco_logs/active_mimic/sensor_vibration_data_20260203_131146.csv \
-  --joint-state /home/wang22/data/mujoco_logs/active_mimic/joint_state_data_20260203_131146.csv \
-  --joint-forces /home/wang22/data/mujoco_logs/active_mimic/joint_forces_data_20260203_131146.csv \
-  --link-energy /home/wang22/data/mujoco_logs/active_mimic/link_kinetic_energy_data_20260203_131146.csv \
-  --output /home/wang22/data/mujoco_logs/active_mimic/risk_results_20260203_131146 \
+  --contact /home/wang22/data/mujoco_logs/contact_data_20260307_141111.csv \
+  --sensor-vibration /home/wang22/data/mujoco_logs/sensor_vibration_data_20260307_141111.csv \
+  --joint-state /home/wang22/data/mujoco_logs/joint_state_data_20260307_141111.csv \
+  --joint-forces /home/wang22/data/mujoco_logs/joint_forces_data_20260307_141111.csv \
+  --link-energy /home/wang22/data/mujoco_logs/link_kinetic_energy_data_20260307_141111.csv \
+  --output /home/wang22/data/mujoco_logs/risk_results_20260307_141111 \
   --plot
 
 # --plot 会绘制 link energy 曲线；若不指定 --link-energy，则根据 contact 同目录自动查找 link_kinetic_energy_data_*.csv
