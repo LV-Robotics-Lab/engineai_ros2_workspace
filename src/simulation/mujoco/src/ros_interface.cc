@@ -539,6 +539,11 @@ void RosInterface::UpdateSimState(const mjModel* m, mjData* d) {
   // 检测用户/GUI 触发的 reset：仿真时间回退表示发生了 reset，发布 reset_complete 让 CHR 等节点恢复走路
   const double kTimeRollbackThreshold = 0.01;
   if (last_sim_time_ >= 0 && d->time < last_sim_time_ - kTimeRollbackThreshold) {
+    // 手动 reset 时也重置 auto_sampling，让推力在 auto_delay 后重新施加
+    auto& sim_manager = SimManager::GetInstance();
+    sim_manager.ResetAutoSampling();
+    RCLCPP_INFO(node_->get_logger(), "手动 reset 已重置 auto_sampling 状态，推力将在 auto_delay 时间后重新施加");
+
     std_msgs::msg::Empty reset_msg;
     mujoco_reset_pub_->publish(reset_msg);
     RCLCPP_INFO(node_->get_logger(), "MuJoCo reset detected (sim time %.3f -> %.3f), published /mujoco/reset_complete",

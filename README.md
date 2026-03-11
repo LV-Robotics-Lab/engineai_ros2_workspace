@@ -493,36 +493,45 @@ ros2 launch launch_urdf_only.launch.py urdf_file:=/home/wang22/engineai/engineai
 ```bash
 # active using mimic 20260203_135754
 python3 scripts/calculate_fall_risk.py \
-  --contact /home/wang22/data/mujoco_logs/contact_data_20260307_141111.csv \
-  --sensor-vibration /home/wang22/data/mujoco_logs/sensor_vibration_data_20260307_141111.csv \
-  --joint-state /home/wang22/data/mujoco_logs/joint_state_data_20260307_141111.csv \
-  --joint-forces /home/wang22/data/mujoco_logs/joint_forces_data_20260307_141111.csv \
-  --link-energy /home/wang22/data/mujoco_logs/link_kinetic_energy_data_20260307_141111.csv \
-  --output /home/wang22/data/mujoco_logs/risk_results_20260307_141111 \
+  --contact /home/wang22/data/mujoco_logs/contact_data_20260310_184540.csv \
+  --sensor-vibration /home/wang22/data/mujoco_logs/sensor_vibration_data_20260310_184540.csv \
+  --joint-state /home/wang22/data/mujoco_logs/joint_state_data_20260310_184540.csv \
+  --joint-forces /home/wang22/data/mujoco_logs/joint_forces_data_20260310_184540.csv \
+  --link-energy /home/wang22/data/mujoco_logs/link_kinetic_energy_data_20260310_184540.csv \
+  --output /home/wang22/data/mujoco_logs/risk_results_20260310_184540 \
   --plot
 
 # --plot 会绘制 link energy 曲线；若不指定 --link-energy，则根据 contact 同目录自动查找 link_kinetic_energy_data_*.csv
 # 仿真时需开启 save_link_kinetic_energy_csv: true 才会生成该文件
 # test_passive
 python3 scripts/calculate_fall_risk.py \
-  --contact /home/wang22/data/mujoco_logs/test_passive/Left/contact_data_20260305_203637.csv \
-  --sensor-vibration /home/wang22/data/mujoco_logs/test_passive/Left/sensor_vibration_data_20260305_203637.csv \
-  --joint-state /home/wang22/data/mujoco_logs/test_passive/Left/joint_state_data_20260305_203637.csv \
-  --joint-forces /home/wang22/data/mujoco_logs/test_passive/Left/joint_forces_data_20260305_203637.csv \
-  --link-energy /home/wang22/data/mujoco_logs/test_passive/Left/link_kinetic_energy_data_20260305_203637.csv \
-  --output /home/wang22/data/mujoco_logs/test_passive/Left/risk_results_20260305_203637 \
+  --contact /home/wang22/data/mujoco_logs/test_passive/Front/contact_data_20260305_203637.csv \
+  --sensor-vibration /home/wang22/data/mujoco_logs/test_passive/Front/sensor_vibration_data_20260305_203637.csv \
+  --joint-state /home/wang22/data/mujoco_logs/test_passive/Front/joint_state_data_20260305_203637.csv \
+  --joint-forces /home/wang22/data/mujoco_logs/test_passive/Front/joint_forces_data_20260305_203637.csv \
+  --link-energy /home/wang22/data/mujoco_logs/test_passive/Front/link_kinetic_energy_data_20260305_203637.csv \
+  --output /home/wang22/data/mujoco_logs/test_passive/Front/risk_results_20260305_203637 \
   --plot
 
 # test_active
 python3 scripts/calculate_fall_risk.py \
-  --contact /home/wang22/data/mujoco_logs/test_active/Left/contact_data_20260306_141257.csv \
-  --sensor-vibration /home/wang22/data/mujoco_logs/test_active/Left/sensor_vibration_data_20260306_141257.csv \
-  --joint-state /home/wang22/data/mujoco_logs/test_active/Left/joint_state_data_20260306_141257.csv \
-  --joint-forces /home/wang22/data/mujoco_logs/test_active/Left/joint_forces_data_20260306_141257.csv \
-  --link-energy /home/wang22/data/mujoco_logs/test_active/Left/link_kinetic_energy_data_20260306_141257.csv \
-  --output /home/wang22/data/mujoco_logs/test_active/Left/risk_results_20260306_141257 \
+  --contact /home/wang22/data/mujoco_logs/test_active/Front/contact_data_20260306_141257.csv \
+  --sensor-vibration /home/wang22/data/mujoco_logs/test_active/Front/sensor_vibration_data_20260306_141257.csv \
+  --joint-state /home/wang22/data/mujoco_logs/test_active/Front/joint_state_data_20260306_141257.csv \
+  --joint-forces /home/wang22/data/mujoco_logs/test_active/Front/joint_forces_data_20260306_141257.csv \
+  --link-energy /home/wang22/data/mujoco_logs/test_active/Front/link_kinetic_energy_data_20260306_141257.csv \
+  --output /home/wang22/data/mujoco_logs/test_active/Front/risk_results_20260306_141257 \
   --plot
 
+# test_PDstand 
+python3 scripts/calculate_fall_risk.py \
+  --contact /home/wang22/data/mujoco_logs/test_PDstand/Front/contact_data_20260307_151446.csv \
+  --sensor-vibration /home/wang22/data/mujoco_logs/test_PDstand/Front/sensor_vibration_data_20260307_151446.csv \
+  --joint-state /home/wang22/data/mujoco_logs/test_PDstand/Front/joint_state_data_20260307_151446.csv \
+  --joint-forces /home/wang22/data/mujoco_logs/test_PDstand/Front/joint_forces_data_20260307_151446.csv \
+  --link-energy /home/wang22/data/mujoco_logs/test_PDstand/Front/link_kinetic_energy_data_20260307_151446.csv \
+  --output /home/wang22/data/mujoco_logs/test_PDstand/Front/risk_results_20260307_151446 \
+  --plot
 
 # non_stumble   20260203_140022
 python3 scripts/calculate_fall_risk.py \

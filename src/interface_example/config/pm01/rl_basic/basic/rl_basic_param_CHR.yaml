@@ -26,7 +26,7 @@ motion_states:
     # data_path: "trajectories/toFront_1_converted_50fps.csv"
     # policy_path: "policies/toFront_3.mnn"
     mimic_policies:
-      forward: "policies/toFront_3_force.mnn"
+      forward: "policies/toFront_9_force.mnn"
       forward_left: "policies/toLeftFront_3_force.mnn"
       left: "policies/toLeft_3_force.mnn"
       backward_left: "policies/toLeftBack_3_force.mnn"
