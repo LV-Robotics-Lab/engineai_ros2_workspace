@@ -493,12 +493,12 @@ ros2 launch launch_urdf_only.launch.py urdf_file:=/home/wang22/engineai/engineai
 ```bash
 # active using mimic 20260203_135754
 python3 scripts/calculate_fall_risk.py \
-  --contact /home/wang22/data/mujoco_logs/contact_data_20260311_232000.csv \
-  --sensor-vibration /home/wang22/data/mujoco_logs/sensor_vibration_data_20260311_232000.csv \
-  --joint-state /home/wang22/data/mujoco_logs/joint_state_data_20260311_232000.csv \
-  --joint-forces /home/wang22/data/mujoco_logs/joint_forces_data_20260311_232000.csv \
-  --link-energy /home/wang22/data/mujoco_logs/link_kinetic_energy_data_20260311_232000.csv \
-  --output /home/wang22/data/mujoco_logs/risk_results_20260311_232000 \
+  --contact /home/wang22/data/mujoco_logs/contact_data_20260312_001449.csv \
+  --sensor-vibration /home/wang22/data/mujoco_logs/sensor_vibration_data_20260312_001449.csv \
+  --joint-state /home/wang22/data/mujoco_logs/joint_state_data_20260312_001449.csv \
+  --joint-forces /home/wang22/data/mujoco_logs/joint_forces_data_20260312_001449.csv \
+  --link-energy /home/wang22/data/mujoco_logs/link_kinetic_energy_data_20260312_001449.csv \
+  --output /home/wang22/data/mujoco_logs/risk_results_20260312_001449 \
   --t-start 2.0 --t-end 4.0 \
   --plot
 

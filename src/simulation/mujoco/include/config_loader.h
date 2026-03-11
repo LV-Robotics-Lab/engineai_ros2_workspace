@@ -50,7 +50,7 @@ class ConfigLoader {
 
   // 自动采样配置
   bool GetAutoSampling() const { return auto_sampling_; }
-  const std::string& GetAutoDirection() const { return auto_direction_; }
+  double GetAutoDirectionAngle() const { return auto_direction_angle_; }  // 推力方向角度（度）
   double GetAutoDelay() const { return auto_delay_; }
 
   // 初始速度配置
@@ -112,7 +112,7 @@ class ConfigLoader {
 
   // 自动采样配置
   bool auto_sampling_ = false;               // 自动采样模式
-  std::string auto_direction_ = "forward";   // 自动采样方向
+  double auto_direction_angle_ = 0.0;        // 推力方向角度（度），0=前(X+), 90=左(Y+)
   double auto_delay_ = 1.0;                  // 自动采样延迟时间
 
   // 初始速度配置

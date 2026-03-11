@@ -74,7 +74,8 @@ bool ChrZzqForce::LoadParams(const std::string& path) {
 
 double ChrZzqForce::GetProtectedForce(double force_unprotected, double thickness,
                                      double density) const {
-  if (!loaded_ || force_unprotected <= 0 || thickness <= 0 || density <= 0) {
+  // CHR 公式仅适用于厚度 >= 6mm，以下范围结果错误
+  if (!loaded_ || force_unprotected <= 0 || thickness < 6.0 || density <= 0) {
     return force_unprotected;
   }
   return C_ * std::pow(thickness, alpha_) * std::pow(density, beta_) *
@@ -82,7 +83,8 @@ double ChrZzqForce::GetProtectedForce(double force_unprotected, double thickness
 }
 
 bool ChrZzqForce::IsInputValid(double force_unprotected, double thickness) const {
-  return loaded_ && force_unprotected > 0 && thickness > 0;
+  // CHR 公式仅适用于厚度 >= 6mm
+  return loaded_ && force_unprotected > 0 && thickness >= 6.0;
 }
 
 std::pair<double, double> ChrZzqForce::GetForceRange() const {
@@ -90,5 +92,5 @@ std::pair<double, double> ChrZzqForce::GetForceRange() const {
 }
 
 std::pair<double, double> ChrZzqForce::GetThicknessRange() const {
-  return {0.1, 50.0};  // 公式对任意正厚度有效
+  return {6.0, 50.0};  // CHR 公式仅对厚度 >= 6mm 有效
 }

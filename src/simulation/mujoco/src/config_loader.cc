@@ -148,8 +148,8 @@ bool ConfigLoader::LoadConfig() {
       if (perturbation["auto_sampling"]) {
         auto_sampling_ = perturbation["auto_sampling"].as<bool>();
       }
-      if (perturbation["auto_direction"]) {
-        auto_direction_ = perturbation["auto_direction"].as<std::string>();
+      if (perturbation["auto_direction_angle"]) {
+        auto_direction_angle_ = perturbation["auto_direction_angle"].as<double>();
       }
       if (perturbation["auto_delay"]) {
         auto_delay_ = perturbation["auto_delay"].as<double>();

@@ -12,6 +12,7 @@
 
 #include "sim_manager.h"
 #include <chrono>
+#include <cmath>
 #include <cstring>
 #include <iostream>
 #include <iomanip>
@@ -475,27 +476,13 @@ void SimManager::ApplyPerturbationForces() {
     
     // 等待指定时间后自动触发推力
     if (d_->time - auto_start_time_ >= config_loader_->GetAutoDelay()) {
-      std::string direction = config_loader_->GetAutoDirection();
-      
-      // 根据方向设置推力（含斜向 45°：左前/右前/左后/右后）
-      const double s = perturb_force_magnitude_ / std::sqrt(2.0);
-      if (direction == "forward") {
-        perturb_force_ = Eigen::Vector3d(perturb_force_magnitude_, 0, 0);
-      } else if (direction == "backward") {
-        perturb_force_ = Eigen::Vector3d(-perturb_force_magnitude_, 0, 0);
-      } else if (direction == "left") {
-        perturb_force_ = Eigen::Vector3d(0, perturb_force_magnitude_, 0);
-      } else if (direction == "right") {
-        perturb_force_ = Eigen::Vector3d(0, -perturb_force_magnitude_, 0);
-      } else if (direction == "left_forward") {
-        perturb_force_ = Eigen::Vector3d(s, s, 0);
-      } else if (direction == "right_forward") {
-        perturb_force_ = Eigen::Vector3d(s, -s, 0);
-      } else if (direction == "left_backward") {
-        perturb_force_ = Eigen::Vector3d(-s, s, 0);
-      } else if (direction == "right_backward") {
-        perturb_force_ = Eigen::Vector3d(-s, -s, 0);
-      }
+      // 根据角度设置推力：0°=前(X+), 90°=左(Y+), 180°=后(X-), 270°=右(Y-)
+      const double angle_rad = config_loader_->GetAutoDirectionAngle() * M_PI / 180.0;
+      perturb_force_ = Eigen::Vector3d(
+        perturb_force_magnitude_ * std::cos(angle_rad),
+        perturb_force_magnitude_ * std::sin(angle_rad),
+        0.0
+      );
       
       // 应用推力
       ApplyPerturbation(true);
@@ -1826,6 +1813,15 @@ void SimManager::ApplyProtectionToContactForces() {
     
     // 确保缩放因子在合理范围内（0到1之间，因为防护应该减少力）
     scale_factor = std::max(0.0, std::min(1.0, scale_factor));
+    
+    // CHR 公式在中小冲击力下衰减过强（scale 可低至 0.07），导致约束力不足、地面穿透
+    // 设置最小 scale 下限，与 ZZQ 表的下界（约 0.5）对齐，保证仿真稳定
+    if (force_method_ == "chr" && chr_zzq_force_) {
+      constexpr double kChrMinScale = 0.5;
+      if (scale_factor < kChrMinScale) {
+        scale_factor = kChrMinScale;
+      }
+    }
     
     // 如果缩放因子接近1，说明防护效果不明显，跳过
     // 但是，即使缩放因子不是1.0，如果防护效果很小（比如只减少1%），也可能被跳过
