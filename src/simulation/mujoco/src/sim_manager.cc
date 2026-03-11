@@ -678,8 +678,11 @@ bool SimManager::Initialize() {
   // 从YAML配置加载防护功能参数
   protection_enabled_ = config_loader_->IsProtectionEnabled();
   protection_thickness_ = config_loader_->GetProtectionThickness();
-  RCLCPP_INFO(logger, "Protection from YAML config: enabled=%s, thickness=%.1fmm", 
-              protection_enabled_ ? "YES" : "NO", protection_thickness_);
+  use_protector_map_ = config_loader_->UseProtectorMap();
+  force_method_ = config_loader_->GetForceMethod();
+  protection_density_ = config_loader_->GetProtectionDensity();
+  RCLCPP_INFO(logger, "Protection from YAML config: enabled=%s, thickness=%.1fmm, use_protector_map=%s, force_method=%s",
+              protection_enabled_ ? "YES" : "NO", protection_thickness_, use_protector_map_ ? "YES" : "NO", force_method_.c_str());
 
   // 初始化力插值计算器（用于柔性护具防护力计算）
   try {
@@ -717,16 +720,88 @@ bool SimManager::Initialize() {
       tsv_path = "";  // 空字符串让ForceInterpolation自己查找
     }
     
-    force_interpolator_ = std::make_unique<ForceInterpolation>(tsv_path);
+    if (force_method_ == "chr") {
+      // CHR: 使用 fitted_parameters 公式 F_after=C*t^α*p^β*F_before^γ
+      std::vector<std::string> params_candidates = {
+        assets_path + "/../../../../scripts/ThicknessCalculate/fitted_parameters.json",   // source 布局
+        assets_path + "/../../../../../scripts/ThicknessCalculate/fitted_parameters.json",  // install 布局
+      };
+      std::string params_path;
+      for (const auto& cand : params_candidates) {
+        struct ::stat st;
+        if (::stat(cand.c_str(), &st) == 0) {
+          params_path = cand;
+          break;
+        }
+      }
+      if (params_path.empty()) params_path = params_candidates[0];
+      chr_zzq_force_ = std::make_unique<ChrZzqForce>(params_path);
+      if (!chr_zzq_force_->IsLoaded()) {
+        chr_zzq_force_ = std::make_unique<ChrZzqForce>("");  // 尝试默认路径
+      }
+      if (chr_zzq_force_->IsLoaded()) {
+        RCLCPP_INFO(logger, "CHR force method initialized (fitted_parameters formula), density=%.2f", protection_density_);
+      } else {
+        RCLCPP_WARN(logger, "CHR init failed, falling back to ZZQ (RT-FEM table)");
+        force_method_ = "zzq";
+        chr_zzq_force_.reset();
+      }
+    }
+    if (force_method_ == "zzq") {
+      // ZZQ: 使用 RT-FEM 表查表
+      force_interpolator_ = std::make_unique<ForceInterpolation>(tsv_path);
+    }
     
-    // 获取力插值范围信息
-    auto force_range = force_interpolator_->GetForceRange();
-    auto thickness_range = force_interpolator_->GetThicknessRange();
+    // 获取力插值范围信息（用于日志）
+    std::pair<double, double> force_range{0, 0}, thickness_range{0, 0};
+    if (force_interpolator_) {
+      force_range = force_interpolator_->GetForceRange();
+      thickness_range = force_interpolator_->GetThicknessRange();
+    } else if (chr_zzq_force_) {
+      force_range = chr_zzq_force_->GetForceRange();
+      thickness_range = chr_zzq_force_->GetThicknessRange();
+    }
     
+    // 初始化护具地图（当 use_protector_map 时，路径写死，支持 source 与 install 两种布局）
+    if (protection_enabled_ && use_protector_map_) {
+      std::vector<std::string> map_dir_candidates = {
+        assets_path + "/../../../interface_example/config/pm01/rl_basic/basic/protector_map",   // source 布局
+        assets_path + "/../../../../src/interface_example/config/pm01/rl_basic/basic/protector_map",  // install 布局
+      };
+      auto dir_exists = [](const std::string& p) {
+        struct ::stat buffer;
+        return (::stat(p.c_str(), &buffer) == 0 && S_ISDIR(buffer.st_mode));
+      };
+      std::string map_dir;
+      for (const auto& cand : map_dir_candidates) {
+        if (dir_exists(cand)) {
+          map_dir = cand;
+          break;
+        }
+      }
+      if (map_dir.empty()) {
+        map_dir = map_dir_candidates[0];  // 默认尝试第一个
+      }
+      try {
+        protector_map_ = std::make_unique<ProtectorMap>(map_dir);
+        if (protector_map_->IsLoaded()) {
+          RCLCPP_INFO(logger, "Protector map loaded from: %s", map_dir.c_str());
+        } else {
+          RCLCPP_WARN(logger, "Protector map failed to load, falling back to global thickness");
+          protector_map_.reset();
+        }
+      } catch (const std::exception& e) {
+        RCLCPP_WARN(logger, "Protector map init failed: %s, falling back to global thickness", e.what());
+        protector_map_.reset();
+      }
+    }
+
     RCLCPP_INFO(logger, "=== Protection Feature Initialized ===");
     RCLCPP_INFO(logger, "Protection enabled: %s", protection_enabled_ ? "YES" : "NO");
-    RCLCPP_INFO(logger, "Protection thickness: %.1f mm", protection_thickness_);
-    RCLCPP_INFO(logger, "RT-FEM data file: %s", tsv_path.c_str());
+    RCLCPP_INFO(logger, "Protection thickness: %.1f mm (fallback when no map)", protection_thickness_);
+    if (force_method_ == "zzq") {
+      RCLCPP_INFO(logger, "RT-FEM data file: %s", tsv_path.c_str());
+    }
     RCLCPP_INFO(logger, "Force range: [%.1f, %.1f] kN", force_range.first, force_range.second);
     RCLCPP_INFO(logger, "Thickness range: [%.1f, %.1f] mm", thickness_range.first, thickness_range.second);
     RCLCPP_INFO(logger, "Excluded contact pairs: %zu", excluded_contact_pairs_.size());
@@ -735,10 +810,11 @@ bool SimManager::Initialize() {
     }
     RCLCPP_INFO(logger, "=====================================");
   } catch (const std::exception& e) {
-    RCLCPP_ERROR(logger, "Failed to initialize force interpolation: %s", e.what());
+    RCLCPP_ERROR(logger, "Failed to initialize force method: %s", e.what());
     RCLCPP_ERROR(logger, "Protection feature will be DISABLED!");
     protection_enabled_ = false;
     force_interpolator_.reset();
+    chr_zzq_force_.reset();
   }
 
   // 创建MuJoCo ROS接口
@@ -1584,11 +1660,11 @@ void SimManager::ApplyProtectionToContactForces() {
     return;
   }
   
-  if (!force_interpolator_) {
+  if (!force_interpolator_ && !chr_zzq_force_) {
     static bool warned_once = false;
     if (!warned_once && node_) {
       RCLCPP_WARN_THROTTLE(node_->get_logger(), *node_->get_clock(), 10000, 
-                          "Force interpolator is not initialized - protection disabled");
+                          "Force method (CHR/ZZQ) is not initialized - protection disabled");
       warned_once = true;
     }
     return;
@@ -1668,45 +1744,72 @@ void SimManager::ApplyProtectionToContactForces() {
     }
     
     // 如果法向力太小，跳过（避免对微小接触力进行插值）
-    // 阈值 800N：躺着时体重分布的力通常 < 800N，不处理；摔倒冲击力 > 800N 才做防护
-    if (contact_force_normal < 500) {  // 800 N阈值
+    // 阈值 500N：躺着时体重分布的力通常 < 500N，不处理；摔倒冲击力 > 500N 才做防护
+    if (contact_force_normal < 500) {
       skipped_small_force++;
       continue;
     }
     
-    // 将力从N转换为kN（ForceInterpolation使用kN作为单位）
+    // 根据碰撞点位置确定护具厚度：护具地图查表 或 全局厚度
+    double thickness_mm = protection_thickness_;
+    if (protector_map_ && protector_map_->IsLoaded()) {
+      // 接触点世界坐标 = 默认站立系坐标（README：世界系即默认站立系）
+      double pos_x = contact.pos[0];
+      double pos_y = contact.pos[1];
+      double pos_z = contact.pos[2];
+      thickness_mm = protector_map_->LookupThickness(pos_x, pos_y, pos_z);
+    }
+    // 厚度 < 6mm 时，不进行衰减计算（chr 与 zzq 均要求厚度 >= 6）
+    if (thickness_mm < 6.0) {
+      continue;
+    }
+
+    // 将力从N转换为kN
     double force_unprotected_kN = contact_force_normal / 1000.0;
     
-    // 使用ForceInterpolation计算防护后的力
+    // 根据 force_method 计算防护后的力
     double force_protected_kN;
     try {
-      if (!force_interpolator_->IsInputValid(force_unprotected_kN, protection_thickness_)) {
+      bool input_valid = false;
+      if (force_method_ == "chr" && chr_zzq_force_) {
+        input_valid = chr_zzq_force_->IsInputValid(force_unprotected_kN, thickness_mm);
+      } else if (force_interpolator_) {
+        input_valid = force_interpolator_->IsInputValid(force_unprotected_kN, thickness_mm);
+      }
+      if (!input_valid) {
         // 如果超出范围，跳过该接触点
         skipped_out_of_range++;
         // 对于超出范围的力，立即记录调试信息（不依赖frame_count）
         // 对于超过15kN的力，总是打印（不限制次数）
         if (contact_force_normal > 15000) {
-          auto force_range = force_interpolator_->GetForceRange();
+          auto force_range = force_interpolator_ ? force_interpolator_->GetForceRange()
+                                                : chr_zzq_force_->GetForceRange();
           RCLCPP_WARN(node_->get_logger(),
-                      "Force %.2f kN (%.2f N) out of range for thickness %.1f mm. "
+                      "Force %.2f kN (%.2f N) out of range for thickness %.1f mm (pos %.3f,%.3f,%.3f). "
                       "Valid range: [%.2f, %.2f] kN",
-                      force_unprotected_kN, contact_force_normal, protection_thickness_,
+                      force_unprotected_kN, contact_force_normal, thickness_mm,
+                      contact.pos[0], contact.pos[1], contact.pos[2],
                       force_range.first, force_range.second);
         } else if (contact_force_normal > 20000) {
           static int out_of_range_count = 0;
           out_of_range_count++;
           if (out_of_range_count <= 5) {
-            auto force_range = force_interpolator_->GetForceRange();
+            auto force_range = force_interpolator_ ? force_interpolator_->GetForceRange()
+                                                  : chr_zzq_force_->GetForceRange();
             RCLCPP_WARN(node_->get_logger(),
                         "Force %.2f kN (%.2f N) out of range for thickness %.1f mm. "
                         "Valid range: [%.2f, %.2f] kN",
-                        force_unprotected_kN, contact_force_normal, protection_thickness_,
+                        force_unprotected_kN, contact_force_normal, thickness_mm,
                         force_range.first, force_range.second);
           }
         }
         continue;
       }
-      force_protected_kN = force_interpolator_->GetProtectedForce(force_unprotected_kN, protection_thickness_);
+      if (force_method_ == "chr" && chr_zzq_force_) {
+        force_protected_kN = chr_zzq_force_->GetProtectedForce(force_unprotected_kN, thickness_mm, protection_density_);
+      } else {
+        force_protected_kN = force_interpolator_->GetProtectedForce(force_unprotected_kN, thickness_mm);
+      }
     } catch (const std::exception& e) {
       // 如果插值失败，跳过该接触点
       skipped_out_of_range++;
@@ -1944,18 +2047,18 @@ void SimManager::ApplyProtectionToContactForces() {
   if (max_force_before > 15000 && protected_contacts == 0 && node_) {
     RCLCPP_WARN(node_->get_logger(), 
                 "High force detected (%.2f N, %.2f kN) but NO contacts were protected! "
-                "skipped_small=%d, skipped_range=%d, skipped_no_effect=%d, protection_enabled=%s, thickness=%.1fmm",
+                "skipped_small=%d, skipped_range=%d, skipped_no_effect=%d, protection_enabled=%s, use_map=%s",
                 max_force_before, max_force_before/1000.0, skipped_small_force, skipped_out_of_range, skipped_no_effect,
-                protection_enabled_ ? "YES" : "NO", protection_thickness_);
+                protection_enabled_ ? "YES" : "NO", use_protector_map_ ? "YES" : "NO");
   } else if (max_force_before > 20000 && protected_contacts == 0 && node_) {
     static int high_force_warn_count = 0;
     high_force_warn_count++;
     if (high_force_warn_count <= 10) {  // 只记录前10次
       RCLCPP_WARN(node_->get_logger(), 
                   "High force detected (%.2f N) but NO contacts were protected! "
-                  "skipped_small=%d, skipped_range=%d, skipped_no_effect=%d, protection_enabled=%s",
+                  "skipped_small=%d, skipped_range=%d, skipped_no_effect=%d, protection_enabled=%s, use_map=%s",
                   max_force_before, skipped_small_force, skipped_out_of_range, skipped_no_effect,
-                  protection_enabled_ ? "YES" : "NO");
+                  protection_enabled_ ? "YES" : "NO", use_protector_map_ ? "YES" : "NO");
     }
   }
 }

@@ -165,6 +165,18 @@ bool ConfigLoader::LoadConfig() {
       if (protection["thickness"]) {
         protection_thickness_ = protection["thickness"].as<double>();
       }
+      if (protection["use_protector_map"]) {
+        use_protector_map_ = protection["use_protector_map"].as<bool>();
+      }
+      if (protection["force_method"]) {
+        force_method_ = protection["force_method"].as<std::string>();
+        if (force_method_ != "chr" && force_method_ != "zzq") {
+          force_method_ = "chr";
+        }
+      }
+      if (protection["density"]) {
+        protection_density_ = protection["density"].as<double>();
+      }
     }
 
     // 解析初始速度配置

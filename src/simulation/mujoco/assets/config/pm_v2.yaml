@@ -27,9 +27,15 @@ contact_visualization:
   position_offset: 0.0 # 位置偏移量（用于调整可视化标记的位置）
 
 # 防护功能配置 - 控制碰撞时的虚拟护具
+# 方式1：use_protector_map=false 时，使用全局 thickness
+# 方式2：use_protector_map=true 时，使用护具地图按碰撞点位置（绿球/站立系）查表厚度
+# force_method: zzq=RT-FEM表查表(与旧版一致), chr=公式(fitted_parameters)
 protection:
-  enabled: false              # 是否启用防护功能（虚拟护具）
-  thickness: 12.0             # 护具厚度（mm），默认12mm
+  enabled: true             # 是否启用防护功能（与旧版默认一致）
+  thickness: 12.0             # 护具厚度（mm），use_protector_map=false 时使用
+  use_protector_map: true     # 是否使用护具地图（yz_map_front/back.tsv）
+  force_method: chr          # 力衰减：zzq=RT-FEM表(旧版), chr=公式
+  density: 0.4               # 材料密度，仅 chr 方法使用
 
 # 模型参数 - 定义机器人的基本结构参数
 model_param:

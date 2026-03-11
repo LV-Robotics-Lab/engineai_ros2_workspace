@@ -17,6 +17,8 @@
 #include "simulate/glfw_adapter.h"
 #include "joint_forces_eigen.hpp"
 #include "force_interpolation.h"
+#include "protector_map.h"
+#include "chr_zzq_force.h"
 
 // Forward declaration
 class CustomGlfwAdapter;
@@ -182,9 +184,14 @@ bool IsContactVisualizationEnabled();
   mutable std::mutex joint_forces_mutex_;  // 保护关节反力数据的互斥锁
   
   // 防护护具相关成员变量
-  std::unique_ptr<ForceInterpolation> force_interpolator_;  // 力插值计算器
-  double protection_thickness_ = 12.0;  // 防护材料厚度 (mm)，默认12mm
+  std::unique_ptr<ForceInterpolation> force_interpolator_;  // ZZQ: RT-FEM 表查表
+  std::unique_ptr<ChrZzqForce> chr_zzq_force_;             // CHR: fitted_parameters 公式
+  std::unique_ptr<ProtectorMap> protector_map_;             // 护具地图（按碰撞点位置查表厚度）
+  double protection_thickness_ = 12.0;  // 防护材料厚度 (mm)，use_protector_map=false 时使用
   bool protection_enabled_ = false;  // 是否启用防护功能
+  bool use_protector_map_ = false;   // 是否使用护具地图
+  std::string force_method_ = "chr";  // chr=fitted_parameters公式, zzq=RT-FEM表查表
+  double protection_density_ = 0.4;   // 材料密度，仅 chr 使用
   
   // 排除防护的接触对列表（body1_name, body2_name），这些接触不施加防护力缩放
   // 脚/踝与 world 的接触已排除，避免走路时地面打滑（LINK_ANKLE_ROLL_L/R 为脚掌接地 body）

@@ -493,13 +493,15 @@ ros2 launch launch_urdf_only.launch.py urdf_file:=/home/wang22/engineai/engineai
 ```bash
 # active using mimic 20260203_135754
 python3 scripts/calculate_fall_risk.py \
-  --contact /home/wang22/data/mujoco_logs/contact_data_20260310_184540.csv \
-  --sensor-vibration /home/wang22/data/mujoco_logs/sensor_vibration_data_20260310_184540.csv \
-  --joint-state /home/wang22/data/mujoco_logs/joint_state_data_20260310_184540.csv \
-  --joint-forces /home/wang22/data/mujoco_logs/joint_forces_data_20260310_184540.csv \
-  --link-energy /home/wang22/data/mujoco_logs/link_kinetic_energy_data_20260310_184540.csv \
-  --output /home/wang22/data/mujoco_logs/risk_results_20260310_184540 \
+  --contact /home/wang22/data/mujoco_logs/contact_data_20260311_232000.csv \
+  --sensor-vibration /home/wang22/data/mujoco_logs/sensor_vibration_data_20260311_232000.csv \
+  --joint-state /home/wang22/data/mujoco_logs/joint_state_data_20260311_232000.csv \
+  --joint-forces /home/wang22/data/mujoco_logs/joint_forces_data_20260311_232000.csv \
+  --link-energy /home/wang22/data/mujoco_logs/link_kinetic_energy_data_20260311_232000.csv \
+  --output /home/wang22/data/mujoco_logs/risk_results_20260311_232000 \
+  --t-start 2.0 --t-end 4.0 \
   --plot
+
 
 # --plot 会绘制 link energy 曲线；若不指定 --link-energy，则根据 contact 同目录自动查找 link_kinetic_energy_data_*.csv
 # 仿真时需开启 save_link_kinetic_energy_csv: true 才会生成该文件

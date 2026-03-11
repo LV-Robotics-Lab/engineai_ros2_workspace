@@ -70,6 +70,8 @@ add_executable(mujoco_simulator
   src/config_loader.cc
   src/sim_manager.cc
   src/force_interpolation.cc
+  src/protector_map.cc
+  src/chr_zzq_force.cc
 )
 
 # # 推倒采样仿真器 - 支持交互式干扰力控制
