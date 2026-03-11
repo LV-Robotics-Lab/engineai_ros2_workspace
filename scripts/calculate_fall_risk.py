@@ -45,6 +45,21 @@ from typing import Dict, Optional, Tuple
 import matplotlib.pyplot as plt
 
 
+def filter_df_by_time(
+    df: pd.DataFrame,
+    t_start: Optional[float],
+    t_end: Optional[float],
+    timestamp_col: str = 'timestamp'
+) -> pd.DataFrame:
+    """
+    按时间范围过滤 DataFrame。若 t_start 或 t_end 为 None，返回原 DataFrame。
+    """
+    if df.empty or t_start is None or t_end is None or timestamp_col not in df.columns:
+        return df
+    mask = (df[timestamp_col] >= t_start) & (df[timestamp_col] <= t_end)
+    return df.loc[mask].copy()
+
+
 def read_binary_contact_data(bin_path: str) -> pd.DataFrame:
     """
     读取二进制格式的contact_data文件
@@ -2156,7 +2171,8 @@ def get_link_group(body_name: str) -> str:
 
 
 def plot_link_energy_curves(energy_df: pd.DataFrame, output_path: Optional[str] = None,
-                           contact_df: Optional[pd.DataFrame] = None):
+                           contact_df: Optional[pd.DataFrame] = None,
+                           t_start: Optional[float] = None, t_end: Optional[float] = None):
     """
     绘制link能量曲线（动能、势能、总能量）
     
@@ -2172,6 +2188,8 @@ def plot_link_energy_curves(energy_df: pd.DataFrame, output_path: Optional[str] 
         output_path: 图片保存路径（可选）
         contact_df: 接触力数据 DataFrame（可选），应包含 timestamp, force_magnitude。
                    若提供，第一个子图将绘制 Total PE + Total contact force，并从 0 时刻开始。
+        t_start: 截取时间范围起点（秒），可选。若与 t_end 同时指定，仅绘制该时间段的曲线并放大显示。
+        t_end: 截取时间范围终点（秒），可选。
     """
     if energy_df.empty:
         print("警告: link能量数据为空，无法绑图")
@@ -2186,6 +2204,18 @@ def plot_link_energy_curves(energy_df: pd.DataFrame, output_path: Optional[str] 
     
     # 按时间戳排序
     energy_df = energy_df.sort_values('timestamp').reset_index(drop=True)
+
+    # 时间范围截取：若指定 t_start 和 t_end，仅保留该时间段的数据并放大显示
+    if t_start is not None and t_end is not None:
+        mask = (energy_df['timestamp'] >= t_start) & (energy_df['timestamp'] <= t_end)
+        energy_df = energy_df.loc[mask].reset_index(drop=True)
+        if energy_df.empty:
+            print(f"警告: 时间范围 [{t_start}, {t_end}]s 内无数据，无法绑图")
+            return
+        print(f"  截取时间范围: {t_start}s ~ {t_end}s，共 {len(energy_df)} 条记录")
+        if contact_df is not None and not contact_df.empty:
+            contact_df = contact_df[(contact_df['timestamp'] >= t_start) & (contact_df['timestamp'] <= t_end)].copy()
+
     timestamps = energy_df['timestamp'].values
     min_t = timestamps.min()
     max_t = timestamps.max()
@@ -2807,6 +2837,34 @@ def main():
         help='Link 动能/势能数据文件路径 (CSV或BIN格式，可选)。'
              '若不指定，将根据 contact 文件路径自动查找同目录下的 link_kinetic_energy_data_YYYYMMDD_HHMMSS.*'
     )
+
+    parser.add_argument(
+        '--t-start',
+        type=float,
+        default=None,
+        help='所有曲线图截取时间起点（秒），需与 --t-end 同时使用，例如 2.0 表示从 2s 开始'
+    )
+
+    parser.add_argument(
+        '--t-end',
+        type=float,
+        default=None,
+        help='所有曲线图截取时间终点（秒），需与 --t-start 同时使用，例如 4.0 表示到 4s 结束'
+    )
+
+    parser.add_argument(
+        '--energy-t-start',
+        type=float,
+        default=None,
+        help='[已废弃，请用 --t-start] Link 能量曲线截取时间起点（秒）'
+    )
+
+    parser.add_argument(
+        '--energy-t-end',
+        type=float,
+        default=None,
+        help='[已废弃，请用 --t-end] Link 能量曲线截取时间终点（秒）'
+    )
     
     parser.add_argument(
         '--a-thr',
@@ -2823,6 +2881,16 @@ def main():
     )
     
     args = parser.parse_args()
+    
+    # 解析时间范围（用于所有曲线图局部截取）
+    t_start, t_end = args.t_start, args.t_end
+    if t_start is None and t_end is None:
+        t_start, t_end = args.energy_t_start, args.energy_t_end
+    if (t_start is not None) != (t_end is not None):
+        print("警告: --t-start 和 --t-end 需同时指定，已忽略时间范围")
+        t_start, t_end = None, None
+    if t_start is not None and t_end is not None:
+        print(f"曲线图将截取时间范围: {t_start}s ~ {t_end}s")
     
     # 读取所有数据文件
     print("正在读取数据文件...")
@@ -2941,8 +3009,13 @@ def main():
             try:
                 motor_risk_df = pd.read_csv(motor_risk_path)
                 if not motor_risk_df.empty:
-                    plot_output_path = f"{output_base}_motor_risk_curves.png"
-                    plot_motor_torque_risk_curves(motor_risk_df, plot_output_path)
+                    motor_risk_df = filter_df_by_time(motor_risk_df, t_start, t_end)
+                    if not motor_risk_df.empty:
+                        suffix = f"_{t_start}_{t_end}s" if (t_start is not None and t_end is not None) else ""
+                        plot_output_path = f"{output_base}_motor_risk_curves{suffix}.png"
+                        plot_motor_torque_risk_curves(motor_risk_df, plot_output_path)
+                    elif t_start is not None:
+                        print("motor_risk 在指定时间范围内无数据，跳过绘图")
                 else:
                     print("motor_risk 数据为空，跳过绘图")
             except Exception as e:
@@ -2954,20 +3027,28 @@ def main():
             if os.path.exists(acceleration_risk_path):
                 try:
                     acceleration_risk_df = pd.read_csv(acceleration_risk_path)
-                    plot_output_path = f"{output_base}_acceleration_risk_curves.png"
-                    plot_acceleration_risk_curves(acceleration_risk_df, plot_output_path)
+                    acceleration_risk_df = filter_df_by_time(acceleration_risk_df, t_start, t_end)
+                    if not acceleration_risk_df.empty:
+                        suffix = f"_{t_start}_{t_end}s" if (t_start is not None and t_end is not None) else ""
+                        plot_output_path = f"{output_base}_acceleration_risk_curves{suffix}.png"
+                        plot_acceleration_risk_curves(acceleration_risk_df, plot_output_path)
                 except Exception as e:
                     print(f"警告: 绘制 acceleration_risk 曲线失败: {e}")
             # 单独画加速度曲线（torso/head ||a||，标碰撞与 20ms 窗口）
             try:
                 time_collision = risk_results.get('time_collision', np.array([]))
-                a_thr = 30.0 if args.a_thr is None else args.a_thr
-                plot_acceleration_curves(
-                    sensor_vibration_df,
-                    time_collision=time_collision if len(time_collision) > 0 else None,
-                    a_thr=a_thr,
-                    output_path=f"{output_base}_acc_curves.png"
-                )
+                if t_start is not None and t_end is not None and len(time_collision) > 0:
+                    time_collision = time_collision[(time_collision >= t_start) & (time_collision <= t_end)]
+                acc_df = filter_df_by_time(sensor_vibration_df, t_start, t_end)
+                if not acc_df.empty:
+                    a_thr = 30.0 if args.a_thr is None else args.a_thr
+                    suffix = f"_{t_start}_{t_end}s" if (t_start is not None and t_end is not None) else ""
+                    plot_acceleration_curves(
+                        acc_df,
+                        time_collision=time_collision if len(time_collision) > 0 else None,
+                        a_thr=a_thr,
+                        output_path=f"{output_base}_acc_curves{suffix}.png"
+                    )
             except Exception as e:
                 print(f"警告: 绘制加速度曲线失败: {e}")
         
@@ -2977,19 +3058,27 @@ def main():
             if os.path.exists(contact_force_risk_path):
                 try:
                     contact_force_risk_df = pd.read_csv(contact_force_risk_path)
-                    plot_output_path = f"{output_base}_contact_force_risk_curves.png"
-                    plot_contact_force_risk_curves(contact_force_risk_df, plot_output_path)
+                    contact_force_risk_df = filter_df_by_time(contact_force_risk_df, t_start, t_end)
+                    if not contact_force_risk_df.empty:
+                        suffix = f"_{t_start}_{t_end}s" if (t_start is not None and t_end is not None) else ""
+                        plot_output_path = f"{output_base}_contact_force_risk_curves{suffix}.png"
+                        plot_contact_force_risk_curves(contact_force_risk_df, plot_output_path)
                 except Exception as e:
                     print(f"警告: 绘制 contact_force_risk 曲线失败: {e}")
             # 单独画接触力曲线（原始 force_magnitude，标碰撞时刻）
             try:
                 time_collision = risk_results.get('time_collision', np.array([]))
-                plot_contact_force_curves(
-                    contact_df,
-                    time_collision=time_collision if len(time_collision) > 0 else None,
-                    f_thr=1000.0,
-                    output_path=f"{output_base}_contact_force_curves.png"
-                )
+                if t_start is not None and t_end is not None and len(time_collision) > 0:
+                    time_collision = time_collision[(time_collision >= t_start) & (time_collision <= t_end)]
+                contact_plot_df = filter_df_by_time(contact_df, t_start, t_end)
+                if not contact_plot_df.empty:
+                    suffix = f"_{t_start}_{t_end}s" if (t_start is not None and t_end is not None) else ""
+                    plot_contact_force_curves(
+                        contact_plot_df,
+                        time_collision=time_collision if len(time_collision) > 0 else None,
+                        f_thr=1000.0,
+                        output_path=f"{output_base}_contact_force_curves{suffix}.png"
+                    )
             except Exception as e:
                 print(f"警告: 绘制接触力曲线失败: {e}")
         
@@ -3000,8 +3089,13 @@ def main():
                 try:
                     joint_wrench_risk_df = pd.read_csv(joint_wrench_risk_path)
                     if not joint_wrench_risk_df.empty:
-                        plot_output_path = f"{output_base}_joint_wrench_risk_curves.png"
-                        plot_joint_wrench_risk_curves(joint_wrench_risk_df, plot_output_path)
+                        joint_wrench_risk_df = filter_df_by_time(joint_wrench_risk_df, t_start, t_end)
+                        if not joint_wrench_risk_df.empty:
+                            suffix = f"_{t_start}_{t_end}s" if (t_start is not None and t_end is not None) else ""
+                            plot_output_path = f"{output_base}_joint_wrench_risk_curves{suffix}.png"
+                            plot_joint_wrench_risk_curves(joint_wrench_risk_df, plot_output_path)
+                        elif t_start is not None:
+                            print("joint_wrench_risk 在指定时间范围内无数据，跳过绘图")
                     else:
                         print("joint_wrench_risk 数据为空，跳过绘图")
                 except Exception as e:
@@ -3031,9 +3125,16 @@ def main():
             link_energy_df = load_data_file(str(link_energy_path))
             if not link_energy_df.empty:
                 print(f"  Link能量数据: {len(link_energy_df)} 条记录")
-                energy_plot_path = f"{output_base}_link_energy_curves.png" if output_base else None
+                if output_base:
+                    if t_start is not None and t_end is not None:
+                        energy_plot_path = f"{output_base}_link_energy_curves_{t_start}_{t_end}s.png"
+                    else:
+                        energy_plot_path = f"{output_base}_link_energy_curves.png"
+                else:
+                    energy_plot_path = None
                 try:
-                    plot_link_energy_curves(link_energy_df, energy_plot_path, contact_df=contact_df)
+                    plot_link_energy_curves(link_energy_df, energy_plot_path, contact_df=contact_df,
+                                           t_start=t_start, t_end=t_end)
                 except Exception as e:
                     print(f"警告: 绘制 link energy 曲线失败: {e}")
 
