@@ -11,6 +11,7 @@
 #include <thread>
 #include <atomic>
 #include <condition_variable>
+#include <optional>
 
 #include "interface_protocol/msg/imu_info.hpp"
 #include "interface_protocol/msg/joint_command.hpp"
@@ -21,6 +22,8 @@
 #include <mujoco/mujoco.h>
 #include <std_msgs/msg/float32_multi_array.hpp>
 #include <std_msgs/msg/empty.hpp>
+#include <std_msgs/msg/string.hpp>
+#include <std_msgs/msg/float64.hpp>
 #include <visualization_msgs/msg/marker_array.hpp>
 
 // Forward declarations
@@ -54,6 +57,9 @@ class RosInterface {
   // Get the ROS node
   std::shared_ptr<rclcpp::Node> GetNode() const { return node_; }
 
+  // 连续采集模式：切换到新实验目录，关闭旧CSV、打开新CSV、触发reset
+  void PrepareNewExperiment(const std::string& csv_dir);
+
   // Publish contact forces
   void PublishContactForces(const mjModel* m, mjData* d);
 
@@ -72,6 +78,8 @@ class RosInterface {
   
   // Subscribers
   rclcpp::Subscription<interface_protocol::msg::JointCommand>::SharedPtr joint_cmd_sub_;
+  rclcpp::Subscription<std_msgs::msg::String>::SharedPtr new_experiment_sub_;
+  rclcpp::Subscription<std_msgs::msg::Float64>::SharedPtr next_direction_sub_;
 
   // Config loader
   std::shared_ptr<ConfigLoader> config_loader_;
@@ -142,6 +150,20 @@ class RosInterface {
   std::string link_kinetic_energy_csv_file_path_;
   std::ofstream link_kinetic_energy_csv_file_;
   std::mutex link_kinetic_energy_csv_mutex_;
+
+  // Policy switch CSV (RL policy 切换事件：walking↔mimic↔damping)
+  bool save_policy_switch_csv_ = false;
+  std::string policy_switch_csv_file_path_;
+  std::ofstream policy_switch_csv_file_;
+  std::mutex policy_switch_csv_mutex_;
+  struct PendingPolicySwitch {
+    std::string from_mode;
+    std::string to_mode;
+    std::string mimic_direction;
+    bool has_data = false;
+  } pending_policy_switch_;
+  rclcpp::Subscription<std_msgs::msg::String>::SharedPtr policy_switch_sub_;
+  void PolicySwitchCallback(const std_msgs::msg::String::SharedPtr msg);
 
   // 异步写入数据结构
   struct ContactDataRow {
@@ -219,6 +241,15 @@ class RosInterface {
   
   // Link动能数据记录函数（持续记录每个link的动能 0.5*m*v^2）
   void SaveLinkKineticEnergyToCSV(const mjModel* m, mjData* d);
+
+  // 在指定目录打开所有CSV文件（供 PrepareNewExperiment 复用）
+  void OpenCsvFilesAtDir(const std::string& csv_dir);
+  // 关闭所有CSV文件并停止写入线程
+  void CloseAllCsvFiles();
+  void NewExperimentCallback(const std_msgs::msg::String::SharedPtr msg);
+  void NextDirectionCallback(const std_msgs::msg::Float64::SharedPtr msg);
+
+  std::optional<double> next_direction_angle_;  // 连续采集时，下次实验的推力方向（度）
 
   // Mutex for thread safety
   mutable std::mutex mtx_;

@@ -136,6 +136,13 @@ RosInterface::~RosInterface() {
     link_kinetic_energy_csv_file_.close();
     RCLCPP_INFO(node_->get_logger(), "Link kinetic energy data saved to: %s", link_kinetic_energy_csv_file_path_.c_str());
   }
+
+  // 关闭 policy switch CSV
+  if (policy_switch_csv_file_.is_open()) {
+    std::lock_guard<std::mutex> lock(policy_switch_csv_mutex_);
+    policy_switch_csv_file_.close();
+    RCLCPP_INFO(node_->get_logger(), "Policy switch data saved to: %s", policy_switch_csv_file_path_.c_str());
+  }
   
   // 报告队列统计信息
   if (contact_queue_dropped_ > 0) {
@@ -171,6 +178,7 @@ bool RosInterface::Initialize() {
   node_->declare_parameter("save_sensor_vibration_csv", false);
   node_->declare_parameter("save_joint_state_csv", false);
   node_->declare_parameter("save_link_kinetic_energy_csv", false);
+  node_->declare_parameter("save_policy_switch_csv", false);
   node_->declare_parameter("csv_file_path", "");
   node_->declare_parameter("csv_save_frequency", 1);  // 每帧都保存
   node_->declare_parameter("csv_format", "csv");  // 格式：csv 或 binary
@@ -181,6 +189,7 @@ bool RosInterface::Initialize() {
   save_sensor_vibration_csv_ = node_->get_parameter("save_sensor_vibration_csv").as_bool();
   save_joint_state_csv_ = node_->get_parameter("save_joint_state_csv").as_bool();
   save_link_kinetic_energy_csv_ = node_->get_parameter("save_link_kinetic_energy_csv").as_bool();
+  save_policy_switch_csv_ = node_->get_parameter("save_policy_switch_csv").as_bool();
   csv_file_path_ = node_->get_parameter("csv_file_path").as_string();
   csv_save_frequency_ = node_->get_parameter("csv_save_frequency").as_int();
   csv_format_ = node_->get_parameter("csv_format").as_string();
@@ -200,27 +209,30 @@ bool RosInterface::Initialize() {
   // 获取关节数量（必须在初始化CSV文件之前获取，因为CSV头部需要用到这个值）
   num_total_joints_ = config_loader_->GetNumTotalJoints();
   
-  // 确定CSV文件保存的目录
+  // 确定CSV文件保存的目录（每次实验存到以时间命名的子文件夹）
+  // csv_file_path 为空时：~/data/mujoco_logs/YYYYMMDD_HHMMSS/（只用时间戳，无 forward-20N-1 等主文件夹）
+  // csv_file_path 有值时（脚本传入）：实验文件夹/时间戳，如 forward-20N-1/YYYYMMDD_HHMMSS/
   std::string csv_dir;
   auto now = std::chrono::system_clock::now();
-  auto time_t = std::chrono::system_clock::to_time_t(now);
+  auto time_t_val = std::chrono::system_clock::to_time_t(now);
+  std::ostringstream ts_ss;
+  ts_ss << std::put_time(std::localtime(&time_t_val), "%Y%m%d_%H%M%S");
+  std::string timestamp_str = ts_ss.str();
   
   if (!csv_file_path_.empty()) {
-    // 如果指定了路径，使用该路径作为目录
     csv_dir = csv_file_path_;
-    std::filesystem::create_directories(csv_dir);
   } else {
-    // 如果没有指定路径，使用默认路径
     const char* home_dir = std::getenv("HOME");
     csv_dir = (home_dir ? std::string(home_dir) : "") + "/data/mujoco_logs";
-    std::filesystem::create_directories(csv_dir);
   }
+  std::string run_dir = csv_dir + "/" + timestamp_str;
+  std::filesystem::create_directories(run_dir);
   
   // 生成接触力文件路径（根据格式选择扩展名）
   if (save_contact_csv_) {
     std::stringstream ss;
     std::string ext = (csv_format_ == "binary") ? ".bin" : ".csv";
-    ss << csv_dir << "/contact_data_" << std::put_time(std::localtime(&time_t), "%Y%m%d_%H%M%S") << ext;
+    ss << run_dir << "/contact_data" << ext;
     csv_file_path_ = ss.str();
   }
   
@@ -228,14 +240,15 @@ bool RosInterface::Initialize() {
   if (save_perturbation_csv_) {
     std::stringstream ss_pert;
     std::string ext = (csv_format_ == "binary") ? ".bin" : ".csv";
-    ss_pert << csv_dir << "/perturbation_data_" << std::put_time(std::localtime(&time_t), "%Y%m%d_%H%M%S") << ext;
+    ss_pert << run_dir << "/perturbation_data" << ext;
     perturbation_csv_file_path_ = ss_pert.str();
   }
   
   // 生成关节反力数据CSV文件路径（与接触力CSV在同一目录）
   if (save_joint_forces_csv_) {
     std::stringstream ss_joint;
-    ss_joint << csv_dir << "/joint_forces_data_" << std::put_time(std::localtime(&time_t), "%Y%m%d_%H%M%S") << ".csv";
+    std::string ext = (csv_format_ == "binary") ? ".bin" : ".csv";
+    ss_joint << run_dir << "/joint_forces_data" << ext;
     joint_forces_csv_file_path_ = ss_joint.str();
   }
 
@@ -243,7 +256,7 @@ bool RosInterface::Initialize() {
   if (save_sensor_vibration_csv_) {
     std::stringstream ss_vibration;
     std::string ext = (csv_format_ == "binary") ? ".bin" : ".csv";
-    ss_vibration << csv_dir << "/sensor_vibration_data_" << std::put_time(std::localtime(&time_t), "%Y%m%d_%H%M%S") << ext;
+    ss_vibration << run_dir << "/sensor_vibration_data" << ext;
     sensor_vibration_csv_file_path_ = ss_vibration.str();
     
     std::lock_guard<std::mutex> lock(sensor_vibration_csv_mutex_);
@@ -274,7 +287,7 @@ bool RosInterface::Initialize() {
   if (save_joint_state_csv_) {
     std::stringstream ss_joint_state;
     std::string ext = (csv_format_ == "binary") ? ".bin" : ".csv";
-    ss_joint_state << csv_dir << "/joint_state_data_" << std::put_time(std::localtime(&time_t), "%Y%m%d_%H%M%S") << ext;
+    ss_joint_state << run_dir << "/joint_state_data" << ext;
     joint_state_csv_file_path_ = ss_joint_state.str();
     
     std::lock_guard<std::mutex> lock(joint_state_csv_mutex_);
@@ -311,7 +324,7 @@ bool RosInterface::Initialize() {
   if (save_link_kinetic_energy_csv_) {
     std::stringstream ss_kinetic;
     std::string ext = (csv_format_ == "binary") ? ".bin" : ".csv";
-    ss_kinetic << csv_dir << "/link_kinetic_energy_data_" << std::put_time(std::localtime(&time_t), "%Y%m%d_%H%M%S") << ext;
+    ss_kinetic << run_dir << "/link_kinetic_energy_data" << ext;
     link_kinetic_energy_csv_file_path_ = ss_kinetic.str();
     
     std::lock_guard<std::mutex> lock(link_kinetic_energy_csv_mutex_);
@@ -327,6 +340,23 @@ bool RosInterface::Initialize() {
     } else {
       RCLCPP_ERROR(node_->get_logger(), "Failed to open link kinetic energy CSV file: %s", link_kinetic_energy_csv_file_path_.c_str());
       save_link_kinetic_energy_csv_ = false;
+    }
+  }
+
+  // 初始化 policy switch CSV（RL policy 切换事件）
+  if (save_policy_switch_csv_) {
+    std::stringstream ss;
+    ss << run_dir << "/policy_switch.csv";
+    policy_switch_csv_file_path_ = ss.str();
+    std::lock_guard<std::mutex> lock(policy_switch_csv_mutex_);
+    policy_switch_csv_file_.open(policy_switch_csv_file_path_, std::ios::out);
+    if (policy_switch_csv_file_.is_open()) {
+      policy_switch_csv_file_ << "timestamp,from_mode,to_mode,mimic_direction\n";
+      policy_switch_csv_file_.flush();
+      RCLCPP_INFO(node_->get_logger(), "Policy switch data will be saved to: %s", policy_switch_csv_file_path_.c_str());
+    } else {
+      RCLCPP_ERROR(node_->get_logger(), "Failed to open policy switch CSV: %s", policy_switch_csv_file_path_.c_str());
+      save_policy_switch_csv_ = false;
     }
   }
   
@@ -398,7 +428,7 @@ bool RosInterface::Initialize() {
   if (save_joint_forces_csv_) {
     std::stringstream ss_joint_forces;
     std::string ext = (csv_format_ == "binary") ? ".bin" : ".csv";
-    ss_joint_forces << csv_dir << "/joint_forces_data_" << std::put_time(std::localtime(&time_t), "%Y%m%d_%H%M%S") << ext;
+    ss_joint_forces << run_dir << "/joint_forces_data" << ext;
     joint_forces_csv_file_path_ = ss_joint_forces.str();
     
     std::lock_guard<std::mutex> lock(joint_forces_csv_mutex_);
@@ -463,6 +493,18 @@ bool RosInterface::Initialize() {
   joint_cmd_sub_ = node_->create_subscription<interface_protocol::msg::JointCommand>(
       config_loader_->GetJointCommandTopic(), qos, std::bind(&RosInterface::JointCommandCallback, this, _1));
 
+  // 连续采集模式：订阅新实验路径和方向
+  new_experiment_sub_ = node_->create_subscription<std_msgs::msg::String>(
+      "/mujoco/new_experiment", 10, std::bind(&RosInterface::NewExperimentCallback, this, _1));
+  next_direction_sub_ = node_->create_subscription<std_msgs::msg::Float64>(
+      "/mujoco/next_direction_angle", 10, std::bind(&RosInterface::NextDirectionCallback, this, _1));
+
+  // RL policy 切换事件（格式：from_mode,to_mode,mimic_direction）
+  if (save_policy_switch_csv_) {
+    policy_switch_sub_ = node_->create_subscription<std_msgs::msg::String>(
+        "/rl/policy_switch", 10, std::bind(&RosInterface::PolicySwitchCallback, this, _1));
+  }
+
   // 注意：关节数量和最大干扰力数量已在CSV初始化时读取
 
   // 用零值初始化命令数组
@@ -524,6 +566,261 @@ void RosInterface::JointCommandCallback(const interface_protocol::msg::JointComm
   }
 }
 
+void RosInterface::NewExperimentCallback(const std_msgs::msg::String::SharedPtr msg) {
+  if (msg && !msg->data.empty()) {
+    PrepareNewExperiment(msg->data);
+  }
+}
+
+void RosInterface::NextDirectionCallback(const std_msgs::msg::Float64::SharedPtr msg) {
+  if (msg) {
+    next_direction_angle_ = msg->data;
+  }
+}
+
+void RosInterface::PolicySwitchCallback(const std_msgs::msg::String::SharedPtr msg) {
+  if (!msg || msg->data.empty()) return;
+  // 格式：from_mode,to_mode,mimic_direction（逗号分隔，mimic_direction 可为空）
+  std::string s = msg->data;
+  size_t p1 = s.find(',');
+  size_t p2 = s.find(',', p1 + 1);
+  if (p1 != std::string::npos) {
+    std::lock_guard<std::mutex> lock(policy_switch_csv_mutex_);
+    pending_policy_switch_.from_mode = s.substr(0, p1);
+    pending_policy_switch_.to_mode = (p2 != std::string::npos) ? s.substr(p1 + 1, p2 - p1 - 1) : s.substr(p1 + 1);
+    pending_policy_switch_.mimic_direction = (p2 != std::string::npos) ? s.substr(p2 + 1) : "";
+    pending_policy_switch_.has_data = true;
+  }
+}
+
+void RosInterface::PrepareNewExperiment(const std::string& csv_dir) {
+  if (csv_dir.empty()) return;
+
+  bool any_csv = save_contact_csv_ || save_perturbation_csv_ || save_joint_forces_csv_ ||
+                 save_sensor_vibration_csv_ || save_joint_state_csv_ || save_link_kinetic_energy_csv_ ||
+                 save_policy_switch_csv_;
+  if (!any_csv) return;
+
+  // 更新推力方向（若脚本已发布）
+  if (next_direction_angle_.has_value()) {
+    config_loader_->SetAutoDirectionAngle(*next_direction_angle_);
+    RCLCPP_INFO(node_->get_logger(), "推力方向已更新为 %.1f°", *next_direction_angle_);
+    next_direction_angle_.reset();
+  }
+
+  all_csv_enabled = false;  // 停止新数据写入
+  CloseAllCsvFiles();
+  OpenCsvFilesAtDir(csv_dir);
+  all_csv_enabled = true;  // 新实验立即开始记录
+  SimManager::GetInstance().RequestReset();
+
+  RCLCPP_INFO(node_->get_logger(), "新实验已准备: %s, CSV已切换, 已触发reset", csv_dir.c_str());
+}
+
+void RosInterface::CloseAllCsvFiles() {
+  if (writer_threads_running_.load()) {
+    writer_threads_running_ = false;
+    contact_queue_cv_.notify_all();
+    perturbation_queue_cv_.notify_all();
+    if (contact_writer_thread_.joinable()) contact_writer_thread_.join();
+    if (perturbation_writer_thread_.joinable()) perturbation_writer_thread_.join();
+    FlushRemainingData();
+  }
+
+  {
+    std::lock_guard<std::mutex> lock(csv_mutex_);
+    if (csv_file_.is_open()) {
+      csv_file_.close();
+      RCLCPP_INFO(node_->get_logger(), "Contact CSV closed: %s", csv_file_path_.c_str());
+    }
+  }
+  {
+    std::lock_guard<std::mutex> lock(perturbation_csv_mutex_);
+    if (perturbation_csv_file_.is_open()) {
+      perturbation_csv_file_.close();
+      RCLCPP_INFO(node_->get_logger(), "Perturbation CSV closed: %s", perturbation_csv_file_path_.c_str());
+    }
+  }
+  {
+    std::lock_guard<std::mutex> lock(joint_forces_csv_mutex_);
+    if (joint_forces_csv_file_.is_open()) {
+      joint_forces_csv_file_.close();
+    }
+  }
+  {
+    std::lock_guard<std::mutex> lock(sensor_vibration_csv_mutex_);
+    if (sensor_vibration_csv_file_.is_open()) {
+      sensor_vibration_csv_file_.close();
+    }
+  }
+  {
+    std::lock_guard<std::mutex> lock(joint_state_csv_mutex_);
+    if (joint_state_csv_file_.is_open()) {
+      joint_state_csv_file_.close();
+    }
+  }
+  {
+    std::lock_guard<std::mutex> lock(link_kinetic_energy_csv_mutex_);
+    if (link_kinetic_energy_csv_file_.is_open()) {
+      link_kinetic_energy_csv_file_.close();
+    }
+  }
+  {
+    std::lock_guard<std::mutex> lock(policy_switch_csv_mutex_);
+    if (policy_switch_csv_file_.is_open()) {
+      policy_switch_csv_file_.close();
+    }
+  }
+}
+
+void RosInterface::OpenCsvFilesAtDir(const std::string& csv_dir) {
+  auto now = std::chrono::system_clock::now();
+  auto time_t_val = std::chrono::system_clock::to_time_t(now);
+  std::ostringstream ts_ss;
+  ts_ss << std::put_time(std::localtime(&time_t_val), "%Y%m%d_%H%M%S");
+  std::string timestamp_str = ts_ss.str();
+  // csv_dir 来自脚本（如 forward-20N-1）或手动 reset 时的当前目录；每次 reset 创建时间戳子文件夹
+  std::string run_dir = csv_dir + "/" + timestamp_str;
+  std::filesystem::create_directories(run_dir);
+  std::string ext = (csv_format_ == "binary") ? ".bin" : ".csv";
+
+  if (save_contact_csv_) {
+    std::stringstream ss;
+    ss << run_dir << "/contact_data" << ext;
+    csv_file_path_ = ss.str();
+    std::lock_guard<std::mutex> lock(csv_mutex_);
+    if (csv_format_ == "binary") {
+      csv_file_.open(csv_file_path_, std::ios::out | std::ios::binary);
+    } else {
+      csv_file_.open(csv_file_path_, std::ios::out);
+    }
+    if (csv_file_.is_open()) {
+      if (csv_format_ == "csv") {
+        csv_file_ << "timestamp,contact_id,body1_name,body2_name,pos_x,pos_y,pos_z,robot_frame_x,robot_frame_y,robot_frame_z,force_x,force_y,force_z,force_magnitude,force_normal,torque_x,torque_y,torque_z,base_link_x,base_link_y,base_link_z,base_link_qw,base_link_qx,base_link_qy,base_link_qz,base_link_vel_x,base_link_vel_y,base_link_vel_z,base_link_angvel_x,base_link_angvel_y,base_link_angvel_z,collision_link_x,collision_link_y,collision_link_z,collision_link_qw,collision_link_qx,collision_link_qy,collision_link_qz\n";
+        csv_file_.flush();
+      } else {
+        int32_t num_joints = num_total_joints_;
+        csv_file_.write(reinterpret_cast<const char*>(&num_joints), sizeof(num_joints));
+        csv_file_.flush();
+      }
+      writer_threads_running_ = true;
+      contact_writer_thread_ = std::thread(&RosInterface::ContactWriterThread, this);
+    }
+  }
+
+  if (save_perturbation_csv_) {
+    std::stringstream ss;
+    ss << run_dir << "/perturbation_data" << ext;
+    perturbation_csv_file_path_ = ss.str();
+    std::lock_guard<std::mutex> lock(perturbation_csv_mutex_);
+    if (csv_format_ == "binary") {
+      perturbation_csv_file_.open(perturbation_csv_file_path_, std::ios::out | std::ios::binary);
+    } else {
+      perturbation_csv_file_.open(perturbation_csv_file_path_, std::ios::out);
+    }
+    if (perturbation_csv_file_.is_open()) {
+      if (csv_format_ == "csv") {
+        perturbation_csv_file_ << "timestamp,perturbation_id,body_name,start_time,duration,elapsed_time,force_x,force_y,force_z,force_magnitude,torque_x,torque_y,torque_z,torque_magnitude,std_pose_x,std_pose_y,std_pose_z,world_force_x,world_force_y,world_force_z,world_force_magnitude\n";
+        perturbation_csv_file_.flush();
+      }
+      if (!writer_threads_running_.load()) writer_threads_running_ = true;
+      perturbation_writer_thread_ = std::thread(&RosInterface::PerturbationWriterThread, this);
+    }
+  }
+
+  if (save_joint_forces_csv_) {
+    std::stringstream ss;
+    ss << run_dir << "/joint_forces_data" << ext;
+    joint_forces_csv_file_path_ = ss.str();
+    std::lock_guard<std::mutex> lock(joint_forces_csv_mutex_);
+    if (csv_format_ == "binary") {
+      joint_forces_csv_file_.open(joint_forces_csv_file_path_, std::ios::out | std::ios::binary);
+    } else {
+      joint_forces_csv_file_.open(joint_forces_csv_file_path_, std::ios::out);
+    }
+    if (joint_forces_csv_file_.is_open()) {
+      if (csv_format_ == "csv") {
+        joint_forces_csv_file_ << "timestamp,joint_id,joint_name,body_id,body_name,"
+          << "child_Mx,child_My,child_Mz,child_Fx,child_Fy,child_Fz,"
+          << "parent_Mx,parent_My,parent_Mz,parent_Fx,parent_Fy,parent_Fz,"
+          << "axis_x,axis_y,axis_z,"
+          << "F_axial_mag,F_shear_mag,M_torsion_mag,M_bend_mag,M_eq,"
+          << "F_axial_x,F_axial_y,F_axial_z,"
+          << "F_shear_x,F_shear_y,F_shear_z,"
+          << "M_torsion_x,M_torsion_y,M_torsion_z,"
+          << "M_bend_x,M_bend_y,M_bend_z\n";
+        joint_forces_csv_file_.flush();
+      }
+    }
+  }
+
+  if (save_sensor_vibration_csv_) {
+    std::stringstream ss;
+    ss << run_dir << "/sensor_vibration_data" << ext;
+    sensor_vibration_csv_file_path_ = ss.str();
+    std::lock_guard<std::mutex> lock(sensor_vibration_csv_mutex_);
+    if (csv_format_ == "binary") {
+      sensor_vibration_csv_file_.open(sensor_vibration_csv_file_path_, std::ios::out | std::ios::binary);
+    } else {
+      sensor_vibration_csv_file_.open(sensor_vibration_csv_file_path_, std::ios::out);
+    }
+    if (sensor_vibration_csv_file_.is_open() && csv_format_ == "csv") {
+      sensor_vibration_csv_file_ << "timestamp,"
+        << "base_link_lin_acc_x,base_link_lin_acc_y,base_link_lin_acc_z,"
+        << "base_link_ang_acc_x,base_link_ang_acc_y,base_link_ang_acc_z,"
+        << "head_lin_acc_x,head_lin_acc_y,head_lin_acc_z,"
+        << "head_ang_acc_x,head_ang_acc_y,head_ang_acc_z\n";
+      sensor_vibration_csv_file_.flush();
+    }
+  }
+
+  if (save_joint_state_csv_) {
+    std::stringstream ss;
+    ss << run_dir << "/joint_state_data" << ext;
+    joint_state_csv_file_path_ = ss.str();
+    std::lock_guard<std::mutex> lock(joint_state_csv_mutex_);
+    if (csv_format_ == "binary") {
+      joint_state_csv_file_.open(joint_state_csv_file_path_, std::ios::out | std::ios::binary);
+    } else {
+      joint_state_csv_file_.open(joint_state_csv_file_path_, std::ios::out);
+    }
+    if (joint_state_csv_file_.is_open() && csv_format_ == "csv") {
+      joint_state_csv_file_ << "timestamp";
+      for (int i = 0; i < num_total_joints_; i++) joint_state_csv_file_ << ",joint_" << i << "_position";
+      for (int i = 0; i < num_total_joints_; i++) joint_state_csv_file_ << ",joint_" << i << "_velocity";
+      for (int i = 0; i < num_total_joints_; i++) joint_state_csv_file_ << ",actuator_" << i << "_force";
+      joint_state_csv_file_ << "\n";
+      joint_state_csv_file_.flush();
+    }
+  }
+
+  if (save_link_kinetic_energy_csv_) {
+    std::stringstream ss;
+    ss << run_dir << "/link_kinetic_energy_data" << ext;
+    link_kinetic_energy_csv_file_path_ = ss.str();
+    std::lock_guard<std::mutex> lock(link_kinetic_energy_csv_mutex_);
+    if (csv_format_ == "binary") {
+      link_kinetic_energy_csv_file_.open(link_kinetic_energy_csv_file_path_, std::ios::out | std::ios::binary);
+    } else {
+      link_kinetic_energy_csv_file_.open(link_kinetic_energy_csv_file_path_, std::ios::out);
+    }
+  }
+
+  if (save_policy_switch_csv_) {
+    std::stringstream ss;
+    ss << run_dir << "/policy_switch.csv";
+    policy_switch_csv_file_path_ = ss.str();
+    std::lock_guard<std::mutex> lock(policy_switch_csv_mutex_);
+    policy_switch_csv_file_.open(policy_switch_csv_file_path_, std::ios::out);
+    if (policy_switch_csv_file_.is_open()) {
+      policy_switch_csv_file_ << "timestamp,from_mode,to_mode,mimic_direction\n";
+      policy_switch_csv_file_.flush();
+    }
+  }
+
+  RCLCPP_INFO(node_->get_logger(), "CSV files opened at: %s", run_dir.c_str());
+}
+
 /**
  * @brief 更新仿真状态并发布数据
  * @param m MuJoCo模型指针
@@ -539,7 +836,33 @@ void RosInterface::UpdateSimState(const mjModel* m, mjData* d) {
   // 检测用户/GUI 触发的 reset：仿真时间回退表示发生了 reset，发布 reset_complete 让 CHR 等节点恢复走路
   const double kTimeRollbackThreshold = 0.01;
   if (last_sim_time_ >= 0 && d->time < last_sim_time_ - kTimeRollbackThreshold) {
-    // 手动 reset 时也重置 auto_sampling，让推力在 auto_delay 后重新施加
+    // 手动 reset 时：切换 CSV 到新文件（同目录、新时间戳）、重置 auto_sampling
+    bool any_csv = save_contact_csv_ || save_perturbation_csv_ || save_joint_forces_csv_ ||
+                   save_sensor_vibration_csv_ || save_joint_state_csv_ || save_link_kinetic_energy_csv_;
+    if (any_csv) {
+      std::string csv_dir;
+      auto get_dir = [](const std::string& p) {
+        return (p.find(".csv") != std::string::npos || p.find(".bin") != std::string::npos)
+                   ? std::filesystem::path(p).parent_path().string() : p;
+      };
+      if (!csv_file_path_.empty()) csv_dir = get_dir(csv_file_path_);
+      else if (!perturbation_csv_file_path_.empty()) csv_dir = get_dir(perturbation_csv_file_path_);
+      else if (!joint_forces_csv_file_path_.empty()) csv_dir = get_dir(joint_forces_csv_file_path_);
+      else if (!sensor_vibration_csv_file_path_.empty()) csv_dir = get_dir(sensor_vibration_csv_file_path_);
+      else if (!joint_state_csv_file_path_.empty()) csv_dir = get_dir(joint_state_csv_file_path_);
+      else if (!link_kinetic_energy_csv_file_path_.empty()) csv_dir = get_dir(link_kinetic_energy_csv_file_path_);
+      else if (!policy_switch_csv_file_path_.empty()) csv_dir = get_dir(policy_switch_csv_file_path_);
+      if (!csv_dir.empty()) {
+        // csv_dir 为当前 run 目录（如 ~/data/20250306_143052），下一 run 需用其父目录作为 base
+        std::string base_dir = std::filesystem::path(csv_dir).parent_path().string();
+        all_csv_enabled = false;
+        CloseAllCsvFiles();
+        OpenCsvFilesAtDir(base_dir);
+        all_csv_enabled = true;
+        RCLCPP_INFO(node_->get_logger(), "手动 reset：已切换 CSV 到新文件（base %s）", base_dir.c_str());
+      }
+    }
+
     auto& sim_manager = SimManager::GetInstance();
     sim_manager.ResetAutoSampling();
     RCLCPP_INFO(node_->get_logger(), "手动 reset 已重置 auto_sampling 状态，推力将在 auto_delay 时间后重新施加");
@@ -550,6 +873,19 @@ void RosInterface::UpdateSimState(const mjModel* m, mjData* d) {
                 last_sim_time_, d->time);
   }
   last_sim_time_ = d->time;
+
+  // 写入待处理的 policy 切换事件（使用当前 sim time 作为 timestamp）
+  if (save_policy_switch_csv_ && pending_policy_switch_.has_data && policy_switch_csv_file_.is_open()) {
+    std::lock_guard<std::mutex> lock(policy_switch_csv_mutex_);
+    if (pending_policy_switch_.has_data) {
+      policy_switch_csv_file_ << std::fixed << std::setprecision(6) << d->time << ","
+                              << "\"" << pending_policy_switch_.from_mode << "\","
+                              << "\"" << pending_policy_switch_.to_mode << "\","
+                              << "\"" << pending_policy_switch_.mimic_direction << "\"\n";
+      policy_switch_csv_file_.flush();
+      pending_policy_switch_.has_data = false;
+    }
+  }
 
   // ==================== 统一的CSV延迟和reset逻辑 ====================
   // 检查是否有任何CSV需要保存

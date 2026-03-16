@@ -28,12 +28,13 @@ class RlBasicRunnerXZL : public rclcpp::Node {
     config_file_ = config_file;
     joint_command_ = std::make_shared<interface_protocol::msg::JointCommand>();
 
-    // 订阅 mujoco reset，reset 后下次摔倒时重新打印
+    // 订阅 mujoco reset，reset 后下次摔倒时重新打印，并清空 obs history
     mujoco_reset_sub_ = create_subscription<std_msgs::msg::Empty>(
         "/mujoco/reset_complete", 10, [this](const std_msgs::msg::Empty::SharedPtr) {
           fall_switch_entered_logged_ = false;
           in_pd_stand_fall_ = false;
           in_pdstand_timed_ = false;
+          is_first_time_ = true;  // 下一帧会重新用当前 obs 填充 history buffer
         });
 
     // 加载扭矩限制参数

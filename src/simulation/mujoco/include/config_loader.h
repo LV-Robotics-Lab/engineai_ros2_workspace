@@ -51,6 +51,7 @@ class ConfigLoader {
   // 自动采样配置
   bool GetAutoSampling() const { return auto_sampling_; }
   double GetAutoDirectionAngle() const { return auto_direction_angle_; }  // 推力方向角度（度）
+  void SetAutoDirectionAngle(double angle) { auto_direction_angle_ = angle; }  // 连续采集时动态更新方向
   double GetAutoDelay() const { return auto_delay_; }
 
   // 初始速度配置
@@ -65,6 +66,8 @@ class ConfigLoader {
   bool IsProtectionEnabled() const { return protection_enabled_; }
   double GetProtectionThickness() const { return protection_thickness_; }
   bool UseProtectorMap() const { return use_protector_map_; }
+  const std::string& GetProtectorMapFront() const { return protector_map_front_; }
+  const std::string& GetProtectorMapBack() const { return protector_map_back_; }
   const std::string& GetForceMethod() const { return force_method_; }
   double GetProtectionDensity() const { return protection_density_; }
 
@@ -127,6 +130,8 @@ class ConfigLoader {
   bool protection_enabled_ = false;          // 是否启用防护功能（虚拟护具）
   double protection_thickness_ = 12.0;       // 护具厚度（mm），默认12mm，use_protector_map=false 时使用
   bool use_protector_map_ = false;           // 是否使用护具地图（按碰撞点位置查表厚度）
+  std::string protector_map_front_ = "yz_map_front.tsv";   // 前侧 TSV 文件名
+  std::string protector_map_back_ = "yz_map_back.tsv";     // 后侧 TSV 文件名
   std::string force_method_ = "chr";        // 力衰减：chr=公式, zzq=RT-FEM查表
   double protection_density_ = 0.4;         // 材料密度，仅 chr 方法使用
 };

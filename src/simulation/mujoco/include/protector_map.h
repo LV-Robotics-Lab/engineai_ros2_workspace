@@ -17,9 +17,12 @@ class ProtectorMap {
  public:
   /**
    * @brief 从目录加载护具地图
-   * @param map_dir 包含 yz_map_front.tsv 和 yz_map_back.tsv 的目录路径
+   * @param map_dir 包含 TSV 文件的目录路径
+   * @param front_tsv 前侧(x>=0) TSV 文件名，如 yz_map_front.tsv
+   * @param back_tsv 后侧(x<0) TSV 文件名，如 yz_map_back.tsv
    */
-  explicit ProtectorMap(const std::string& map_dir);
+  ProtectorMap(const std::string& map_dir, const std::string& front_tsv = "yz_map_front.tsv",
+               const std::string& back_tsv = "yz_map_back.tsv");
 
   /**
    * @brief 根据接触点世界坐标（=默认站立系）查表得到护具厚度
@@ -35,6 +38,12 @@ class ProtectorMap {
    */
   bool IsLoaded() const { return loaded_; }
 
+  /**
+   * @brief 从 TSV 读取的材料密度（use_protector_map=true 时使用）
+   * @return 密度值，若 TSV 未指定则返回 0.4
+   */
+  double GetDensity() const { return density_; }
+
  private:
   bool LoadTsv(const std::string& file_path, std::vector<std::vector<double>>& grid);
   void ComputeBounds();  // 根据 y_coords_、z_coords_ 计算边界（格心 ± 半格距）
@@ -46,6 +55,7 @@ class ProtectorMap {
   std::vector<double> z_coords_;  // 行对应的 Z 格心坐标
   double y_min_ = 0.0, y_max_ = 0.0;  // 有效范围（由格心 ± 半格距算出）
   double z_min_ = 0.0, z_max_ = 0.0;
+  double density_ = 0.4;  // 材料密度，从 TSV 注释 "# density 0.4" 解析
   bool loaded_ = false;
 };
 

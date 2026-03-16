@@ -10,14 +10,16 @@
 #include <algorithm>
 #include <iostream>
 
-ProtectorMap::ProtectorMap(const std::string& map_dir) {
+ProtectorMap::ProtectorMap(const std::string& map_dir, const std::string& front_tsv,
+                           const std::string& back_tsv) {
   if (map_dir.empty()) {
     return;
   }
-  std::string path_front = map_dir + "/yz_map_front.tsv";
-  std::string path_back = map_dir + "/yz_map_back.tsv";
+  std::string path_front = map_dir + "/" + front_tsv;
+  std::string path_back = map_dir + "/" + back_tsv;
   if (!LoadTsv(path_front, grid_front_) || !LoadTsv(path_back, grid_back_)) {
-    std::cerr << "ProtectorMap: Failed to load map from " << map_dir << std::endl;
+    std::cerr << "ProtectorMap: Failed to load map from " << map_dir
+              << " (front=" << front_tsv << ", back=" << back_tsv << ")" << std::endl;
     return;
   }
   ComputeBounds();
@@ -32,11 +34,21 @@ bool ProtectorMap::LoadTsv(const std::string& file_path,
     return false;
   }
   std::string line;
-  // 跳过注释行
-  if (!std::getline(file, line) || line.empty()) return false;
-  if (line[0] == '#') {
-    if (!std::getline(file, line)) return false;
+  // 跳过注释行，并解析 "# density 0.4"
+  while (std::getline(file, line)) {
+    if (line.empty()) continue;
+    if (line[0] != '#') break;  // 非注释行，作为表头
+    size_t pos = line.find("density");
+    if (pos != std::string::npos) {
+      try {
+        size_t num_start = line.find_first_of("0123456789.", pos);
+        if (num_start != std::string::npos) {
+          density_ = std::stod(line.substr(num_start));
+        }
+      } catch (...) {}
+    }
   }
+  if (line.empty()) return false;
   // 解析表头: z\y, -0.4, -0.35, ..., 0.4
   std::istringstream header_stream(line);
   std::string cell;

@@ -613,6 +613,12 @@ void SimManager::ResetAutoSampling() {
   std::cout << "Auto-sampling状态已重置，推力将在auto_delay时间后重新施加" << std::endl;
 }
 
+void SimManager::RequestReset() {
+  if (sim_) {
+    sim_->pending_.reset = true;
+  }
+}
+
 /**
  * @brief 初始化仿真管理器
  * @return 初始化是否成功
@@ -770,9 +776,12 @@ bool SimManager::Initialize() {
         map_dir = map_dir_candidates[0];  // 默认尝试第一个
       }
       try {
-        protector_map_ = std::make_unique<ProtectorMap>(map_dir);
+        std::string front_tsv = config_loader_->GetProtectorMapFront();
+        std::string back_tsv = config_loader_->GetProtectorMapBack();
+        protector_map_ = std::make_unique<ProtectorMap>(map_dir, front_tsv, back_tsv);
         if (protector_map_->IsLoaded()) {
-          RCLCPP_INFO(logger, "Protector map loaded from: %s", map_dir.c_str());
+          RCLCPP_INFO(logger, "Protector map loaded from: %s (front=%s, back=%s)", map_dir.c_str(),
+                      front_tsv.c_str(), back_tsv.c_str());
         } else {
           RCLCPP_WARN(logger, "Protector map failed to load, falling back to global thickness");
           protector_map_.reset();
@@ -1793,7 +1802,10 @@ void SimManager::ApplyProtectionToContactForces() {
         continue;
       }
       if (force_method_ == "chr" && chr_zzq_force_) {
-        force_protected_kN = chr_zzq_force_->GetProtectedForce(force_unprotected_kN, thickness_mm, protection_density_);
+        double density = use_protector_map_ && protector_map_ && protector_map_->IsLoaded()
+                            ? protector_map_->GetDensity()
+                            : protection_density_;
+        force_protected_kN = chr_zzq_force_->GetProtectedForce(force_unprotected_kN, thickness_mm, density);
       } else {
         force_protected_kN = force_interpolator_->GetProtectedForce(force_unprotected_kN, thickness_mm);
       }

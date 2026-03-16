@@ -120,7 +120,8 @@ cd /home/wang22/engineai/engineai_ros2_workspace && conda activate engineai_ros2
 source install/setup.bash 
 # ros2 launch mujoco_simulator mujoco_simulator.launch.py csv_format:=csv or binary
 # 修改 pm_v2.yaml protection: enabled:true 启用护具功能（thickness:设置厚度）
-ros2 launch mujoco_simulator mujoco_simulator.launch.py save_contact_csv:=true save_joint_state_csv:=true save_sensor_vibration_csv:=true save_joint_forces_csv:=true save_link_kinetic_energy_csv:=true csv_format:=csv
+ros2 launch mujoco_simulator mujoco_simulator.launch.py save_contact_csv:=true save_perturbation_csv:=true save_joint_state_csv:=true save_sensor_vibration_csv:=true save_joint_forces_csv:=true save_link_kinetic_energy_csv:=true save_policy_switch_csv:=true csv_format:=csv
+# save_perturbation_csv: 推力数据；save_policy_switch_csv: RL 摔倒切换时间戳（walking↔mimic↔damping）；csv_file_path: 指定目录（留空则 ~/data/mujoco_logs/时间戳/）
 
 # # 推倒采样仿真器 - 支持交互式干扰力控制
 # # 基本启动

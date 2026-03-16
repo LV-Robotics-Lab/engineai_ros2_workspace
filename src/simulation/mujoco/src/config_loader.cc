@@ -168,6 +168,12 @@ bool ConfigLoader::LoadConfig() {
       if (protection["use_protector_map"]) {
         use_protector_map_ = protection["use_protector_map"].as<bool>();
       }
+      if (protection["protector_map_front"]) {
+        protector_map_front_ = protection["protector_map_front"].as<std::string>();
+      }
+      if (protection["protector_map_back"]) {
+        protector_map_back_ = protection["protector_map_back"].as<std::string>();
+      }
       if (protection["force_method"]) {
         force_method_ = protection["force_method"].as<std::string>();
         if (force_method_ != "chr" && force_method_ != "zzq") {

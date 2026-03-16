@@ -19,6 +19,7 @@
 #include "rl_dance/csv_loader.h"
 #include "rl_dance/rl_dance_motion_state_profile.h"
 #include <std_msgs/msg/empty.hpp>
+#include <std_msgs/msg/string.hpp>
 
 using namespace std::chrono_literals;
 
@@ -201,6 +202,8 @@ class RlBasicRunnerCHR : public rclcpp::Node {
       mujoco_reset_sub_ = create_subscription<std_msgs::msg::Empty>(
           "/mujoco/reset_complete", 10,
           std::bind(&RlBasicRunnerCHR::MujocoResetCallback, this, std::placeholders::_1));
+
+      policy_switch_pub_ = create_publisher<std_msgs::msg::String>("/rl/policy_switch", 10);
 
       control_timer_ = create_wall_timer(std::chrono::duration<double>(control_dt_),
                                          std::bind(&RlBasicRunnerCHR::ControlCallback, this));
@@ -945,6 +948,11 @@ class RlBasicRunnerCHR : public rclcpp::Node {
   
   void MujocoResetCallback(const std_msgs::msg::Empty::SharedPtr msg) {
     (void)msg;
+    // 若从 mimic/damping 切回 walking，发布 policy switch
+    if (!is_walking_mode_) {
+      std::string from = is_damping_mode_ ? "damping" : "mimic";
+      PublishPolicySwitch(from, "walking", kMimicDirectionNames[static_cast<int>(current_mimic_direction_)]);
+    }
     // 每次收到 reset 信号都重新初始化状态
     mujoco_reset_received_ = true;
     walking_start_time_ = time_;
@@ -963,6 +971,16 @@ class RlBasicRunnerCHR : public rclcpp::Node {
     if (mimic_trajs_loaded_[static_cast<int>(MimicDirection::FORWARD)]) {
       current_traj_ = &mimic_trajs_directions_[static_cast<int>(MimicDirection::FORWARD)];
     }
+    
+    // 清空 obs history，避免新 episode 开始时带入上一 episode 的旧数据
+    q_diff_history_.setZero();
+    qd_history_.setZero();
+    action_history_.setZero();
+    w_history_.setZero();
+    gravity_history_.setZero();
+    if (quat_error_history_.size() > 0) quat_error_history_.setZero();
+    initial_quat_offset_computed_ = false;
+    initial_quat_offset_ = std::nullopt;
     
     RCLCPP_INFO(get_logger(), "Received MuJoCo reset signal, restarting walking from time: %.2f", time_);
   }
@@ -1254,6 +1272,7 @@ class RlBasicRunnerCHR : public rclcpp::Node {
           stability_history_.clear();
           stability_history_.resize(std::max(1, stability_history_length_), true);
         }
+        PublishPolicySwitch("walking", "mimic", kMimicDirectionNames[static_cast<int>(current_mimic_direction_)]);
       }
     }
 
@@ -1263,6 +1282,7 @@ class RlBasicRunnerCHR : public rclcpp::Node {
         is_damping_mode_ = true;
         mujoco_reset_received_ = false;
         RCLCPP_INFO(get_logger(), "[mimic] 检测到不稳定，提前进入 damping mode (time=%.2f)", time_);
+        PublishPolicySwitch("mimic", "damping", kMimicDirectionNames[static_cast<int>(current_mimic_direction_)]);
       }
     }
     
@@ -1452,6 +1472,7 @@ class RlBasicRunnerCHR : public rclcpp::Node {
         mujoco_reset_received_ = false;
         RCLCPP_INFO(get_logger(), "[mimic] 轨迹播放完成（第 %zu 帧），进入 damping mode (time=%.2f)",
                     trajectory_index_, time_);
+        PublishPolicySwitch("mimic", "damping", kMimicDirectionNames[static_cast<int>(current_mimic_direction_)]);
       }
     }
   }
@@ -1973,6 +1994,14 @@ class RlBasicRunnerCHR : public rclcpp::Node {
   
   // MuJoCo reset subscription
   rclcpp::Subscription<std_msgs::msg::Empty>::SharedPtr mujoco_reset_sub_;
+  rclcpp::Publisher<std_msgs::msg::String>::SharedPtr policy_switch_pub_;
+  
+  void PublishPolicySwitch(const std::string& from_mode, const std::string& to_mode,
+                          const std::string& mimic_direction = "") {
+    std_msgs::msg::String msg;
+    msg.data = from_mode + "," + to_mode + "," + mimic_direction;
+    policy_switch_pub_->publish(msg);
+  }
   
   // Walking mode parameters
   YAML::Node config_walking_;

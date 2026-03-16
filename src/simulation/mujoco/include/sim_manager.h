@@ -96,6 +96,9 @@ bool IsContactVisualizationEnabled();
   
   // 重置auto_sampling状态，用于MuJoCo重置后重新触发推力
   void ResetAutoSampling();
+
+  // 请求仿真 reset（由 ROS 服务调用，用于连续采集模式）
+  void RequestReset();
   
   // 获取配置加载器
   std::shared_ptr<ConfigLoader> GetConfigLoader() const { return config_loader_; }
