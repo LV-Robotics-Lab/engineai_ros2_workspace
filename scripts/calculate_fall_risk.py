@@ -128,6 +128,7 @@ def read_binary_contact_data(bin_path: str) -> pd.DataFrame:
             world_forces = struct.unpack('3d', f.read(24))
             force_magnitude = struct.unpack('d', f.read(8))[0]
             force_normal = struct.unpack('d', f.read(8))[0]
+            force_friction = struct.unpack('d', f.read(8))[0]  # 摩擦力大小（新格式）；旧格式可能无此字段
             world_torques = struct.unpack('3d', f.read(24))
             base_link_pos = struct.unpack('3d', f.read(24))
             base_link_quat = struct.unpack('4d', f.read(32))
@@ -149,6 +150,7 @@ def read_binary_contact_data(bin_path: str) -> pd.DataFrame:
                 'force_z': world_forces[2],
                 'force_magnitude': force_magnitude,
                 'force_normal': force_normal,
+                'force_friction': force_friction,
                 'torque_x': world_torques[0],
                 'torque_y': world_torques[1],
                 'torque_z': world_torques[2],
@@ -1931,9 +1933,10 @@ def plot_contact_force_curves(
 ) -> None:
     """
     单独绘制接触力曲线（每时刻最大接触力），便于观察护具对力峰值与时间的影响。
+    绘制三个力：合力、正压力、摩擦力。
     
     参数:
-        contact_df: 接触力数据 DataFrame，应包含列：timestamp, force_magnitude
+        contact_df: 接触力数据 DataFrame，应包含列：timestamp, force_magnitude, force_normal, force_friction
         time_collision: 碰撞时间戳数组（可选），若提供则画垂线
         f_thr: 力阈值（N），画水平参考线，默认 1000.0
         output_path: 图片保存路径（可选）
@@ -1946,19 +1949,27 @@ def plot_contact_force_curves(
         return
     
     # 每时刻取最大接触力（同一时刻可能有多接触点）
-    by_time = contact_df.groupby('timestamp')['force_magnitude'].max().reset_index()
+    agg_dict = {'force_magnitude': 'max'}
+    if 'force_normal' in contact_df.columns:
+        agg_dict['force_normal'] = 'max'
+    if 'force_friction' in contact_df.columns:
+        agg_dict['force_friction'] = 'max'
+    by_time = contact_df.groupby('timestamp').agg(agg_dict).reset_index()
     by_time = by_time.sort_values('timestamp')
     ts = by_time['timestamp'].to_numpy(dtype=float)
-    force = by_time['force_magnitude'].to_numpy(dtype=float)
     
     fig, ax = plt.subplots(1, 1, figsize=(14, 5))
-    ax.plot(ts, force, 'b-', label='max contact force (N)', linewidth=1.2)
+    ax.plot(ts, by_time['force_magnitude'].to_numpy(dtype=float), 'b-', label='合力 (force_magnitude)', linewidth=1.2)
+    if 'force_normal' in by_time.columns:
+        ax.plot(ts, by_time['force_normal'].to_numpy(dtype=float), 'g-', label='正压力 (force_normal)', linewidth=1.2)
+    if 'force_friction' in by_time.columns:
+        ax.plot(ts, by_time['force_friction'].to_numpy(dtype=float), 'm-', label='摩擦力 (force_friction)', linewidth=1.2)
     ax.axhline(y=f_thr, color='orange', linestyle='--', linewidth=1, label=f'threshold={f_thr} N')
     ax.set_ylabel('Force (N)', fontsize=10)
     ax.set_xlabel('Time (s)', fontsize=10)
     ax.legend(loc='upper right')
     ax.grid(True, alpha=0.3)
-    ax.set_title('Contact force magnitude (max per timestamp)', fontsize=12)
+    ax.set_title('Contact force: 合力 / 正压力 / 摩擦力 (max per timestamp)', fontsize=12)
     
     if time_collision is not None and len(time_collision) > 0:
         for t in time_collision:
