@@ -40,6 +40,7 @@ import argparse
 import struct
 import os
 import re
+import sys
 from pathlib import Path
 from typing import Dict, Optional, Tuple
 import matplotlib.pyplot as plt
@@ -584,6 +585,43 @@ def read_binary_link_kinetic_energy_data(bin_path: str) -> pd.DataFrame:
             data.append(row)
     
     return pd.DataFrame(data)
+
+
+def resolve_paths_from_log_dir(log_dir: str) -> Dict[str, Optional[str]]:
+    """
+    从日志目录解析各数据文件路径。支持 contact_data.csv 或 contact_data_YYYYMMDD_HHMMSS.csv 等命名。
+    返回: {'contact': path, 'sensor_vibration': path, 'joint_state': path, 'joint_forces': path,
+           'perturbation': path, 'link_energy': path}
+    """
+    log_path = Path(log_dir)
+    if not log_path.is_dir():
+        return {}
+    result = {}
+    # 每种文件类型的候选 basename 前缀
+    patterns = {
+        'contact': 'contact_data',
+        'sensor_vibration': 'sensor_vibration_data',
+        'joint_state': 'joint_state_data',
+        'joint_forces': 'joint_forces_data',
+        'perturbation': 'perturbation_data',
+        'link_energy': 'link_kinetic_energy_data',
+    }
+    for key, prefix in patterns.items():
+        found = None
+        for ext in ['.csv', '.bin']:
+            # 1) 精确匹配 contact_data.csv
+            exact = log_path / f"{prefix}{ext}"
+            if exact.exists():
+                found = str(exact)
+                break
+            # 2) 模糊匹配 contact_data_20260316_204945.csv
+            for f in log_path.glob(f"{prefix}_*{ext}"):
+                found = str(f)
+                break
+            if found:
+                break
+        result[key] = found
+    return result
 
 
 def load_data_file(file_path: str) -> pd.DataFrame:
@@ -2782,31 +2820,39 @@ def main():
     )
     
     parser.add_argument(
+        '--log-dir',
+        type=str,
+        default=None,
+        help='日志目录路径。指定后自动从该目录查找 contact_data*.csv、sensor_vibration_data*.csv 等，'
+             '可替代 --contact/--sensor-vibration/--joint-state/--joint-forces。例如: /home/wang22/data/mujoco_logs/20260316_204945'
+    )
+    
+    parser.add_argument(
         '--contact',
         type=str,
-        required=True,
-        help='接触力数据文件路径 (CSV或BIN格式)'
+        default=None,
+        help='接触力数据文件路径 (CSV或BIN格式)。若指定 --log-dir 则自动查找，可省略'
     )
     
     parser.add_argument(
         '--sensor-vibration',
         type=str,
-        required=True,
-        help='传感器振动数据文件路径 (CSV或BIN格式)'
+        default=None,
+        help='传感器振动数据文件路径 (CSV或BIN格式)。若指定 --log-dir 则自动查找，可省略'
     )
     
     parser.add_argument(
         '--joint-state',
         type=str,
-        required=True,
-        help='关节状态数据文件路径 (CSV或BIN格式)'
+        default=None,
+        help='关节状态数据文件路径 (CSV或BIN格式)。若指定 --log-dir 则自动查找，可省略'
     )
     
     parser.add_argument(
         '--joint-forces',
         type=str,
-        required=True,
-        help='关节力数据文件路径 (CSV格式)'
+        default=None,
+        help='关节力数据文件路径 (CSV格式)。若指定 --log-dir 则自动查找，可省略'
     )
     
     parser.add_argument(
@@ -2881,6 +2927,32 @@ def main():
     )
     
     args = parser.parse_args()
+    
+    # 若指定 --log-dir，从目录自动解析各文件路径
+    if args.log_dir:
+        resolved = resolve_paths_from_log_dir(args.log_dir)
+        if not resolved.get('contact') or not resolved.get('sensor_vibration') or not resolved.get('joint_state') or not resolved.get('joint_forces'):
+            missing = [k for k in ['contact', 'sensor_vibration', 'joint_state', 'joint_forces'] if not resolved.get(k)]
+            print(f"错误: 在 {args.log_dir} 中未找到: {missing}")
+            print("  需要至少: contact_data*.csv, sensor_vibration_data*.csv, joint_state_data*.csv, joint_forces_data*.csv")
+            return 1
+        args.contact = resolved['contact']
+        args.sensor_vibration = resolved['sensor_vibration']
+        args.joint_state = resolved['joint_state']
+        args.joint_forces = resolved['joint_forces']
+        args.perturbation = args.perturbation or resolved.get('perturbation')
+        args.link_energy = args.link_energy or resolved.get('link_energy')
+        if not args.output:
+            args.output = str(Path(args.log_dir) / "risk_results")
+        print(f"从日志目录解析: {args.log_dir}")
+        print(f"  contact: {args.contact}")
+        print(f"  sensor_vibration: {args.sensor_vibration}")
+        print(f"  joint_state: {args.joint_state}")
+        print(f"  joint_forces: {args.joint_forces}")
+    else:
+        if not args.contact or not args.sensor_vibration or not args.joint_state or not args.joint_forces:
+            print("错误: 请指定 --log-dir 或同时指定 --contact, --sensor-vibration, --joint-state, --joint-forces")
+            return 1
     
     # 解析时间范围（用于所有曲线图局部截取）
     t_start, t_end = args.t_start, args.t_end
@@ -3140,4 +3212,4 @@ def main():
 
 
 if __name__ == '__main__':
-    main()
+    sys.exit(main() or 0)
