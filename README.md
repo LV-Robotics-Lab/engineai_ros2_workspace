@@ -134,7 +134,7 @@ source install/setup.bash
 # 修改 rl_basic_param_XZL.yaml 的 enable_pdstand_switch 可以选择是 走路policy or PDstand
 ros2 launch interface_example rl_basic_example_XZL.launch.py
 ros2 launch interface_example rl_basic_example_CHR.launch.py
-## 通过修改 pm_v2.yaml 里 perturbation 组参数来改变推力大小； src/simulation/mujoco/assets/config/pm_v2.yaml
+## 通过修改 pm_v2.yaml 里 perturbation 组参数来改变推力大小 和 护具map； src/simulation/mujoco/assets/config/pm_v2.yaml
 ## 通过修改 rl_basic_param_XZL.yaml 里 initial_velocity 组参数来改变初始速度
 
 ## 滑倒采样（如果没有设置priority属性，MuJoCo会取最大值）
@@ -175,6 +175,9 @@ ros2 launch interface_example rl_basic_example_CHR.launch.py
 # terminal 1&2 自动采集碰撞
 chmod +x /home/wang22/engineai/engineai_ros2_workspace/scripts/automated_collection.sh
 ./scripts/automated_collection.sh
+# 连续模式自动采集（MuJoCo/运控常驻，仅 reset 切换 CSV，更快）
+chmod +x /home/wang22/engineai/engineai_ros2_workspace/scripts/automated_collection_continuous.sh
+./scripts/automated_collection_continuous.sh
 # 断电摔倒采样
 # pm_v2.yaml default_force_magnitude = 0.0, auto_sampling = true, 然后运行下面代码
 chmod +x /home/wang22/engineai/engineai_ros2_workspace/scripts/automated_collection_poweroff.sh

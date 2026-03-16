@@ -34,7 +34,10 @@ class RlBasicRunnerXZL : public rclcpp::Node {
           fall_switch_entered_logged_ = false;
           in_pd_stand_fall_ = false;
           in_pdstand_timed_ = false;
-          is_first_time_ = true;  // 下一帧会重新用当前 obs 填充 history buffer
+          in_damping_fall_ = false;  // 重置 damping 模式，下次摔倒再进入
+          fall_stable_count_ = 0;    // 重置摔倒检测防抖
+          is_first_time_ = true;     // 下一帧会重新用当前 obs 填充 history buffer
+          time_ = 0.0;               // 重置计时，使 falling_detect_after_sec 在每次 reset 后重新生效
         });
 
     // 加载扭矩限制参数
@@ -69,6 +72,25 @@ class RlBasicRunnerXZL : public rclcpp::Node {
       }
       RCLCPP_INFO(get_logger(), "Enable falling switch: %s, detect after %.1fs, strategy: %s",
                   enable_falling_switch_ ? "enabled" : "disabled", falling_detect_after_sec_, falling_switch_.c_str());
+      // 摔倒检测参数（与 CHR 一致：tilt/omega）
+      if (config["fall_detection"]) {
+        const YAML::Node& fc = config["fall_detection"];
+        if (fc["tilt_threshold"]) fall_tilt_threshold_ = fc["tilt_threshold"].as<double>();
+        if (fc["omega_threshold"]) fall_omega_threshold_ = fc["omega_threshold"].as<double>();
+        if (fc["confirm_frames"]) fall_confirm_frames_ = fc["confirm_frames"].as<int>();
+        if (fc["fast_fall_omega"]) fast_fall_omega_ = fc["fast_fall_omega"].as<double>();
+        if (fc["fast_fall_confirm_frames"]) fast_fall_confirm_frames_ = fc["fast_fall_confirm_frames"].as<int>();
+        RCLCPP_INFO(get_logger(), "Fall detection: tilt=%.2f rad, omega=%.2f rad/s, confirm=%d",
+                    fall_tilt_threshold_, fall_omega_threshold_, fall_confirm_frames_);
+      }
+      // passive 模式 kd（fall_detection.passive_damping）
+      if (config["fall_detection"] && config["fall_detection"]["passive_damping"]) {
+        passive_damping_kd_ = math::ConcatenateVectors(LoadVectorArrayFromYaml(config["fall_detection"]["passive_damping"]));
+        RCLCPP_INFO(get_logger(), "Loaded passive_damping: %zd joints", passive_damping_kd_.size());
+      } else {
+        passive_damping_kd_ = Eigen::VectorXd::Zero(24);
+        passive_damping_kd_.setConstant(0.5);  // 默认 0.5
+      }
       // 定时 pdstand 或 摔倒 pdstand 时加载 falling_pd_stand 参数
       enable_pdstand_switch_ = config["enable_pdstand_switch"] ? config["enable_pdstand_switch"].as<bool>() : false;
       pdstand_after_sec_ = config["pdstand_after_sec"] ? config["pdstand_after_sec"].as<double>() : 1.0;
@@ -335,7 +357,40 @@ class RlBasicRunnerXZL : public rclcpp::Node {
     }
   }
 
-  // 获取当前 IMU 俯仰角度（弧度），用于 damping mode 判断
+  // 摔倒检测（与 CHR 一致：tilt + omega + 防抖）
+  bool DetectFall() {
+    auto imu = message_handler_->GetLatestImu();
+    if (!imu) return false;
+    Eigen::AngleAxisd rollAngle(imu_install_bias_.x(), Eigen::Vector3d::UnitX());
+    Eigen::AngleAxisd pitchAngle(imu_install_bias_.y(), Eigen::Vector3d::UnitY());
+    Eigen::AngleAxisd yawAngle(imu_install_bias_.z(), Eigen::Vector3d::UnitZ());
+    Eigen::Quaterniond q_install = yawAngle * pitchAngle * rollAngle;
+    Eigen::Matrix3d R_install = q_install.toRotationMatrix();
+    Eigen::Matrix3d R_local = Eigen::Quaterniond(imu->quaternion.w, imu->quaternion.x,
+                                                 imu->quaternion.y, imu->quaternion.z).toRotationMatrix();
+    Eigen::Matrix3d R_real = R_local * R_install.transpose();
+    Eigen::Vector3d w_real = R_real.transpose() * R_local *
+        Eigen::Vector3d(imu->angular_velocity.x, imu->angular_velocity.y, imu->angular_velocity.z);
+    Eigen::Vector3d projected_gravity = -R_real.transpose() * Eigen::Vector3d::UnitZ();
+    const double gz = projected_gravity.z();
+    double tilt = std::acos(std::clamp(-gz, -1.0, 1.0));
+    double omega_xy = std::hypot(w_real.x(), w_real.y());
+    bool candidate = (tilt > fall_tilt_threshold_) || (omega_xy > fall_omega_threshold_);
+    int N_confirm = (omega_xy > fast_fall_omega_) ? fast_fall_confirm_frames_ : fall_confirm_frames_;
+    if (candidate) {
+      fall_stable_count_++;
+    } else {
+      fall_stable_count_ = 0;
+    }
+    if (fall_stable_count_ >= N_confirm) {
+      RCLCPP_INFO(get_logger(), "Fall detected! tilt=%.3f rad, omega_xy=%.3f rad/s", tilt, omega_xy);
+      fall_stable_count_ = 0;
+      return true;
+    }
+    return false;
+  }
+
+  // 获取当前 IMU 俯仰角度（弧度），保留供其他用途
   double GetCurrentPitchAngle() {
     auto imu = message_handler_->GetLatestImu();
     if (!imu) {
@@ -438,28 +493,28 @@ class RlBasicRunnerXZL : public rclcpp::Node {
     joint_command_->feed_forward_torque = std::vector<double>(n, 0.0);
     joint_command_->torque = std::vector<double>(n, 0.0);
 
-    const double kPitchDampingThresholdRad = 50.0 * M_PI / 180.0;  // 50°
-    bool fall_detected = enable_falling_switch_ && time_ >= falling_detect_after_sec_;
-    if (fall_detected) {
-      double current_pitch = GetCurrentPitchAngle();
-      if (current_pitch <= kPitchDampingThresholdRad && current_pitch >= -kPitchDampingThresholdRad) {
-        fall_detected = false;
-      }
-    }
+    // 已进入 damping 时不再调用 DetectFall，避免躺地后 tilt 持续超阈值导致每帧打印
+    bool fall_detected = in_damping_fall_ ||
+        (enable_falling_switch_ && time_ >= falling_detect_after_sec_ && DetectFall());
+    if (fall_detected && falling_switch_ == "damping") in_damping_fall_ = true;
 
     // 优先级：摔倒检测 > 定时 pdstand > 正常 RL
     bool use_fall_command = false;
     bool use_pdstand_timed = false;
     if (falling_switch_ == "none") {
       use_fall_command = false;
-    } else if (falling_switch_ == "damping" && fall_detected) {
+    } else if (falling_switch_ == "damping" && (fall_detected || in_damping_fall_)) {
       use_fall_command = true;
       if (!fall_switch_entered_logged_) {
         RCLCPP_INFO(get_logger(), "Fall detected, switching to damping mode");
         fall_switch_entered_logged_ = true;
       }
       joint_command_->stiffness = std::vector<double>(n, 0.0);
-      joint_command_->damping = std::vector<double>(n, 0.5);
+      if (n <= static_cast<int>(passive_damping_kd_.size())) {
+        joint_command_->damping = std::vector<double>(passive_damping_kd_.data(), passive_damping_kd_.data() + n);
+      } else {
+        joint_command_->damping = std::vector<double>(n, 0.5);  // fallback
+      }
     } else if (falling_switch_ == "pdstand" && pd_stand_loaded_) {
       if (fall_detected && !in_pd_stand_fall_) {
         in_pd_stand_fall_ = true;
@@ -530,6 +585,7 @@ class RlBasicRunnerXZL : public rclcpp::Node {
 
     if (!use_fall_command && !use_pdstand_timed) {
       fall_switch_entered_logged_ = false;  // 恢复后下次摔倒再打印
+      in_damping_fall_ = false;             // 非 fall 模式时清除（正常 RL 分支）
       in_pdstand_timed_ = false;  // 回到 RL 时重置
       joint_command_->stiffness = std::vector<double>(joint_kp_.data(), joint_kp_.data() + joint_kp_.size());
       joint_command_->damping = std::vector<double>(joint_kd_.data(), joint_kd_.data() + joint_kd_.size());
@@ -578,10 +634,19 @@ class RlBasicRunnerXZL : public rclcpp::Node {
   std::vector<Eigen::VectorXd> max_torque_joint_;
   double soft_torque_limit_ = 0.9;  // 软扭矩限制系数，默认0.9（参考XZL实现）
 
-  // 摔倒策略（YAML enable_falling_switch, falling_detect_after_sec, falling_switch）
+  // 摔倒策略（YAML enable_falling_switch, falling_detect_after_sec, falling_switch, fall_detection）
   bool enable_falling_switch_ = true;
   double falling_detect_after_sec_ = 5.0;
   std::string falling_switch_ = "damping";  // none / damping / pdstand
+  // 摔倒检测（与 CHR 一致）
+  double fall_tilt_threshold_ = 0.5;
+  double fall_omega_threshold_ = 1.8;
+  int fall_confirm_frames_ = 8;
+  double fast_fall_omega_ = 2.5;
+  int fast_fall_confirm_frames_ = 2;
+  int fall_stable_count_ = 0;
+  bool in_damping_fall_ = false;          // 已进入 damping 模式，保持直到 reset
+  Eigen::VectorXd passive_damping_kd_;    // passive 模式 kd，从 fall_detection.passive_damping 加载
 
   // pdstand 策略：从 YAML falling_pd_stand 加载
   bool pd_stand_loaded_ = false;

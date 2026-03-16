@@ -53,8 +53,8 @@ perturbation:
   force_step: 20.0                  # 推力调整步长（牛顿），用于+/-键调整推力大小
   torque_step: 0.0                  # 扭矩调整步长（牛·米），用于+/-键调整推力大小
   force_duration: 0.4               # 推力持续时间（秒），按下键盘后推力持续的时间
-  auto_sampling: false
-  auto_direction_angle: 135         # 推力方向（度）：0=前, 45=左前, 90=左, 135=左后, 180=后, 225=右后, 270=右, 315=右前
+  auto_sampling: true
+  auto_direction_angle: 0.0         # 推力方向（度）：0=前, 45=左前, 90=左, 135=左后, 180=后, 225=右后, 270=右, 315=右前
   auto_delay: 3.0                   # 施加推力等待时间（秒）
 
 # 传感器配置 - 定义传感器数据的话题

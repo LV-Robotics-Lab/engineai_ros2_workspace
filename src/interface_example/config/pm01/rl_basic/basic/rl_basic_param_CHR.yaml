@@ -26,7 +26,7 @@ motion_states:
     # data_path: "trajectories/toFront_1_converted_50fps.csv"
     # policy_path: "policies/toFront_3.mnn"
     mimic_policies:
-      forward: "policies/toFront_test3.mnn"
+      forward: "policies/toFront_test4.mnn"
       forward_left: "policies/toLeftFront_11_force.mnn"
       left: "policies/toLeft_11_force.mnn"
       backward_left: "policies/toLeftBack_11_force.mnn"
@@ -268,8 +268,16 @@ test_force_fall_delay: 3.0      # 仅当 test_force_fall_direction 非空时有�
 # 摔倒检测参数（仅当 test_force_fall_direction 留空时使用：walking 下 tilt/omega 超阈值则切 mimic）
 fall_detection:
   tilt_threshold: 0.5            # 倾斜角阈值 (rad)，改小易误触、方向仍由重力判定
-  omega_threshold: 1.8          # 角速度阈值 (rad/s)
-  confirm_frames: 8             # 确认帧数
-  fast_fall_omega: 2.5          # 快速摔倒角速度阈值 (rad/s)
-  fast_fall_confirm_frames: 2   # 快速摔倒确认帧数
+  omega_threshold: 1.8           # 角速度阈值 (rad/s)
+  confirm_frames: 8              # 确认帧数
+  fast_fall_omega: 2.5           # 快速摔倒角速度阈值 (rad/s)
+  fast_fall_confirm_frames: 2    # 快速摔倒确认帧数
+  # passive/damping 模式（kp=0）下的 kd，与 default_joint_q 结构一致
+  passive_damping:
+    - [4, 4, 4, 4, 3, 3]   # 左腿 6 个关节
+    - [4, 4, 4, 4, 3, 3]   # 右腿 6 个关节
+    - [2]                  # 腰部 1 个关节
+    - [3, 3, 3, 3, 3]      # 左臂 5 个关节
+    - [3, 3, 3, 3, 3]      # 右臂 5 个关节
+    - [1]                  # 头部 1 个关节
 

@@ -834,8 +834,14 @@ void RosInterface::UpdateSimState(const mjModel* m, mjData* d) {
   }
 
   // 检测用户/GUI 触发的 reset：仿真时间回退表示发生了 reset，发布 reset_complete 让 CHR 等节点恢复走路
+  // 若时间回退来自本帧的 delayed 自动 reset（3秒后），下一帧会误触发；用 skip_next_manual_reset_due_to_our_delayed_
+  // 跳过，避免重复关闭/打开 CSV 产生多余文件夹
+  static bool skip_next_manual_reset_due_to_our_delayed_ = false;
   const double kTimeRollbackThreshold = 0.01;
-  if (last_sim_time_ >= 0 && d->time < last_sim_time_ - kTimeRollbackThreshold) {
+  if (skip_next_manual_reset_due_to_our_delayed_) {
+    skip_next_manual_reset_due_to_our_delayed_ = false;
+    // 时间回退来自本帧的 delayed 自动 reset，跳过手动 reset 逻辑（不切换 CSV）
+  } else if (last_sim_time_ >= 0 && d->time < last_sim_time_ - kTimeRollbackThreshold) {
     // 手动 reset 时：切换 CSV 到新文件（同目录、新时间戳）、重置 auto_sampling
     bool any_csv = save_contact_csv_ || save_perturbation_csv_ || save_joint_forces_csv_ ||
                    save_sensor_vibration_csv_ || save_joint_state_csv_ || save_link_kinetic_energy_csv_;
@@ -942,9 +948,11 @@ void RosInterface::UpdateSimState(const mjModel* m, mjData* d) {
         RCLCPP_INFO(node_->get_logger(), "已发布MuJoCo重置完成消息");
         
         mujoco_reset_done = true;
-        // 重置后启用所有CSV记录
+        // 3秒校准期结束、reset 后启用 CSV 记录（两种采集脚本均在此后开始记录）
         all_csv_enabled = true;
         RCLCPP_INFO(node_->get_logger(), "所有CSV记录已启用");
+        // 下一帧会检测到时间回退，误判为手动 reset；设标志跳过，避免重复切换 CSV
+        skip_next_manual_reset_due_to_our_delayed_ = true;
       }
     } else {
       // 还在延迟期间，不记录任何CSV

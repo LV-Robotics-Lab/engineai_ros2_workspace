@@ -330,6 +330,13 @@ class RlBasicRunnerCHR : public rclcpp::Node {
       if (fall_config["detection_delay"]) {
         fall_detection_delay_ = fall_config["detection_delay"].as<double>();
       }
+      if (fall_config["passive_damping"]) {
+        passive_damping_kd_ = math::ConcatenateVectors(LoadVectorArrayFromYaml(fall_config["passive_damping"]));
+        RCLCPP_INFO(get_logger(), "Loaded passive_damping: %zd joints", passive_damping_kd_.size());
+      } else {
+        passive_damping_kd_ = Eigen::VectorXd::Zero(24);
+        passive_damping_kd_.setConstant(0.5);
+      }
     }
 
     // 测试用：reset 后先走 XZL，等 test_force_fall_delay 秒后强制切到指定方向 mimic（如 "left"）
@@ -1876,9 +1883,14 @@ class RlBasicRunnerCHR : public rclcpp::Node {
     
     // 根据模式选择正确的 kp/kd 参数
     if (is_damping_mode_) {
-      // Damping mode: kp=0, kd=0.5
-      joint_command_->stiffness = std::vector<double>(q_des_.size(), 0.0);
-      joint_command_->damping = std::vector<double>(q_des_.size(), 0.5);
+      // Damping mode: kp=0, kd 从 fall_detection.passive_damping 加载
+      const int n = static_cast<int>(q_des_.size());
+      joint_command_->stiffness = std::vector<double>(n, 0.0);
+      if (n <= static_cast<int>(passive_damping_kd_.size())) {
+        joint_command_->damping = std::vector<double>(passive_damping_kd_.data(), passive_damping_kd_.data() + n);
+      } else {
+        joint_command_->damping = std::vector<double>(n, 0.5);
+      }
     } else if (is_walking_mode_) {
       joint_command_->stiffness = std::vector<double>(walking_joint_kp_.data(), walking_joint_kp_.data() + walking_joint_kp_.size());
       joint_command_->damping = std::vector<double>(walking_joint_kd_.data(), walking_joint_kd_.data() + walking_joint_kd_.size());
@@ -1973,6 +1985,7 @@ class RlBasicRunnerCHR : public rclcpp::Node {
   // Fall detection parameters
   double fall_tilt_threshold_ = 0.5;        // 倾斜角阈值 (rad)
   double fall_omega_threshold_ = 1.8;       // 角速度阈值 (rad/s)
+  Eigen::VectorXd passive_damping_kd_;      // passive 模式 kd，从 fall_detection.passive_damping 加载
   int fall_confirm_frames_ = 8;             // 确认帧数
   double fast_fall_omega_ = 2.5;            // 快速摔倒角速度阈值 (rad/s)
   int fast_fall_confirm_frames_ = 2;        // 快速摔倒确认帧数

@@ -100,11 +100,27 @@ initial_velocity:
   linear: [0.0, 0.0, 0.0]    # 初始线速度 [x, y, z] (m/s) - 设置为0停止前进, 速度不能超过1.5m/s
   angular: [0.0, 0.0, 0.0]   # 初始角速度 [x, y, z] (rad/s)
 
-# 摔倒检测后进入 damping mode：俯仰角 > 50° 或 < -50° 时 kp=0, kd=0.5
+# 摔倒检测后进入 damping mode：俯仰角超出阈值时 kp=0, kd=0.5
 # enable_falling_switch: true 启用；falling_detect_after_sec 内不检测，避免落地/复位瞬间误触发
-enable_falling_switch: false
+enable_falling_switch: true
 falling_detect_after_sec: 1.0   # 控制运行超过此时间(秒)后才开启摔倒检测（根据俯仰角切换 damping/pdstand，与仿真 3s reset + 2s auto_delay 后推力 对齐）
 falling_switch: damping   # pdstand / damping / none
+
+# 摔倒检测参数（与 CHR 一致：tilt/omega 超阈值 + 防抖确认）
+fall_detection:
+  tilt_threshold: 0.5            # 倾斜角阈值 (rad)
+  omega_threshold: 1.8           # 角速度阈值 (rad/s)
+  confirm_frames: 8              # 确认帧数
+  fast_fall_omega: 2.5           # 快速摔倒角速度阈值 (rad/s)
+  fast_fall_confirm_frames: 2    # 快速摔倒确认帧数
+  # passive 模式（kp=0）下的 kd，与 default_joint_q 结构一致
+  passive_damping:
+    - [4, 4, 4, 4, 3, 3]   # 左腿 6 个关节
+    - [4, 4, 4, 4, 3, 3]   # 右腿 6 个关节
+    - [2]                  # 腰部 1 个关节
+    - [3, 3, 3, 3, 3]      # 左臂 5 个关节
+    - [3, 3, 3, 3, 3]      # 右臂 5 个关节
+    - [1]                  # 头部 1 个关节
 
 enable_pdstand_switch: false   # true 时：XZL walk 后按时间切换到 pdstand，仿真器推力前接上
 pdstand_after_sec: 1.0   # 控制运行超过此时间(秒)后才开启定时 pdstand（与 falling_detect_after_sec 逻辑一致）

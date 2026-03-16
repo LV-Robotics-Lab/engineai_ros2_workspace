@@ -758,8 +758,8 @@ bool SimManager::Initialize() {
     // 初始化护具地图（当 use_protector_map 时，路径写死，支持 source 与 install 两种布局）
     if (protection_enabled_ && use_protector_map_) {
       std::vector<std::string> map_dir_candidates = {
-        assets_path + "/../../../interface_example/config/pm01/rl_basic/basic/protector_map",   // source 布局
-        assets_path + "/../../../../src/interface_example/config/pm01/rl_basic/basic/protector_map",  // install 布局
+        assets_path + "/../../../../interface_example/share/interface_example/config/pm01/rl_basic/basic/protector_map",  // install 布局
+        assets_path + "/../../../../../src/interface_example/config/pm01/rl_basic/basic/protector_map",  // source 布局
       };
       auto dir_exists = [](const std::string& p) {
         struct ::stat buffer;

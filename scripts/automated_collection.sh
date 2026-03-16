@@ -11,7 +11,7 @@ CONTROLLER=XZL
 # 日志/CSV 根目录（可修改，如 /mnt/ssd/data）
 LOG_BASE_DIR="${HOME}/data/mujoco_logs"
 
-TOTAL_EXPERIMENTS=1600
+TOTAL_EXPERIMENTS=80
 EXPERIMENT_DURATION=15
 DIRECTION_ANGLES=(0 45 90 135 180 225 270 315)
 DIRECTION_NAMES=("forward" "forward_left" "left" "backward_left" "backward" "backward_right" "right" "forward_right")
