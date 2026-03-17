@@ -20,11 +20,19 @@ find_package(interface_protocol REQUIRED)
 find_package(yaml-cpp REQUIRED)
 find_package(Eigen3 REQUIRED)
 # Find glog for csv_loader (only needed for rl_basic_example_CHR)
-# Try to find glog, but make it optional since it might be in conda
-find_package(glog QUIET)
-# If not found via find_package, try to find it manually (e.g., in conda)
-if(NOT glog_FOUND)
-  # Try to find glog in common locations
+# Config package (apt: libgoogle-glog-dev) or conda-forge glog
+find_package(glog CONFIG QUIET)
+if(NOT TARGET glog::glog)
+  find_package(Glog QUIET)
+endif()
+if(NOT TARGET glog::glog AND GLOG_INCLUDE_DIRS AND GLOG_LIBRARIES)
+  add_library(glog::glog UNKNOWN IMPORTED)
+  set_target_properties(glog::glog PROPERTIES
+    INTERFACE_INCLUDE_DIRECTORIES "${GLOG_INCLUDE_DIRS}"
+    IMPORTED_LOCATION "${GLOG_LIBRARIES}")
+endif()
+# Manual lookup: conda + Debian multiarch (lib under /usr/lib/x86_64-linux-gnu)
+if(NOT TARGET glog::glog)
   find_path(GLOG_INCLUDE_DIR
     NAMES glog/logging.h
     PATHS
@@ -32,26 +40,32 @@ if(NOT glog_FOUND)
       /usr/include
       /usr/local/include
       ${ENGINEAI_ROBOTICS_THIRD_PARTY}/include
-    NO_DEFAULT_PATH
   )
   find_library(GLOG_LIBRARY
     NAMES glog
     PATHS
       $ENV{CONDA_PREFIX}/lib
+      /usr/lib/${CMAKE_SYSTEM_PROCESSOR}-linux-gnu
+      /usr/lib/aarch64-linux-gnu
+      /usr/lib/x86_64-linux-gnu
       /usr/lib
       /usr/local/lib
       ${ENGINEAI_ROBOTICS_THIRD_PARTY}/lib
-    NO_DEFAULT_PATH
   )
   if(GLOG_INCLUDE_DIR AND GLOG_LIBRARY)
     message(STATUS "Found glog manually: ${GLOG_INCLUDE_DIR}, ${GLOG_LIBRARY}")
-    set(glog_FOUND TRUE)
     add_library(glog::glog UNKNOWN IMPORTED)
     set_target_properties(glog::glog PROPERTIES
       INTERFACE_INCLUDE_DIRECTORIES "${GLOG_INCLUDE_DIR}"
       IMPORTED_LOCATION "${GLOG_LIBRARY}"
     )
   endif()
+endif()
+if(NOT TARGET glog::glog)
+  message(FATAL_ERROR
+    "glog not found. Install one of:\n"
+    "  sudo apt install -y libgoogle-glog-dev\n"
+    "  conda install -y -c conda-forge glog")
 endif()
 
 include_directories(
