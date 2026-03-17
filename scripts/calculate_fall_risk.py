@@ -2244,12 +2244,34 @@ def plot_link_energy_curves(energy_df: pd.DataFrame, output_path: Optional[str] 
         print("警告: link能量数据为空，无法绑图")
         return
     
-    # 检查必要的总能量列
+    # 检查必要的总能量列；若缺少 total_* 则尝试从各 body 列求和补全（兼容旧版 CSV 或列名不一致）
     required_cols = ['timestamp', 'total_linear_KE', 'total_angular_KE', 'total_KE', 'total_PE', 'total_energy']
     missing_cols = [col for col in required_cols if col not in energy_df.columns]
     if missing_cols:
-        print(f"警告: link能量数据缺少必要的列: {missing_cols}")
-        return
+        if 'timestamp' in missing_cols:
+            print(f"警告: link能量数据缺少必要的列: {missing_cols}")
+            return
+        # 尝试从 per-body 列求和补全 total_*（兼容旧版 CSV 或列名不一致）
+        linear_cols = [c for c in energy_df.columns if c.endswith('_linear_KE') and c != 'total_linear_KE']
+        angular_cols = [c for c in energy_df.columns if c.endswith('_angular_KE') and c != 'total_angular_KE']
+        pe_cols = [c for c in energy_df.columns if c.endswith('_PE') and c != 'total_PE']
+        need_fill = (linear_cols or angular_cols or pe_cols)
+        if need_fill:
+            energy_df = energy_df.copy()
+            if 'total_linear_KE' not in energy_df.columns and linear_cols:
+                energy_df['total_linear_KE'] = energy_df[linear_cols].sum(axis=1)
+            if 'total_angular_KE' not in energy_df.columns and angular_cols:
+                energy_df['total_angular_KE'] = energy_df[angular_cols].sum(axis=1)
+            if 'total_PE' not in energy_df.columns and pe_cols:
+                energy_df['total_PE'] = energy_df[pe_cols].sum(axis=1)
+            if 'total_KE' not in energy_df.columns and 'total_linear_KE' in energy_df.columns and 'total_angular_KE' in energy_df.columns:
+                energy_df['total_KE'] = energy_df['total_linear_KE'] + energy_df['total_angular_KE']
+            if 'total_energy' not in energy_df.columns and 'total_KE' in energy_df.columns and 'total_PE' in energy_df.columns:
+                energy_df['total_energy'] = energy_df['total_KE'] + energy_df['total_PE']
+        missing_cols = [col for col in required_cols if col not in energy_df.columns]
+        if missing_cols:
+            print(f"警告: link能量数据缺少必要的列: {missing_cols}")
+            return
     
     # 按时间戳排序
     energy_df = energy_df.sort_values('timestamp').reset_index(drop=True)

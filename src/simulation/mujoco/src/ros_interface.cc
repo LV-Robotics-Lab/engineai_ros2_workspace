@@ -102,44 +102,46 @@ RosInterface::~RosInterface() {
     FlushRemainingData();
   }
   
-  // 关闭接触力文件
+  // 关闭前先 flush，避免缓冲区数据未写入导致 CSV 无数据
   if (csv_file_.is_open()) {
     std::lock_guard<std::mutex> lock(csv_mutex_);
+    csv_file_.flush();
     csv_file_.close();
     RCLCPP_INFO(node_->get_logger(), "Contact data saved to: %s", csv_file_path_.c_str());
   }
-  
-  // 关闭推力文件
   if (perturbation_csv_file_.is_open()) {
     std::lock_guard<std::mutex> lock(perturbation_csv_mutex_);
+    perturbation_csv_file_.flush();
     perturbation_csv_file_.close();
     RCLCPP_INFO(node_->get_logger(), "Perturbation data saved to: %s", perturbation_csv_file_path_.c_str());
   }
-  
-  // 关闭关节反力CSV文件
   if (joint_forces_csv_file_.is_open()) {
     std::lock_guard<std::mutex> lock(joint_forces_csv_mutex_);
+    joint_forces_csv_file_.flush();
     joint_forces_csv_file_.close();
     RCLCPP_INFO(node_->get_logger(), "Joint forces data saved to: %s", joint_forces_csv_file_path_.c_str());
   }
-
-  // 关闭传感器震动CSV文件
   if (sensor_vibration_csv_file_.is_open()) {
     std::lock_guard<std::mutex> lock(sensor_vibration_csv_mutex_);
+    sensor_vibration_csv_file_.flush();
     sensor_vibration_csv_file_.close();
     RCLCPP_INFO(node_->get_logger(), "Sensor vibration data saved to: %s", sensor_vibration_csv_file_path_.c_str());
   }
-  
-  // 关闭Link动能CSV文件
+  if (joint_state_csv_file_.is_open()) {
+    std::lock_guard<std::mutex> lock(joint_state_csv_mutex_);
+    joint_state_csv_file_.flush();
+    joint_state_csv_file_.close();
+    RCLCPP_INFO(node_->get_logger(), "Joint state data saved to: %s", joint_state_csv_file_path_.c_str());
+  }
   if (link_kinetic_energy_csv_file_.is_open()) {
     std::lock_guard<std::mutex> lock(link_kinetic_energy_csv_mutex_);
+    link_kinetic_energy_csv_file_.flush();
     link_kinetic_energy_csv_file_.close();
     RCLCPP_INFO(node_->get_logger(), "Link kinetic energy data saved to: %s", link_kinetic_energy_csv_file_path_.c_str());
   }
-
-  // 关闭 policy switch CSV
   if (policy_switch_csv_file_.is_open()) {
     std::lock_guard<std::mutex> lock(policy_switch_csv_mutex_);
+    policy_switch_csv_file_.flush();
     policy_switch_csv_file_.close();
     RCLCPP_INFO(node_->get_logger(), "Policy switch data saved to: %s", policy_switch_csv_file_path_.c_str());
   }
@@ -334,8 +336,9 @@ bool RosInterface::Initialize() {
       link_kinetic_energy_csv_file_.open(link_kinetic_energy_csv_file_path_, std::ios::out);
     }
     if (link_kinetic_energy_csv_file_.is_open()) {
+      link_kinetic_energy_csv_header_written_ = false;  // 新文件必须写表头
       // 注意：CSV头部将在第一次保存时根据model写入，因为此时还没有model
-      RCLCPP_INFO(node_->get_logger(), "Link kinetic energy data will be saved to: %s (format: %s)", 
+      RCLCPP_INFO(node_->get_logger(), "Link kinetic energy data will be saved to: %s (format: %s)",
                   link_kinetic_energy_csv_file_path_.c_str(), csv_format_.c_str());
     } else {
       RCLCPP_ERROR(node_->get_logger(), "Failed to open link kinetic energy CSV file: %s", link_kinetic_energy_csv_file_path_.c_str());
@@ -373,7 +376,7 @@ bool RosInterface::Initialize() {
       if (csv_format_ == "csv") {
         // 写入CSV头部
         // 写入CSV头部（移除关节角度、关节加速度和电机扭矩，已移到独立的 joint_state_data.csv）
-        csv_file_ << "timestamp,contact_id,body1_name,body2_name,pos_x,pos_y,pos_z,robot_frame_x,robot_frame_y,robot_frame_z,force_x,force_y,force_z,force_magnitude,force_normal,torque_x,torque_y,torque_z,base_link_x,base_link_y,base_link_z,base_link_qw,base_link_qx,base_link_qy,base_link_qz,base_link_vel_x,base_link_vel_y,base_link_vel_z,base_link_angvel_x,base_link_angvel_y,base_link_angvel_z,collision_link_x,collision_link_y,collision_link_z,collision_link_qw,collision_link_qx,collision_link_qy,collision_link_qz\n";
+        csv_file_ << "timestamp,contact_id,body1_name,body2_name,pos_x,pos_y,pos_z,robot_frame_x,robot_frame_y,robot_frame_z,force_x,force_y,force_z,force_magnitude,force_normal,force_friction,torque_x,torque_y,torque_z,base_link_x,base_link_y,base_link_z,base_link_qw,base_link_qx,base_link_qy,base_link_qz,base_link_vel_x,base_link_vel_y,base_link_vel_z,base_link_angvel_x,base_link_angvel_y,base_link_angvel_z,collision_link_x,collision_link_y,collision_link_z,collision_link_qw,collision_link_qx,collision_link_qy,collision_link_qz\n";
         csv_file_.flush();
       } else {
         // 二进制格式：写入文件头（包含关节数量等信息）
@@ -627,9 +630,11 @@ void RosInterface::CloseAllCsvFiles() {
     FlushRemainingData();
   }
 
+  // 关闭前先 flush，避免 reset/切换 CSV 时缓冲区数据未写入
   {
     std::lock_guard<std::mutex> lock(csv_mutex_);
     if (csv_file_.is_open()) {
+      csv_file_.flush();
       csv_file_.close();
       RCLCPP_INFO(node_->get_logger(), "Contact CSV closed: %s", csv_file_path_.c_str());
     }
@@ -637,6 +642,7 @@ void RosInterface::CloseAllCsvFiles() {
   {
     std::lock_guard<std::mutex> lock(perturbation_csv_mutex_);
     if (perturbation_csv_file_.is_open()) {
+      perturbation_csv_file_.flush();
       perturbation_csv_file_.close();
       RCLCPP_INFO(node_->get_logger(), "Perturbation CSV closed: %s", perturbation_csv_file_path_.c_str());
     }
@@ -644,30 +650,35 @@ void RosInterface::CloseAllCsvFiles() {
   {
     std::lock_guard<std::mutex> lock(joint_forces_csv_mutex_);
     if (joint_forces_csv_file_.is_open()) {
+      joint_forces_csv_file_.flush();
       joint_forces_csv_file_.close();
     }
   }
   {
     std::lock_guard<std::mutex> lock(sensor_vibration_csv_mutex_);
     if (sensor_vibration_csv_file_.is_open()) {
+      sensor_vibration_csv_file_.flush();
       sensor_vibration_csv_file_.close();
     }
   }
   {
     std::lock_guard<std::mutex> lock(joint_state_csv_mutex_);
     if (joint_state_csv_file_.is_open()) {
+      joint_state_csv_file_.flush();
       joint_state_csv_file_.close();
     }
   }
   {
     std::lock_guard<std::mutex> lock(link_kinetic_energy_csv_mutex_);
     if (link_kinetic_energy_csv_file_.is_open()) {
+      link_kinetic_energy_csv_file_.flush();
       link_kinetic_energy_csv_file_.close();
     }
   }
   {
     std::lock_guard<std::mutex> lock(policy_switch_csv_mutex_);
     if (policy_switch_csv_file_.is_open()) {
+      policy_switch_csv_file_.flush();
       policy_switch_csv_file_.close();
     }
   }
@@ -696,7 +707,7 @@ void RosInterface::OpenCsvFilesAtDir(const std::string& csv_dir) {
     }
     if (csv_file_.is_open()) {
       if (csv_format_ == "csv") {
-        csv_file_ << "timestamp,contact_id,body1_name,body2_name,pos_x,pos_y,pos_z,robot_frame_x,robot_frame_y,robot_frame_z,force_x,force_y,force_z,force_magnitude,force_normal,torque_x,torque_y,torque_z,base_link_x,base_link_y,base_link_z,base_link_qw,base_link_qx,base_link_qy,base_link_qz,base_link_vel_x,base_link_vel_y,base_link_vel_z,base_link_angvel_x,base_link_angvel_y,base_link_angvel_z,collision_link_x,collision_link_y,collision_link_z,collision_link_qw,collision_link_qx,collision_link_qy,collision_link_qz\n";
+        csv_file_ << "timestamp,contact_id,body1_name,body2_name,pos_x,pos_y,pos_z,robot_frame_x,robot_frame_y,robot_frame_z,force_x,force_y,force_z,force_magnitude,force_normal,force_friction,torque_x,torque_y,torque_z,base_link_x,base_link_y,base_link_z,base_link_qw,base_link_qx,base_link_qy,base_link_qz,base_link_vel_x,base_link_vel_y,base_link_vel_z,base_link_angvel_x,base_link_angvel_y,base_link_angvel_z,collision_link_x,collision_link_y,collision_link_z,collision_link_qw,collision_link_qx,collision_link_qy,collision_link_qz\n";
         csv_file_.flush();
       } else {
         int32_t num_joints = num_total_joints_;
@@ -804,6 +815,7 @@ void RosInterface::OpenCsvFilesAtDir(const std::string& csv_dir) {
     } else {
       link_kinetic_energy_csv_file_.open(link_kinetic_energy_csv_file_path_, std::ios::out);
     }
+    link_kinetic_energy_csv_header_written_ = false;  // 新文件必须写表头
   }
 
   if (save_policy_switch_csv_) {
@@ -1216,6 +1228,7 @@ void RosInterface::PublishContactForces(const mjModel* m, mjData* d) {
   std::unique_ptr<std::vector<mjtNum>> csv_world_forces_z;
   std::unique_ptr<std::vector<mjtNum>> csv_contact_force_magnitudes;  // f_mag: 世界坐标系下的总力大小
   std::unique_ptr<std::vector<mjtNum>> csv_contact_force_normals;     // f_norm: 接触坐标系下的法向力分量
+  std::unique_ptr<std::vector<mjtNum>> csv_contact_force_frictions;  // f_friction: 接触坐标系下切向力大小
   std::unique_ptr<std::vector<mjtNum>> csv_world_torques_x;
   std::unique_ptr<std::vector<mjtNum>> csv_world_torques_y;
   std::unique_ptr<std::vector<mjtNum>> csv_world_torques_z;
@@ -1263,6 +1276,7 @@ void RosInterface::PublishContactForces(const mjModel* m, mjData* d) {
     csv_world_forces_z = std::make_unique<std::vector<mjtNum>>(ncon);
     csv_contact_force_magnitudes = std::make_unique<std::vector<mjtNum>>(ncon);
     csv_contact_force_normals = std::make_unique<std::vector<mjtNum>>(ncon);
+    csv_contact_force_frictions = std::make_unique<std::vector<mjtNum>>(ncon);
     csv_world_torques_x = std::make_unique<std::vector<mjtNum>>(ncon);
     csv_world_torques_y = std::make_unique<std::vector<mjtNum>>(ncon);
     csv_world_torques_z = std::make_unique<std::vector<mjtNum>>(ncon);
@@ -1564,6 +1578,8 @@ void RosInterface::PublishContactForces(const mjModel* m, mjData* d) {
     
     // 计算接触坐标系下的法向力分量（接触系x方向，正值，即正压力）
     double contact_force_normal = std::max(0.0, f_c[0]);  // f_norm: 接触坐标系下的法向力分量
+    // 接触坐标系下切向力大小（摩擦力）
+    double contact_force_friction = std::sqrt(f_c[1] * f_c[1] + f_c[2] * f_c[2]);
     
     // 将世界坐标系下的力和力矩存储到消息中
     contact_msg->contact_forces_x[i] = world_force[0];
@@ -1576,13 +1592,14 @@ void RosInterface::PublishContactForces(const mjModel* m, mjData* d) {
 
     // 存储到CSV变量
     if (save_contact_csv_ && csv_world_forces_x && csv_world_forces_y && csv_world_forces_z &&
-        csv_contact_force_magnitudes && csv_contact_force_normals &&
+        csv_contact_force_magnitudes && csv_contact_force_normals && csv_contact_force_frictions &&
         csv_world_torques_x && csv_world_torques_y && csv_world_torques_z) {
       (*csv_world_forces_x)[i] = world_force[0];
       (*csv_world_forces_y)[i] = world_force[1];
       (*csv_world_forces_z)[i] = world_force[2];
       (*csv_contact_force_magnitudes)[i] = contact_force_magnitude;  // f_mag: 世界坐标系下的总力大小
       (*csv_contact_force_normals)[i] = contact_force_normal;        // f_norm: 接触坐标系下的法向力分量
+      (*csv_contact_force_frictions)[i] = contact_force_friction;  // f_friction: 接触坐标系下切向力大小
       (*csv_world_torques_x)[i] = world_torque[0];
       (*csv_world_torques_y)[i] = world_torque[1];
       (*csv_world_torques_z)[i] = world_torque[2];
@@ -2160,7 +2177,7 @@ void RosInterface::PublishContactForces(const mjModel* m, mjData* d) {
           if (csv_body1_names && csv_body2_names && csv_red_ball_pos_x && csv_red_ball_pos_y && csv_red_ball_pos_z &&
               csv_green_ball_pos_x && csv_green_ball_pos_y && csv_green_ball_pos_z &&
               csv_world_forces_x && csv_world_forces_y && csv_world_forces_z &&
-              csv_contact_force_magnitudes && csv_contact_force_normals &&
+              csv_contact_force_magnitudes && csv_contact_force_normals && csv_contact_force_frictions &&
               csv_world_torques_x && csv_world_torques_y && csv_world_torques_z &&
               csv_base_link_pos_x && csv_base_link_pos_y && csv_base_link_pos_z &&
               csv_base_link_quat_w && csv_base_link_quat_x && csv_base_link_quat_y && csv_base_link_quat_z &&
@@ -2184,6 +2201,7 @@ void RosInterface::PublishContactForces(const mjModel* m, mjData* d) {
             row.world_forces[2] = (*csv_world_forces_z)[i];
             row.force_magnitude = (*csv_contact_force_magnitudes)[i];
             row.force_normal = (*csv_contact_force_normals)[i];
+            row.force_friction = (*csv_contact_force_frictions)[i];
             row.world_torques[0] = (*csv_world_torques_x)[i];
             row.world_torques[1] = (*csv_world_torques_y)[i];
             row.world_torques[2] = (*csv_world_torques_z)[i];
@@ -2612,6 +2630,7 @@ void RosInterface::ContactWriterThread() {
                     << row.world_forces[2] << ","
                     << row.force_magnitude << ","
                     << row.force_normal << ","
+                    << row.force_friction << ","
                     << row.world_torques[0] << ","
                     << row.world_torques[1] << ","
                     << row.world_torques[2] << ","
@@ -2742,6 +2761,7 @@ void RosInterface::WriteContactDataBinary(const ContactDataRow& row) {
   csv_file_.write(reinterpret_cast<const char*>(row.world_forces), 3 * sizeof(double));
   csv_file_.write(reinterpret_cast<const char*>(&row.force_magnitude), sizeof(double));
   csv_file_.write(reinterpret_cast<const char*>(&row.force_normal), sizeof(double));
+  csv_file_.write(reinterpret_cast<const char*>(&row.force_friction), sizeof(double));
   csv_file_.write(reinterpret_cast<const char*>(row.world_torques), 3 * sizeof(double));
   csv_file_.write(reinterpret_cast<const char*>(row.base_link_pos), 3 * sizeof(double));
   csv_file_.write(reinterpret_cast<const char*>(row.base_link_quat), 4 * sizeof(double));
@@ -2804,6 +2824,7 @@ void RosInterface::FlushRemainingData() {
                     << row.world_forces[2] << ","
                     << row.force_magnitude << ","
                     << row.force_normal << ","
+                    << row.force_friction << ","
                     << row.world_torques[0] << ","
                     << row.world_torques[1] << ","
                     << row.world_torques[2] << ","
@@ -3135,22 +3156,21 @@ void RosInterface::SaveLinkKineticEnergyToCSV(const mjModel* m, mjData* d) {
   }
   
   static int frame_counter = 0;
-  static bool header_written = false;
   frame_counter++;
-  
+
   // 根据配置的频率决定是否保存
   if (frame_counter % csv_save_frequency_ != 0) {
     return;
   }
-  
+
   std::lock_guard<std::mutex> lock(link_kinetic_energy_csv_mutex_);
-  
+
   if (!link_kinetic_energy_csv_file_.is_open()) {
     return;
   }
-  
-  // 第一次保存时写入CSV头部（因为初始化时没有model）
-  if (!header_written && csv_format_ == "csv") {
+
+  // 每次打开新文件后第一次保存时写入CSV头部（因为初始化时没有model）
+  if (!link_kinetic_energy_csv_header_written_ && csv_format_ == "csv") {
     link_kinetic_energy_csv_file_ << "timestamp";
     
     // 每个body的速度列和动能列
@@ -3180,7 +3200,7 @@ void RosInterface::SaveLinkKineticEnergyToCSV(const mjModel* m, mjData* d) {
     link_kinetic_energy_csv_file_ << ",total_linear_KE,total_angular_KE,total_KE,total_PE,total_energy";
     link_kinetic_energy_csv_file_ << "\n";
     link_kinetic_energy_csv_file_.flush();
-    header_written = true;
+    link_kinetic_energy_csv_header_written_ = true;
     RCLCPP_INFO(node_->get_logger(), "Link kinetic energy CSV header written with %d bodies (10 cols each: 6 vel + 1 height + 3 energy, plus 5 total energy cols)", m->nbody);
   }
   

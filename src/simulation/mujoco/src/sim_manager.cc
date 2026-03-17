@@ -1696,7 +1696,7 @@ void SimManager::ApplyProtectionToContactForces() {
   double max_force_before = 0.0;
   double max_force_after = 0.0;
   static int frame_count = 0;  // 用于调试输出频率控制
-  
+
   // 遍历所有接触点
   for (int i = 0; i < ncon; ++i) {
     const mjContact& contact = d_->contact[i];
@@ -1934,10 +1934,10 @@ void SimManager::ApplyProtectionToContactForces() {
       // 记录原始法向力（用于验证）
       double original_normal = decoded_force[0];
       
-      // 法向与切向同比例缩放，保持摩擦锥一致（否则会约束不一致、仿真摔飞）
       decoded_force[0] *= scale_factor;  // 法向力
-      for (int j = 1; j < dim && j < 6; ++j) {
-        decoded_force[j] *= scale_factor;  // 切向力
+      int tang_dim = std::min(dim, 6);   // 防止 dim 异常导致越界
+      for (int j = 1; j < tang_dim; ++j) {
+        decoded_force[j] *= scale_factor;  // 切向同比例缩放
       }
       
       // 重新编码为 pyramid 表示
@@ -1957,7 +1957,7 @@ void SimManager::ApplyProtectionToContactForces() {
         }
       }
     } else {
-      // Elliptic 摩擦锥或 dim=1：法向与摩擦同比例缩放
+      // Elliptic 摩擦锥或 dim=1
       int efc_size = (dim == 1) ? 1 : dim;
       if (efc_address >= 0 && efc_address < d_->nefc && efc_size > 0) {
         int max_size = std::min(efc_size, d_->nefc - efc_address);

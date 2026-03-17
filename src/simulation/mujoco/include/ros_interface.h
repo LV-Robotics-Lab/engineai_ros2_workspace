@@ -150,6 +150,7 @@ class RosInterface {
   std::string link_kinetic_energy_csv_file_path_;
   std::ofstream link_kinetic_energy_csv_file_;
   std::mutex link_kinetic_energy_csv_mutex_;
+  bool link_kinetic_energy_csv_header_written_ = false;  // 每次打开新文件需重置，保证写表头
 
   // Policy switch CSV (RL policy 切换事件：walking↔mimic↔damping)
   bool save_policy_switch_csv_ = false;
@@ -176,6 +177,7 @@ class RosInterface {
     double world_forces[3];
     double force_magnitude;
     double force_normal;
+    double force_friction;   // 接触坐标系下切向力大小 sqrt(f_c[1]^2 + f_c[2]^2)
     double world_torques[3];
     double base_link_pos[3];
     double base_link_quat[4];

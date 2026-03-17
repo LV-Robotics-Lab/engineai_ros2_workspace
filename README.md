@@ -494,6 +494,18 @@ ros2 launch launch_urdf_only.launch.py urdf_file:=/home/wang22/engineai/engineai
 
 # Risk 计算
 ## 单次采样的数据处理
+
+### 方式一：指定日志目录（推荐，CSV 在同一文件夹时）
+```bash
+# 只需指定一个文件夹，自动查找 contact_data.csv、sensor_vibration_data.csv 等
+python3 scripts/calculate_fall_risk.py \
+  --log-dir /home/wang22/data/mujoco_logs/20260316_212618 \
+  --plot \
+  --t-start 3.0 --t-end 5.0
+# 输出默认保存到同目录 risk_results_summary.csv 等
+```
+
+### 方式二：分别指定各文件路径
 ```bash
 # active using mimic 20260203_135754
 python3 scripts/calculate_fall_risk.py \

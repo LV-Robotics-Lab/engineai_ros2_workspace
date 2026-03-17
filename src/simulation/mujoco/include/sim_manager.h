@@ -195,7 +195,7 @@ bool IsContactVisualizationEnabled();
   bool use_protector_map_ = false;   // 是否使用护具地图
   std::string force_method_ = "chr";  // chr=fitted_parameters公式, zzq=RT-FEM表查表
   double protection_density_ = 0.4;   // 材料密度，仅 chr 使用
-  
+
   // 排除防护的接触对列表（body1_name, body2_name），这些接触不施加防护力缩放
   // 脚/踝与 world 的接触已排除，避免走路时地面打滑（LINK_ANKLE_ROLL_L/R 为脚掌接地 body）
   // 使用 std::pair<std::string, std::string> 存储，顺序无关
