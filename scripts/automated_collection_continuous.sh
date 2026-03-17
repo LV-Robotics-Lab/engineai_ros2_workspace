@@ -6,13 +6,13 @@
 # 8方向循环：0=前, 45=左前, 90=左, 135=左后, 180=后, 225=右后, 270=右, 315=右前
 
 # 运控选择：XZL 或 CHR
-CONTROLLER=XZL
+CONTROLLER=CHR
 
 # 日志/CSV 根目录（可修改，如 /mnt/ssd/data）
 LOG_BASE_DIR="${HOME}/data/mujoco_logs"
 
-TOTAL_EXPERIMENTS=80
-EXPERIMENT_DURATION=15
+TOTAL_EXPERIMENTS=1600
+EXPERIMENT_DURATION=10
 DIRECTION_ANGLES=(0 45 90 135 180 225 270 315)
 DIRECTION_NAMES=("forward" "forward_left" "left" "backward_left" "backward" "backward_right" "right" "forward_right")
 
@@ -27,8 +27,10 @@ echo "实验次数: $TOTAL_EXPERIMENTS"
 echo "实验持续时间: ${EXPERIMENT_DURATION}秒"
 echo "=========================================="
 
-# 进入工作目录
-cd /home/wang22/engineai/engineai_ros2_workspace
+# 工作目录：脚本所在目录的上一级
+SCRIPT_DIR="$(cd -- "$(dirname "${BASH_SOURCE[0]}")" &>/dev/null && pwd)"
+WORKSPACE_DIR="$(realpath -s "$SCRIPT_DIR/..")"
+cd "$WORKSPACE_DIR" || { echo "错误: 无法进入工作目录 $WORKSPACE_DIR"; exit 1; }
 
 # 激活conda环境
 CONDA_SH=""
@@ -51,6 +53,9 @@ fi
 source "$CONDA_SH"
 conda activate engineai_ros2
 source install/setup.bash
+
+# 保证 rl_basic_example_CHR 运行时能找到 libglog.so.0（系统或 conda）
+export LD_LIBRARY_PATH="/usr/lib/x86_64-linux-gnu:${CONDA_PREFIX:-}/lib:${LD_LIBRARY_PATH:-}"
 
 # 创建实验文件夹
 PROGRAM_START_TIME=$(date +"%Y%m%d_%H%M%S")

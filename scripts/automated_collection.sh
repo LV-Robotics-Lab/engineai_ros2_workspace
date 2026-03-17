@@ -27,8 +27,10 @@ echo "实验次数: $TOTAL_EXPERIMENTS"
 echo "实验持续时间: ${EXPERIMENT_DURATION}秒"
 echo "=========================================="
 
-# 进入工作目录
-cd /home/wang22/engineai/engineai_ros2_workspace
+# 工作目录：脚本所在目录的上一级
+SCRIPT_DIR="$(cd -- "$(dirname "${BASH_SOURCE[0]}")" &>/dev/null && pwd)"
+WORKSPACE_DIR="$(realpath -s "$SCRIPT_DIR/..")"
+cd "$WORKSPACE_DIR" || { echo "错误: 无法进入工作目录 $WORKSPACE_DIR"; exit 1; }
 
 # 激活conda环境（自动查找 conda 位置）
 CONDA_SH=""
@@ -51,6 +53,9 @@ fi
 source "$CONDA_SH"
 conda activate engineai_ros2
 source install/setup.bash
+
+# 保证 rl_basic_example_* 运行时能找到 libglog.so.0（CHR 需要；系统或 conda）
+export LD_LIBRARY_PATH="/usr/lib/x86_64-linux-gnu:${CONDA_PREFIX:-}/lib:${LD_LIBRARY_PATH:-}"
 
 # 创建实验文件夹
 PROGRAM_START_TIME=$(date +"%Y%m%d_%H%M%S")
