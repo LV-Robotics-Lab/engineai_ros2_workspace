@@ -25,14 +25,16 @@ def generate_launch_description():
         raise FileNotFoundError(f"CHR config file not found: {chr_config_file}")
     print(f"Using CHR config file: {chr_config_file}")
 
-    # Append dynamic library path
+    # rl_basic_example_CHR 依赖 libglog.so.0，需在 LD_LIBRARY_PATH 中能找到（系统或 conda）
     ENGINEAI_ROBOTICS_THIRD_PARTY = "/opt/engineai_robotics_third_party"
     conda_prefix = os.environ.get('CONDA_PREFIX', '')
-    ld_library_path = os.path.join(ENGINEAI_ROBOTICS_THIRD_PARTY, 'lib')
+    system_lib = '/usr/lib/x86_64-linux-gnu'
+    ld_parts = [os.path.join(ENGINEAI_ROBOTICS_THIRD_PARTY, 'lib')]
     if conda_prefix:
-        conda_lib = os.path.join(conda_prefix, 'lib')
-        ld_library_path = conda_lib + ':' + ld_library_path
-    os.environ['LD_LIBRARY_PATH'] = ld_library_path + ':' + os.environ.get('LD_LIBRARY_PATH', '')
+        ld_parts.insert(0, os.path.join(conda_prefix, 'lib'))
+    ld_parts.insert(0, system_lib)
+    existing = os.environ.get('LD_LIBRARY_PATH', '')
+    os.environ['LD_LIBRARY_PATH'] = ':'.join(ld_parts) + (':' + existing if existing else '')
 
     # Create node - using rl_basic_example_CHR
     hardware_node = Node(

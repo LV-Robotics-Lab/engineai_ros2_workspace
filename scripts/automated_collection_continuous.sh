@@ -12,7 +12,7 @@ CONTROLLER=CHR
 LOG_BASE_DIR="${HOME}/data/mujoco_logs"
 
 TOTAL_EXPERIMENTS=1600
-EXPERIMENT_DURATION=10
+EXPERIMENT_DURATION=8
 DIRECTION_ANGLES=(0 45 90 135 180 225 270 315)
 DIRECTION_NAMES=("forward" "forward_left" "left" "backward_left" "backward" "backward_right" "right" "forward_right")
 
@@ -56,6 +56,21 @@ source install/setup.bash
 
 # 保证 rl_basic_example_CHR 运行时能找到 libglog.so.0（系统或 conda）
 export LD_LIBRARY_PATH="/usr/lib/x86_64-linux-gnu:${CONDA_PREFIX:-}/lib:${LD_LIBRARY_PATH:-}"
+
+# CHR 依赖 libglog：若未安装则先提示再退出
+if [[ "$CONTROLLER" == "CHR" ]]; then
+  GLOG_SO=""
+  for d in /usr/lib/x86_64-linux-gnu "${CONDA_PREFIX:-}/lib"; do
+    [ -f "$d/libglog.so.0" ] && GLOG_SO="$d/libglog.so.0" && break
+    [ -f "$d/libglog.so" ]   && GLOG_SO="$d/libglog.so"   && break
+  done
+  if [[ -z "$GLOG_SO" ]]; then
+    echo "错误: 未找到 libglog（rl_basic_example_CHR 需要）。请任选其一安装后重试："
+    echo "  sudo apt install -y libgoogle-glog-dev"
+    echo "  或: conda install -y -c conda-forge glog"
+    exit 1
+  fi
+fi
 
 # 创建实验文件夹
 PROGRAM_START_TIME=$(date +"%Y%m%d_%H%M%S")
