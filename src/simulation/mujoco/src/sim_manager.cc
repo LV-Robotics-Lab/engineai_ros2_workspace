@@ -40,6 +40,8 @@ const std::vector<std::pair<std::string, std::string>> SimManager::excluded_cont
   {"LINK_ANKLE_ROLL_R", "world"}    // 右脚掌接地接触
 };
 const int kNumFloatingBaseJoints = 7;  // 浮动基座的关节数量（四元数 + xyz位置）
+// 未收到关节命令时用于“保持当前姿态”的阻尼，避免启动瞬间零力矩自由下落
+constexpr double kHoldDampingWhenNoCmd = 15.0;
 constexpr double kSyncMisalign = 0.1;  // 重新同步前的最大偏差
 constexpr double kSimRefreshFraction = 0.7;  // 可用于仿真的刷新率分数
 const std::chrono::milliseconds kBusyWaitTime(1);  // 忙等待时间
@@ -401,44 +403,32 @@ SimManager::~SimManager() {
  * @details 实现PD控制器和推倒采样的干扰力系统
  */
 void SimManager::TorqueController(const mjModel* m, mjData* d) {
-  // ==================== PD控制器部分 ====================
+  bool is_floating_base = (m->nv != m->nu);
+
   if (ros_interface_) {
-    // 获取线程安全的命令值副本
     auto cmd = ros_interface_->GetCommandedSafe();
 
-    // 检查是否为浮动基座机器人
-    bool is_floating_base = (m->nv != m->nu);
+    // 命令未就绪（CHR 等尚未发布第一条 JointCommand）时不能留空 ctrl，否则零力矩会自由下落
+    bool cmd_ready = (cmd.position.size() >= static_cast<size_t>(m->nu) &&
+                      cmd.velocity.size() >= static_cast<size_t>(m->nu) &&
+                      cmd.feed_forward_torque.size() >= static_cast<size_t>(m->nu) &&
+                      cmd.stiffness.size() >= static_cast<size_t>(m->nu) &&
+                      cmd.damping.size() >= static_cast<size_t>(m->nu));
 
-    // 应用命令控制
-    for (int i = 0; i < m->nu; ++i) {
-      if (i >= cmd.position.size() || i >= cmd.velocity.size() || i >= cmd.torque.size() ||
-          i >= cmd.feed_forward_torque.size() || i >= cmd.stiffness.size() || i >= cmd.damping.size()) {
-        continue;
+    if (cmd_ready) {
+      for (int i = 0; i < m->nu; ++i) {
+        double position = is_floating_base ? d->qpos[i + kNumFloatingBaseJoints] : d->qpos[i];
+        double velocity = is_floating_base ? d->qvel[i + kDofFloatingBase] : d->qvel[i];
+        double position_error = cmd.position[i] - position;
+        double velocity_error = cmd.velocity[i] - velocity;
+        d->ctrl[i] = cmd.feed_forward_torque[i] + cmd.stiffness[i] * position_error + cmd.damping[i] * velocity_error;
       }
-
-      // 获取位置和速度，考虑浮动基座
-      double position;
-      double velocity;
-
-      if (is_floating_base) {
-        position = d->qpos[i + kNumFloatingBaseJoints];
-        velocity = d->qvel[i + kDofFloatingBase];
-      } else {
-        position = d->qpos[i];
-        velocity = d->qvel[i];
+    } else {
+      // 未收到命令前：用阻尼稳住当前姿态，避免启动瞬间摔倒
+      for (int i = 0; i < m->nu; ++i) {
+        double velocity = is_floating_base ? d->qvel[i + kDofFloatingBase] : d->qvel[i];
+        d->ctrl[i] = -kHoldDampingWhenNoCmd * velocity;
       }
-
-      // PD控制加前馈力矩
-      double position_error = cmd.position[i] - position;
-      double velocity_error = cmd.velocity[i] - velocity;
-
-      d->ctrl[i] = cmd.feed_forward_torque[i] + cmd.stiffness[i] * position_error + cmd.damping[i] * velocity_error;
-      
-      // 应用执行器层面的硬限制（如果MuJoCo模型中配置了ctrlrange）
-      // 注意：这里限制的是d->ctrl，MuJoCo会在mj_fwdActuation中进一步限制d->actuator_force
-      // 但是，如果ctrlrange (61.0 N·m) 大于配置限制 (52.0 N·m)，我们需要在这里额外限制
-      // 由于我们无法直接访问配置的max_torque_joint，这里依赖MuJoCo的ctrlrange限制
-      // 如果需要更严格的限制，应该修改MuJoCo XML中的ctrlrange
     }
   } else {
     // 如果没有ROS接口，使用零力矩控制（机器人自由运动）

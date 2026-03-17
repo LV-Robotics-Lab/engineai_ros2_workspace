@@ -1192,11 +1192,22 @@ def calculate_contact_force_risk(
     
     # 只保留在碰撞时间戳的数据
     contact_df_collision = contact_df[mask].copy()
-    
+
+    # 接触力 risk 只统计非脚/踝 link（与 time_collision 的「非脚碰撞」一致，避免走路接地计入 risk）
+    foot_ankle_keywords = ('foot', 'ankle', 'toe', 'heel', 'LINK_ANKLE', 'LINK_FOOT')
+
+    def is_foot_ankle_link(link_name: str) -> bool:
+        s = str(link_name).lower()
+        return any(kw.lower() in s for kw in foot_ankle_keywords)
+
+    contact_df_collision = contact_df_collision[
+        ~contact_df_collision['robot_link'].apply(is_foot_ankle_link)
+    ].copy()
+
     if contact_df_collision.empty:
         empty_breakdown = pd.DataFrame(columns=["link_name", "R_link"])
         return 0.0, empty_breakdown
-    
+
     # 定义不同关节的阈值（关键词 -> 阈值）
     # HEAD, ELBOW_END: 400N（最脆弱）
     # TORSO: 700N（中等脆弱）
@@ -1959,17 +1970,17 @@ def plot_contact_force_curves(
     ts = by_time['timestamp'].to_numpy(dtype=float)
     
     fig, ax = plt.subplots(1, 1, figsize=(14, 5))
-    ax.plot(ts, by_time['force_magnitude'].to_numpy(dtype=float), 'b-', label='合力 (force_magnitude)', linewidth=1.2)
+    ax.plot(ts, by_time['force_magnitude'].to_numpy(dtype=float), 'b-', label='Force magnitude', linewidth=1.2)
     if 'force_normal' in by_time.columns:
-        ax.plot(ts, by_time['force_normal'].to_numpy(dtype=float), 'g-', label='正压力 (force_normal)', linewidth=1.2)
+        ax.plot(ts, by_time['force_normal'].to_numpy(dtype=float), 'g-', label='Force normal', linewidth=1.2)
     if 'force_friction' in by_time.columns:
-        ax.plot(ts, by_time['force_friction'].to_numpy(dtype=float), 'm-', label='摩擦力 (force_friction)', linewidth=1.2)
+        ax.plot(ts, by_time['force_friction'].to_numpy(dtype=float), 'm-', label='Force friction', linewidth=1.2)
     ax.axhline(y=f_thr, color='orange', linestyle='--', linewidth=1, label=f'threshold={f_thr} N')
     ax.set_ylabel('Force (N)', fontsize=10)
     ax.set_xlabel('Time (s)', fontsize=10)
     ax.legend(loc='upper right')
     ax.grid(True, alpha=0.3)
-    ax.set_title('Contact force: 合力 / 正压力 / 摩擦力 (max per timestamp)', fontsize=12)
+    ax.set_title('Contact force: magnitude / normal / friction (max per timestamp)', fontsize=12)
     
     if time_collision is not None and len(time_collision) > 0:
         for t in time_collision:
@@ -1989,35 +2000,33 @@ def plot_contact_force_curves(
     plt.close()
 
 
-def plot_contact_force_risk_curves(frame_by_frame_df: pd.DataFrame, output_path: Optional[str] = None):
+def plot_contact_force_risk_curves(
+    frame_by_frame_df: pd.DataFrame,
+    output_path: Optional[str] = None,
+):
     """
-    绘制接触力风险曲线
-    
+    绘制接触力风险曲线（仅含 risk 相关：总 risk + 各超阈值 link 的 force/risk）
+
     参数:
         frame_by_frame_df: 逐帧接触力风险数据 DataFrame，应包含列：
-            - timestamp: 时间戳
-            - link_name: link 名称
-            - force_magnitude: 力的大小
-            - r_link: 风险值
+            - timestamp, link_name, force_magnitude, r_link
         output_path: 图片保存路径（可选）
     """
     if frame_by_frame_df.empty:
         print("警告: 接触力风险逐帧数据为空，无法绘图")
         return
-    
-    # 按 link 分组
-    links = frame_by_frame_df['link_name'].unique()
+
+    links = list(frame_by_frame_df['link_name'].unique())
     n_links = len(links)
-    
     if n_links == 0:
         return
-    
-    # 创建子图：第一个子图显示总 risk，后面每个 link 一个子图
-    fig, axes = plt.subplots(n_links + 1, 1, figsize=(12, 4 * (n_links + 1)), sharex=True)
-    if n_links == 0:
+
+    n_plots = n_links + 1
+    fig, axes = plt.subplots(n_plots, 1, figsize=(12, 4 * n_plots), sharex=True)
+    if n_plots == 1:
         axes = [axes]
     else:
-        axes = axes.flatten() if hasattr(axes, 'flatten') else [axes]
+        axes = np.asarray(axes).flatten().tolist()
     
     # 第一个子图：总 risk（瞬时风险和累计风险）
     frame_by_frame_df_sorted = frame_by_frame_df.sort_values('timestamp')
@@ -2059,29 +2068,26 @@ def plot_contact_force_risk_curves(frame_by_frame_df: pd.DataFrame, output_path:
     for i, link_name in enumerate(links):
         link_data = frame_by_frame_df[frame_by_frame_df['link_name'] == link_name].copy()
         link_data = link_data.sort_values('timestamp')
-        
+
         ax = axes[i + 1]
-        # 左 y 轴：force_magnitude
-        line1, = ax.plot(link_data['timestamp'], link_data['force_magnitude'], 'b-', 
+        line1, = ax.plot(link_data['timestamp'], link_data['force_magnitude'], 'b-',
                          label='Force Magnitude (N)', linewidth=1.5)
         ax.set_xlim(min_timestamp - x_margin, max_timestamp + x_margin)
-        ax.set_ylabel(f'Force (N)', fontsize=10, color='blue')
+        ax.set_ylabel('Force (N)', fontsize=10, color='blue')
         ax.tick_params(axis='y', labelcolor='blue')
         ax.grid(True, alpha=0.3)
         ax.set_title(f'{link_name} Contact Force Risk Over Time', fontsize=12)
-        
-        # 右 y 轴：r_link（风险值有独立的 y 轴，不会被压扁）
+
         ax_twin = ax.twinx()
-        line2, = ax_twin.plot(link_data['timestamp'], link_data['r_link'], 'r-', 
+        line2, = ax_twin.plot(link_data['timestamp'], link_data['r_link'], 'r-',
                               label='Risk Value (r_link)', linewidth=2)
         ax_twin.set_ylabel('Risk Value', fontsize=10, color='red')
         ax_twin.tick_params(axis='y', labelcolor='red')
-        
-        # 合并图例
-        lines = [line1, line2]
-        labels = [l.get_label() for l in lines]
-        ax.legend(lines, labels, loc='upper left')
-    
+
+        leg_lines = [line1, line2]
+        leg_labels = [l.get_label() for l in leg_lines]
+        ax.legend(leg_lines, leg_labels, loc='upper left')
+
     axes[-1].set_xlabel('Time (s) - Absolute Timestamp', fontsize=10)
     plt.tight_layout()
     
@@ -2091,6 +2097,97 @@ def plot_contact_force_risk_curves(frame_by_frame_df: pd.DataFrame, output_path:
     else:
         plt.show()
     
+    plt.close()
+
+
+def _get_robot_link_from_contact(body1: str, body2: str) -> Optional[str]:
+    """Return robot link name (LINK_*) from contact body pair, or None."""
+    a, b = str(body1).strip(), str(body2).strip()
+    if a.startswith("LINK_"):
+        return a
+    if b.startswith("LINK_"):
+        return b
+    if a.lower() not in ("world", "ground") and b.lower() in ("world", "ground"):
+        return a
+    if b.lower() not in ("world", "ground") and a.lower() in ("world", "ground"):
+        return b
+    return None
+
+
+def plot_contact_force_by_link(
+    contact_df: pd.DataFrame,
+    output_path: Optional[str] = None,
+    t_start: Optional[float] = None,
+    t_end: Optional[float] = None,
+):
+    """
+    单独一张图：按 link 分子图，每个 link 画 3 条力曲线（magnitude / normal / friction），纵横网格排列。
+    """
+    if contact_df.empty:
+        return
+    req = {'timestamp', 'body1_name', 'body2_name', 'force_magnitude'}
+    if not req.issubset(contact_df.columns):
+        return
+    contact_df = filter_df_by_time(contact_df, t_start, t_end)
+    if contact_df.empty:
+        return
+
+    contact_df = contact_df.copy()
+    contact_df['robot_link'] = contact_df.apply(
+        lambda row: _get_robot_link_from_contact(row['body1_name'], row['body2_name']),
+        axis=1,
+    )
+    contact_df = contact_df[contact_df['robot_link'].notna()]
+
+    links = sorted(contact_df['robot_link'].unique().tolist())
+    if not links:
+        return
+
+    agg_dict = {'force_magnitude': 'max'}
+    if 'force_normal' in contact_df.columns:
+        agg_dict['force_normal'] = 'max'
+    if 'force_friction' in contact_df.columns:
+        agg_dict['force_friction'] = 'max'
+
+    per_link = {}
+    for link in links:
+        sub = contact_df[contact_df['robot_link'] == link].groupby('timestamp', as_index=False).agg(agg_dict)
+        per_link[link] = sub.sort_values('timestamp')
+
+    n_links = len(links)
+    ncols = min(4, max(1, n_links))
+    nrows = (n_links + ncols - 1) // ncols
+    fig, axes = plt.subplots(nrows, ncols, figsize=(5 * ncols, 4 * nrows), sharex=True)
+    if n_links == 1:
+        axes = np.array([[axes]])
+    elif axes.ndim == 1:
+        axes = axes.reshape(1, -1)
+    for idx, link in enumerate(links):
+        r, c = idx // ncols, idx % ncols
+        ax = axes[r, c]
+        df = per_link[link]
+        ax.plot(df['timestamp'], df['force_magnitude'], 'b-', linewidth=1.2, label='Force magnitude (N)')
+        if 'force_normal' in df.columns:
+            ax.plot(df['timestamp'], df['force_normal'], 'g-', linewidth=1.0, label='Force normal (N)')
+        if 'force_friction' in df.columns:
+            ax.plot(df['timestamp'], df['force_friction'], 'm-', linewidth=1.0, label='Force friction (N)')
+        ax.set_ylabel('Force (N)', fontsize=9)
+        ax.set_title(link, fontsize=10)
+        ax.legend(loc='upper right', fontsize=8)
+        ax.grid(True, alpha=0.3)
+    for idx in range(n_links, nrows * ncols):
+        r, c = idx // ncols, idx % ncols
+        axes[r, c].set_visible(False)
+    axes[-1, 0].set_xlabel('Time (s)', fontsize=10)
+    if ncols > 1:
+        for c in range(1, ncols):
+            axes[-1, c].set_xlabel('Time (s)', fontsize=10)
+    plt.tight_layout()
+    if output_path:
+        plt.savefig(output_path, dpi=150, bbox_inches='tight')
+        print(f"Contact force by link 图已保存到: {output_path}")
+    else:
+        plt.show()
     plt.close()
 
 
@@ -3183,6 +3280,12 @@ def main():
                         time_collision=time_collision if len(time_collision) > 0 else None,
                         f_thr=1000.0,
                         output_path=f"{output_base}_contact_force_curves{suffix}.png"
+                    )
+                    plot_contact_force_by_link(
+                        contact_plot_df,
+                        output_path=f"{output_base}_contact_force_by_link{suffix}.png",
+                        t_start=t_start,
+                        t_end=t_end,
                     )
             except Exception as e:
                 print(f"警告: 绘制接触力曲线失败: {e}")
