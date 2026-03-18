@@ -35,16 +35,13 @@ except ImportError:
 
 
 def read_csv_with_progress_mujoco(csv_path, encoding='utf-8'):
-    """
-    读取CSV文件，支持分块读取和进度条显示（单进程）
-    
-    参数:
-        csv_path: CSV文件路径
-        encoding: 编码方式，默认'utf-8'
-    
-    返回:
-        df: DataFrame
-    """
+    """读取 contact CSV 或 contact_data.bin。"""
+    if str(csv_path).lower().endswith('.bin'):
+        _sd = os.path.dirname(os.path.abspath(__file__))
+        if _sd not in sys.path:
+            sys.path.insert(0, _sd)
+        from mujoco_data_io import load_contact_file
+        return load_contact_file(csv_path)
     file_size = os.path.getsize(csv_path)
     file_size_mb = file_size / (1024 * 1024)
     

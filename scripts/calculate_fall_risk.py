@@ -43,6 +43,7 @@ import re
 import sys
 from pathlib import Path
 from typing import Dict, Optional, Tuple
+import matplotlib
 import matplotlib.pyplot as plt
 
 
@@ -61,608 +62,18 @@ def filter_df_by_time(
     return df.loc[mask].copy()
 
 
-def read_binary_contact_data(bin_path: str) -> pd.DataFrame:
-    """
-    读取二进制格式的contact_data文件
-    
-    二进制格式：
-    - 文件头：int32_t num_joints
-    - 每条记录：
-      - double sim_time
-      - int contact_id
-      - int32_t body1_name_len + body1_name (string)
-      - int32_t body2_name_len + body2_name (string)
-      - double[3] red_ball_pos
-      - double[3] green_ball_pos
-      - double[3] world_forces
-      - double force_magnitude
-      - double force_normal
-      - double[3] world_torques
-      - double[3] base_link_pos
-      - double[4] base_link_quat
-      - double[3] base_link_vel
-      - double[3] base_link_angvel
-      - double[3] collision_link_pos
-      - double[4] collision_link_quat
-    """
-    data = []
-    
-    with open(bin_path, 'rb') as f:
-        # 读取文件头（关节数量）
-        num_joints_bytes = f.read(4)
-        if len(num_joints_bytes) < 4:
-            return pd.DataFrame()
-        num_joints = struct.unpack('i', num_joints_bytes)[0]
-        
-        # 读取所有记录
-        while True:
-            # 读取sim_time
-            sim_time_bytes = f.read(8)
-            if len(sim_time_bytes) < 8:
-                break
-            sim_time = struct.unpack('d', sim_time_bytes)[0]
-            
-            # 读取contact_id
-            contact_id_bytes = f.read(4)
-            if len(contact_id_bytes) < 4:
-                break
-            contact_id = struct.unpack('i', contact_id_bytes)[0]
-            
-            # 读取body1_name
-            body1_len_bytes = f.read(4)
-            if len(body1_len_bytes) < 4:
-                break
-            body1_len = struct.unpack('i', body1_len_bytes)[0]
-            body1_name = f.read(body1_len).decode('utf-8')
-            
-            # 读取body2_name
-            body2_len_bytes = f.read(4)
-            if len(body2_len_bytes) < 4:
-                break
-            body2_len = struct.unpack('i', body2_len_bytes)[0]
-            body2_name = f.read(body2_len).decode('utf-8')
-            
-            # 读取数组数据
-            red_ball_pos = struct.unpack('3d', f.read(24))
-            green_ball_pos = struct.unpack('3d', f.read(24))
-            world_forces = struct.unpack('3d', f.read(24))
-            force_magnitude = struct.unpack('d', f.read(8))[0]
-            force_normal = struct.unpack('d', f.read(8))[0]
-            force_friction = struct.unpack('d', f.read(8))[0]  # 摩擦力大小（新格式）；旧格式可能无此字段
-            world_torques = struct.unpack('3d', f.read(24))
-            base_link_pos = struct.unpack('3d', f.read(24))
-            base_link_quat = struct.unpack('4d', f.read(32))
-            base_link_vel = struct.unpack('3d', f.read(24))
-            base_link_angvel = struct.unpack('3d', f.read(24))
-            collision_link_pos = struct.unpack('3d', f.read(24))
-            collision_link_quat = struct.unpack('4d', f.read(32))
-            
-            data.append({
-                'timestamp': sim_time,
-                'contact_id': contact_id,
-                'body1_name': body1_name,
-                'body2_name': body2_name,
-                'pos_x': red_ball_pos[0],
-                'pos_y': red_ball_pos[1],
-                'pos_z': red_ball_pos[2],
-                'force_x': world_forces[0],
-                'force_y': world_forces[1],
-                'force_z': world_forces[2],
-                'force_magnitude': force_magnitude,
-                'force_normal': force_normal,
-                'force_friction': force_friction,
-                'torque_x': world_torques[0],
-                'torque_y': world_torques[1],
-                'torque_z': world_torques[2],
-                'base_link_x': base_link_pos[0],
-                'base_link_y': base_link_pos[1],
-                'base_link_z': base_link_pos[2],
-                'base_link_qw': base_link_quat[0],
-                'base_link_qx': base_link_quat[1],
-                'base_link_qy': base_link_quat[2],
-                'base_link_qz': base_link_quat[3],
-                'base_link_vel_x': base_link_vel[0],
-                'base_link_vel_y': base_link_vel[1],
-                'base_link_vel_z': base_link_vel[2],
-                'base_link_angvel_x': base_link_angvel[0],
-                'base_link_angvel_y': base_link_angvel[1],
-                'base_link_angvel_z': base_link_angvel[2],
-                'collision_link_x': collision_link_pos[0],
-                'collision_link_y': collision_link_pos[1],
-                'collision_link_z': collision_link_pos[2],
-                'collision_link_qw': collision_link_quat[0],
-                'collision_link_qx': collision_link_quat[1],
-                'collision_link_qy': collision_link_quat[2],
-                'collision_link_qz': collision_link_quat[3],
-            })
-    
-    return pd.DataFrame(data)
-
-
-def read_binary_sensor_vibration_data(bin_path: str) -> pd.DataFrame:
-    """
-    读取二进制格式的sensor_vibration_data文件
-    
-    二进制格式：
-    - 每条记录：
-      - double timestamp
-      - double[3] base_link_lin_acc
-      - double[3] base_link_ang_acc
-      - double[3] head_lin_acc
-      - double[3] head_ang_acc
-    """
-    data = []
-    
-    with open(bin_path, 'rb') as f:
-        while True:
-            # 读取timestamp
-            timestamp_bytes = f.read(8)
-            if len(timestamp_bytes) < 8:
-                break
-            
-            timestamp = struct.unpack('d', timestamp_bytes)[0]
-            base_link_lin_acc = struct.unpack('3d', f.read(24))
-            base_link_ang_acc = struct.unpack('3d', f.read(24))
-            head_lin_acc = struct.unpack('3d', f.read(24))
-            head_ang_acc = struct.unpack('3d', f.read(24))
-            
-            data.append({
-                'timestamp': timestamp,
-                'base_link_lin_acc_x': base_link_lin_acc[0],
-                'base_link_lin_acc_y': base_link_lin_acc[1],
-                'base_link_lin_acc_z': base_link_lin_acc[2],
-                'base_link_ang_acc_x': base_link_ang_acc[0],
-                'base_link_ang_acc_y': base_link_ang_acc[1],
-                'base_link_ang_acc_z': base_link_ang_acc[2],
-                'head_lin_acc_x': head_lin_acc[0],
-                'head_lin_acc_y': head_lin_acc[1],
-                'head_lin_acc_z': head_lin_acc[2],
-                'head_ang_acc_x': head_ang_acc[0],
-                'head_ang_acc_y': head_ang_acc[1],
-                'head_ang_acc_z': head_ang_acc[2],
-            })
-    
-    return pd.DataFrame(data)
-
-
-def read_binary_joint_state_data(bin_path: str) -> pd.DataFrame:
-    """
-    读取二进制格式的joint_state_data文件
-    
-    二进制格式：
-    - 每条记录：
-      - double timestamp
-      - int32_t num_joints
-      - double[num_joints] joint_positions
-      - int32_t num_joints
-      - double[num_joints] joint_velocities
-      - int32_t num_joints
-      - double[num_joints] actuator_forces
-    """
-    data = []
-    
-    with open(bin_path, 'rb') as f:
-        while True:
-            # 读取timestamp
-            timestamp_bytes = f.read(8)
-            if len(timestamp_bytes) < 8:
-                break
-            
-            timestamp = struct.unpack('d', timestamp_bytes)[0]
-            
-            # 读取关节数量
-            num_joints_bytes = f.read(4)
-            if len(num_joints_bytes) < 4:
-                break
-            num_joints = struct.unpack('i', num_joints_bytes)[0]
-            
-            # 读取关节位置
-            joint_pos_bytes = f.read(num_joints * 8)
-            if len(joint_pos_bytes) < num_joints * 8:
-                break
-            joint_positions = struct.unpack(f'{num_joints}d', joint_pos_bytes)
-            
-            # 读取关节数量（速度）
-            num_joints_bytes = f.read(4)
-            if len(num_joints_bytes) < 4:
-                break
-            num_joints = struct.unpack('i', num_joints_bytes)[0]
-            
-            # 读取关节速度
-            joint_vel_bytes = f.read(num_joints * 8)
-            if len(joint_vel_bytes) < num_joints * 8:
-                break
-            joint_velocities = struct.unpack(f'{num_joints}d', joint_vel_bytes)
-            
-            # 读取关节数量（力矩）
-            num_joints_bytes = f.read(4)
-            if len(num_joints_bytes) < 4:
-                break
-            num_joints = struct.unpack('i', num_joints_bytes)[0]
-            
-            # 读取电机力矩
-            actuator_force_bytes = f.read(num_joints * 8)
-            if len(actuator_force_bytes) < num_joints * 8:
-                break
-            actuator_forces = struct.unpack(f'{num_joints}d', actuator_force_bytes)
-            
-            row = {'timestamp': timestamp}
-            for i in range(num_joints):
-                row[f'joint_{i}_position'] = joint_positions[i]
-                row[f'joint_{i}_velocity'] = joint_velocities[i]
-                row[f'actuator_{i}_force'] = actuator_forces[i]
-            
-            data.append(row)
-    
-    return pd.DataFrame(data)
-
-
-def read_binary_perturbation_data(bin_path: str) -> pd.DataFrame:
-    """
-    读取二进制格式的perturbation_data文件
-    
-    二进制格式：
-    - 每条记录：
-      - double sim_time
-      - int perturbation_id
-      - int32_t body_name_len + body_name (string)
-      - double start_time
-      - double duration
-      - double elapsed_time
-      - double[3] force
-      - double force_magnitude
-      - double[3] torque
-      - double torque_magnitude
-      - double[3] std_pose
-      - double[3] world_force
-      - double world_force_magnitude
-    """
-    data = []
-    
-    with open(bin_path, 'rb') as f:
-        while True:
-            # 读取sim_time
-            sim_time_bytes = f.read(8)
-            if len(sim_time_bytes) < 8:
-                break
-            sim_time = struct.unpack('d', sim_time_bytes)[0]
-            
-            # 读取perturbation_id
-            perturbation_id_bytes = f.read(4)
-            if len(perturbation_id_bytes) < 4:
-                break
-            perturbation_id = struct.unpack('i', perturbation_id_bytes)[0]
-            
-            # 读取body_name
-            body_name_len_bytes = f.read(4)
-            if len(body_name_len_bytes) < 4:
-                break
-            body_name_len = struct.unpack('i', body_name_len_bytes)[0]
-            body_name = f.read(body_name_len).decode('utf-8')
-            
-            # 读取其他数据
-            start_time = struct.unpack('d', f.read(8))[0]
-            duration = struct.unpack('d', f.read(8))[0]
-            elapsed_time = struct.unpack('d', f.read(8))[0]
-            force = struct.unpack('3d', f.read(24))
-            force_magnitude = struct.unpack('d', f.read(8))[0]
-            torque = struct.unpack('3d', f.read(24))
-            torque_magnitude = struct.unpack('d', f.read(8))[0]
-            std_pose = struct.unpack('3d', f.read(24))
-            world_force = struct.unpack('3d', f.read(24))
-            world_force_magnitude = struct.unpack('d', f.read(8))[0]
-            
-            data.append({
-                'timestamp': sim_time,
-                'perturbation_id': perturbation_id,
-                'body_name': body_name,
-                'start_time': start_time,
-                'duration': duration,
-                'elapsed_time': elapsed_time,
-                'force_x': force[0],
-                'force_y': force[1],
-                'force_z': force[2],
-                'force_magnitude': force_magnitude,
-                'torque_x': torque[0],
-                'torque_y': torque[1],
-                'torque_z': torque[2],
-                'torque_magnitude': torque_magnitude,
-                'std_pose_x': std_pose[0],
-                'std_pose_y': std_pose[1],
-                'std_pose_z': std_pose[2],
-                'world_force_x': world_force[0],
-                'world_force_y': world_force[1],
-                'world_force_z': world_force[2],
-                'world_force_magnitude': world_force_magnitude,
-            })
-    
-    return pd.DataFrame(data)
-
-
-def read_binary_joint_forces_data(bin_path: str) -> pd.DataFrame:
-    """
-    读取二进制格式的joint_forces_data文件
-    
-    二进制格式：
-    - 每条记录（每个关节）：
-      - double timestamp
-      - int joint_id
-      - int32_t joint_name_len + joint_name (string)
-      - int body_id
-      - int32_t body_name_len + body_name (string)
-      - double[3] child_M (力矩)
-      - double[3] child_F (力)
-      - double[3] parent_M (力矩)
-      - double[3] parent_F (力)
-      - double[3] axis (关节轴向量)
-      - double F_axial_mag
-      - double F_shear_mag
-      - double M_torsion_mag
-      - double M_bend_mag
-      - double M_eq
-      - double[3] F_axial
-      - double[3] F_shear
-      - double[3] M_torsion
-      - double[3] M_bend
-    """
-    data = []
-    
-    with open(bin_path, 'rb') as f:
-        while True:
-            # 读取timestamp
-            timestamp_bytes = f.read(8)
-            if len(timestamp_bytes) < 8:
-                break
-            
-            timestamp = struct.unpack('d', timestamp_bytes)[0]
-            
-            # 读取joint_id
-            joint_id_bytes = f.read(4)
-            if len(joint_id_bytes) < 4:
-                break
-            joint_id = struct.unpack('i', joint_id_bytes)[0]
-            
-            # 读取joint_name
-            joint_name_len_bytes = f.read(4)
-            if len(joint_name_len_bytes) < 4:
-                break
-            joint_name_len = struct.unpack('i', joint_name_len_bytes)[0]
-            joint_name = f.read(joint_name_len).decode('utf-8')
-            
-            # 读取body_id
-            body_id_bytes = f.read(4)
-            if len(body_id_bytes) < 4:
-                break
-            body_id = struct.unpack('i', body_id_bytes)[0]
-            
-            # 读取body_name
-            body_name_len_bytes = f.read(4)
-            if len(body_name_len_bytes) < 4:
-                break
-            body_name_len = struct.unpack('i', body_name_len_bytes)[0]
-            body_name = f.read(body_name_len).decode('utf-8')
-            
-            # 读取子body坐标系下的反力
-            child_M = struct.unpack('3d', f.read(24))
-            child_F = struct.unpack('3d', f.read(24))
-            
-            # 读取父body坐标系下的反力
-            parent_M = struct.unpack('3d', f.read(24))
-            parent_F = struct.unpack('3d', f.read(24))
-            
-            # 读取关节轴向量
-            axis = struct.unpack('3d', f.read(24))
-            
-            # 读取载荷分解的标量值
-            F_axial_mag = struct.unpack('d', f.read(8))[0]
-            F_shear_mag = struct.unpack('d', f.read(8))[0]
-            M_torsion_mag = struct.unpack('d', f.read(8))[0]
-            M_bend_mag = struct.unpack('d', f.read(8))[0]
-            M_eq = struct.unpack('d', f.read(8))[0]
-            
-            # 读取向量
-            F_axial = struct.unpack('3d', f.read(24))
-            F_shear = struct.unpack('3d', f.read(24))
-            M_torsion = struct.unpack('3d', f.read(24))
-            M_bend = struct.unpack('3d', f.read(24))
-            
-            data.append({
-                'timestamp': timestamp,
-                'joint_id': joint_id,
-                'joint_name': joint_name,
-                'body_id': body_id,
-                'body_name': body_name,
-                'child_Mx': child_M[0],
-                'child_My': child_M[1],
-                'child_Mz': child_M[2],
-                'child_Fx': child_F[0],
-                'child_Fy': child_F[1],
-                'child_Fz': child_F[2],
-                'parent_Mx': parent_M[0],
-                'parent_My': parent_M[1],
-                'parent_Mz': parent_M[2],
-                'parent_Fx': parent_F[0],
-                'parent_Fy': parent_F[1],
-                'parent_Fz': parent_F[2],
-                'axis_x': axis[0],
-                'axis_y': axis[1],
-                'axis_z': axis[2],
-                'F_axial_mag': F_axial_mag,
-                'F_shear_mag': F_shear_mag,
-                'M_torsion_mag': M_torsion_mag,
-                'M_bend_mag': M_bend_mag,
-                'M_eq': M_eq,
-                'F_axial_x': F_axial[0],
-                'F_axial_y': F_axial[1],
-                'F_axial_z': F_axial[2],
-                'F_shear_x': F_shear[0],
-                'F_shear_y': F_shear[1],
-                'F_shear_z': F_shear[2],
-                'M_torsion_x': M_torsion[0],
-                'M_torsion_y': M_torsion[1],
-                'M_torsion_z': M_torsion[2],
-                'M_bend_x': M_bend[0],
-                'M_bend_y': M_bend[1],
-                'M_bend_z': M_bend[2],
-            })
-    
-    return pd.DataFrame(data)
-
-
-def read_binary_link_kinetic_energy_data(bin_path: str) -> pd.DataFrame:
-    """
-    读取二进制格式的link_kinetic_energy_data文件
-    
-    二进制格式：
-    - 每条记录：
-      - double timestamp
-      - int32_t num_bodies
-      - 每个body: double[10] (vel_x, vel_y, vel_z, angvel_x, angvel_y, angvel_z, height, linear_KE, angular_KE, PE)
-      - double total_linear_KE
-      - double total_angular_KE
-      - double total_KE
-      - double total_PE
-      - double total_energy
-    """
-    data = []
-    
-    with open(bin_path, 'rb') as f:
-        # 读取第一条记录来获取body数量
-        first_timestamp_bytes = f.read(8)
-        if len(first_timestamp_bytes) < 8:
-            return pd.DataFrame()
-        first_timestamp = struct.unpack('d', first_timestamp_bytes)[0]
-        
-        num_bodies_bytes = f.read(4)
-        if len(num_bodies_bytes) < 4:
-            return pd.DataFrame()
-        num_bodies = struct.unpack('i', num_bodies_bytes)[0]
-        
-        # 回到文件开头重新读取
-        f.seek(0)
-        
-        while True:
-            # 读取timestamp
-            timestamp_bytes = f.read(8)
-            if len(timestamp_bytes) < 8:
-                break
-            timestamp = struct.unpack('d', timestamp_bytes)[0]
-            
-            # 读取body数量
-            num_bodies_bytes = f.read(4)
-            if len(num_bodies_bytes) < 4:
-                break
-            num_bodies = struct.unpack('i', num_bodies_bytes)[0]
-            
-            row = {'timestamp': timestamp}
-            
-            # 读取每个body的速度、高度和能量
-            for i in range(num_bodies):
-                body_data = f.read(80)  # 10 * 8 bytes (6 vel + 1 height + 3 energy)
-                if len(body_data) < 80:
-                    break
-                vals = struct.unpack('10d', body_data)
-                row[f'body_{i}_vel_x'] = vals[0]
-                row[f'body_{i}_vel_y'] = vals[1]
-                row[f'body_{i}_vel_z'] = vals[2]
-                row[f'body_{i}_angvel_x'] = vals[3]
-                row[f'body_{i}_angvel_y'] = vals[4]
-                row[f'body_{i}_angvel_z'] = vals[5]
-                row[f'body_{i}_height'] = vals[6]
-                row[f'body_{i}_linear_KE'] = vals[7]
-                row[f'body_{i}_angular_KE'] = vals[8]
-                row[f'body_{i}_PE'] = vals[9]
-            
-            # 读取能量数据
-            energy_bytes = f.read(40)  # 5 * 8 bytes
-            if len(energy_bytes) < 40:
-                break
-            energies = struct.unpack('5d', energy_bytes)
-            row['total_linear_KE'] = energies[0]
-            row['total_angular_KE'] = energies[1]
-            row['total_KE'] = energies[2]
-            row['total_PE'] = energies[3]
-            row['total_energy'] = energies[4]
-            
-            data.append(row)
-    
-    return pd.DataFrame(data)
-
-
-def resolve_paths_from_log_dir(log_dir: str) -> Dict[str, Optional[str]]:
-    """
-    从日志目录解析各数据文件路径。支持 contact_data.csv 或 contact_data_YYYYMMDD_HHMMSS.csv 等命名。
-    返回: {'contact': path, 'sensor_vibration': path, 'joint_state': path, 'joint_forces': path,
-           'perturbation': path, 'link_energy': path}
-    """
-    log_path = Path(log_dir)
-    if not log_path.is_dir():
-        return {}
-    result = {}
-    # 每种文件类型的候选 basename 前缀
-    patterns = {
-        'contact': 'contact_data',
-        'sensor_vibration': 'sensor_vibration_data',
-        'joint_state': 'joint_state_data',
-        'joint_forces': 'joint_forces_data',
-        'perturbation': 'perturbation_data',
-        'link_energy': 'link_kinetic_energy_data',
-    }
-    for key, prefix in patterns.items():
-        found = None
-        for ext in ['.csv', '.bin']:
-            # 1) 精确匹配 contact_data.csv
-            exact = log_path / f"{prefix}{ext}"
-            if exact.exists():
-                found = str(exact)
-                break
-            # 2) 模糊匹配 contact_data_20260316_204945.csv
-            for f in log_path.glob(f"{prefix}_*{ext}"):
-                found = str(f)
-                break
-            if found:
-                break
-        result[key] = found
-    return result
-
-
-def load_data_file(file_path: str) -> pd.DataFrame:
-    """
-    根据文件扩展名自动选择CSV或二进制格式读取
-    """
-    if not os.path.exists(file_path):
-        print(f"警告: 文件不存在: {file_path}")
-        return pd.DataFrame()
-    
-    ext = Path(file_path).suffix.lower()
-    
-    if ext == '.bin':
-        # 根据文件名判断数据类型
-        filename = Path(file_path).stem.lower()
-        if 'contact_data' in filename:
-            return read_binary_contact_data(file_path)
-        elif 'sensor_vibration_data' in filename:
-            return read_binary_sensor_vibration_data(file_path)
-        elif 'joint_state_data' in filename:
-            return read_binary_joint_state_data(file_path)
-        elif 'perturbation_data' in filename:
-            return read_binary_perturbation_data(file_path)
-        elif 'joint_forces_data' in filename:
-            return read_binary_joint_forces_data(file_path)
-        elif 'link_kinetic_energy_data' in filename:
-            return read_binary_link_kinetic_energy_data(file_path)
-        else:
-            print(f"警告: 无法识别二进制文件类型: {file_path}")
-            return pd.DataFrame()
-    elif ext == '.csv':
-        try:
-            return pd.read_csv(file_path)
-        except Exception as e:
-            print(f"错误: 读取CSV文件失败 {file_path}: {e}")
-            return pd.DataFrame()
-    else:
-        print(f"警告: 不支持的文件格式: {ext}")
-        return pd.DataFrame()
+# 日志 CSV/binary 统一读写（含 policy_switch.bin）
+from mujoco_data_io import (  # noqa: E402
+    load_data_file,
+    resolve_paths_from_log_dir,
+    read_binary_contact_data,
+    read_binary_sensor_vibration_data,
+    read_binary_joint_state_data,
+    read_binary_perturbation_data,
+    read_binary_joint_forces_data,
+    read_binary_link_kinetic_energy_data,
+    read_binary_policy_switch,
+)
 
 
 def relu(x: np.ndarray) -> np.ndarray:
@@ -2114,6 +1525,22 @@ def _get_robot_link_from_contact(body1: str, body2: str) -> Optional[str]:
     return None
 
 
+def _robot_links_for_contact_by_link_plot(body1: str, body2: str) -> list:
+    """
+    用于 contact_force_by_link：单侧 LINK 或 world-robot；两侧皆为 LINK 时两条都画（自碰/链内碰）。
+    """
+    a, b = str(body1).strip(), str(body2).strip()
+    la, lb = a.startswith("LINK_"), b.startswith("LINK_")
+    if la and lb:
+        return [a, b]
+    if la and not lb:
+        return [a]
+    if lb and not la:
+        return [b]
+    r = _get_robot_link_from_contact(a, b)
+    return [r] if r else []
+
+
 def plot_contact_force_by_link(
     contact_df: pd.DataFrame,
     output_path: Optional[str] = None,
@@ -2133,11 +1560,17 @@ def plot_contact_force_by_link(
         return
 
     contact_df = contact_df.copy()
-    contact_df['robot_link'] = contact_df.apply(
-        lambda row: _get_robot_link_from_contact(row['body1_name'], row['body2_name']),
-        axis=1,
-    )
-    contact_df = contact_df[contact_df['robot_link'].notna()]
+    exp_rows = []
+    for _, row in contact_df.iterrows():
+        for link in _robot_links_for_contact_by_link_plot(
+            row['body1_name'], row['body2_name']
+        ):
+            d = row.to_dict()
+            d['robot_link'] = link
+            exp_rows.append(d)
+    contact_df = pd.DataFrame(exp_rows)
+    if contact_df.empty:
+        return
 
     links = sorted(contact_df['robot_link'].unique().tolist())
     if not links:
@@ -2284,6 +1717,7 @@ def get_link_group(body_name: str) -> str:
     - Elbow: 包含 elbow
     - Hip: 包含 hip
     - Knee: 仅包含 knee
+    - Ankle: 包含 ankle（LINK_ANKLE_*）
     - Skip: foot（质量几乎为零，忽略）、world
     """
     name_lower = body_name.lower()
@@ -2308,9 +1742,12 @@ def get_link_group(body_name: str) -> str:
     if 'hip' in name_lower:
         return 'Hip'
     
-    # Knee 组（不包含 ankle）
+    # Knee 组（ankle 单独一组，故 knee 与 ankle 互斥）
     if 'knee' in name_lower:
         return 'Knee'
+    
+    if 'ankle' in name_lower:
+        return 'Ankle'
     
     # 其他归入 Other
     return 'Other'
@@ -2426,7 +1863,7 @@ def plot_link_energy_curves(energy_df: pd.DataFrame, output_path: Optional[str] 
         print(f"  跳过质量为零的 body: {skipped_bodies}")
     
     # 定义分组顺序
-    group_order = ['Body', 'Shoulder', 'Elbow', 'Hip', 'Knee', 'Other']
+    group_order = ['Body', 'Shoulder', 'Elbow', 'Hip', 'Knee', 'Ankle', 'Other']
     # 过滤掉没有数据的组
     groups = [g for g in group_order if g in group_bodies]
     
@@ -2526,6 +1963,7 @@ def plot_link_energy_curves(energy_df: pd.DataFrame, output_path: Optional[str] 
         'Elbow': '#2ECC71',     # 绿色
         'Hip': '#9B59B6',       # 紫色
         'Knee': '#F39C12',      # 橙色
+        'Ankle': '#D35400',     # 深橙（脚踝，与 PE 青绿区分）
         'Other': '#95A5A6',     # 灰色
     }
     
@@ -2534,7 +1972,8 @@ def plot_link_energy_curves(energy_df: pd.DataFrame, output_path: Optional[str] 
     x_max_rel = (max_t - t0) + x_margin
 
     # ===== 子图 1~N：各分组 PE（求和）+ contact force（各 body 各自一条曲线）=====
-    import matplotlib.cm as mcm
+    _tab10 = matplotlib.colormaps['tab10']
+    _tab10_rgba = getattr(_tab10, 'colors', None)
     for i, group in enumerate(groups):
         ax = axes[i]
         color = colors.get(group, '#333333')
@@ -2558,13 +1997,16 @@ def plot_link_energy_curves(energy_df: pd.DataFrame, output_path: Optional[str] 
         # 右 Y：该组内每个 body 的 contact force 各自一条曲线（不求和）
         ax2 = ax.twinx()
         bodies_in_group = group_bodies[group]
-        cmap = mcm.get_cmap('tab10')
         for j, body_name in enumerate(bodies_in_group):
             if body_name not in per_body_contact:
                 continue
             df_b = per_body_contact[body_name]
             t_rel_b = df_b['timestamp'].values - t0
-            ax2.plot(t_rel_b, df_b['force_magnitude'].values, color=cmap(j % 10), linewidth=1.0, label=body_name, alpha=0.9)
+            if _tab10_rgba is not None:
+                line_color = _tab10_rgba[j % len(_tab10_rgba)]
+            else:
+                line_color = _tab10(j % 10 / 9.0)
+            ax2.plot(t_rel_b, df_b['force_magnitude'].values, color=line_color, linewidth=1.0, label=body_name, alpha=0.9)
         ax2.set_ylabel('Contact force (N)', fontsize=11, color='#333333')
         ax2.tick_params(axis='y', labelcolor='#333333')
         lines1, labels1 = ax.get_legend_handles_labels()
@@ -3064,7 +2506,7 @@ def main():
         if not resolved.get('contact') or not resolved.get('sensor_vibration') or not resolved.get('joint_state') or not resolved.get('joint_forces'):
             missing = [k for k in ['contact', 'sensor_vibration', 'joint_state', 'joint_forces'] if not resolved.get(k)]
             print(f"错误: 在 {args.log_dir} 中未找到: {missing}")
-            print("  需要至少: contact_data*.csv, sensor_vibration_data*.csv, joint_state_data*.csv, joint_forces_data*.csv")
+            print("  需要至少: contact_data*.{csv,bin}, sensor_vibration_data*, joint_state_data*, joint_forces_data*")
             return 1
         args.contact = resolved['contact']
         args.sensor_vibration = resolved['sensor_vibration']

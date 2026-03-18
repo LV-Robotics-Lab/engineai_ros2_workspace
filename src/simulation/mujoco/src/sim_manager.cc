@@ -16,8 +16,13 @@
 #include <cstring>
 #include <iostream>
 #include <iomanip>
+#include <string>
+#include <utility>
 #include <sys/stat.h>
 #include <vector>
+#if defined(__linux__)
+#include <pthread.h>
+#endif
 #include "simulate/array_safety.h"
 #include "simulate/glfw_adapter.h"
 #include "joint_forces_eigen.hpp"
@@ -45,6 +50,26 @@ constexpr double kHoldDampingWhenNoCmd = 15.0;
 constexpr double kSyncMisalign = 0.1;  // 重新同步前的最大偏差
 constexpr double kSimRefreshFraction = 0.7;  // 可用于仿真的刷新率分数
 const std::chrono::milliseconds kBusyWaitTime(1);  // 忙等待时间
+
+#if defined(__linux__)
+namespace {
+constexpr size_t kPhysicsThreadStackBytes = 64U * 1024U * 1024U;
+}
+void* SimManager::PhysicsThreadTrampoline(void* arg) {
+  auto* p = static_cast<std::pair<SimManager*, std::string>*>(arg);
+  SimManager* self = p->first;
+  std::string file = std::move(p->second);
+  delete p;
+  try {
+    self->PhysicsThread(file);
+  } catch (const std::exception& e) {
+    std::cerr << "[mujoco_physics] PhysicsThread: " << e.what() << std::endl;
+  } catch (...) {
+    std::cerr << "[mujoco_physics] PhysicsThread: unknown exception" << std::endl;
+  }
+  return nullptr;
+}
+#endif
 
 /**
  * @brief MuJoCo控制回调的静态包装函数
@@ -370,10 +395,16 @@ SimManager::~SimManager() {
       sim_->exitrequest.store(true);
     }
     
-    // 等待物理线程结束
+#if defined(__linux__)
+    if (physics_pthread_started_) {
+      pthread_join(physics_pthread_, nullptr);
+      physics_pthread_started_ = false;
+    }
+#else
     if (physics_thread_.joinable()) {
       physics_thread_.join();
     }
+#endif
     
     // 清理MuJoCo资源（添加空指针检查）
     if (d_) {
@@ -1073,6 +1104,12 @@ std::vector<SimManager::PerturbationData> SimManager::GetActivePerturbations() c
  * @brief 运行仿真
  * @details 启动物理线程和UI渲染循环
  */
+void SimManager::RequestExitFromSignal() {
+  if (sim_) {
+    sim_->exitrequest.store(1);
+  }
+}
+
 void SimManager::Run() {
   auto logger = node_->get_logger();
   std::string model_file = config_loader_->GetModelFilePath();
@@ -1085,7 +1122,27 @@ void SimManager::Run() {
 
   // 启动物理线程
   RCLCPP_INFO(logger, "Starting physics thread");
+#if defined(__linux__)
+  auto* pay = new std::pair<SimManager*, std::string>(this, std::string(model_file));
+  pthread_attr_t pattr;
+  pthread_attr_init(&pattr);
+  if (pthread_attr_setstacksize(&pattr, kPhysicsThreadStackBytes) != 0) {
+    RCLCPP_WARN(logger, "pthread_attr_setstacksize(%zu) failed, using default thread stack",
+                kPhysicsThreadStackBytes);
+  }
+  const int perr = pthread_create(&physics_pthread_, &pattr, &PhysicsThreadTrampoline, pay);
+  pthread_attr_destroy(&pattr);
+  if (perr != 0) {
+    delete pay;
+    RCLCPP_ERROR(logger, "pthread_create(physics) failed: %d", perr);
+    return;
+  }
+  physics_pthread_started_ = true;
+  RCLCPP_INFO(logger, "Physics thread stack size: %zu MB (Linux pthread)",
+              kPhysicsThreadStackBytes / (1024U * 1024U));
+#else
   physics_thread_ = std::thread([this, model_file]() { PhysicsThread(model_file); });
+#endif
 
   // 启动UI循环
   RCLCPP_INFO(logger, "Starting UI rendering loop");
@@ -1613,8 +1670,9 @@ void SimManager::PhysicsThread(std::string_view filename) {
   
   // 清理线程本地资源
   try {
-    // 重置ROS接口中的模型和数据指针，避免悬空指针
+    // 先排空接触/扰动异步写入并 flush，再清指针（避免退出时 bin 未刷盘或与写入线程竞态引发栈破坏）
     if (ros_interface_) {
+      ros_interface_->DrainBinaryWritersAndFlush();
       ros_interface_->SetModelAndData(nullptr, nullptr);
     }
   } catch (const std::exception& e) {

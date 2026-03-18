@@ -13,6 +13,11 @@ import os
 from datetime import datetime
 import seaborn as sns
 
+_SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+if _SCRIPT_DIR not in sys.path:
+    sys.path.insert(0, _SCRIPT_DIR)
+from mujoco_data_io import load_contact_file
+
 # Set English font
 plt.rcParams['font.sans-serif'] = ['DejaVu Sans', 'Arial']
 plt.rcParams['axes.unicode_minus'] = False
@@ -21,7 +26,7 @@ def load_and_clean_data(csv_file):
     """Load contact force CSV (new format: single-line header, timestamp, contact_id, body names, force columns, etc.)."""
     print(f"Loading data: {csv_file}")
     try:
-        df = pd.read_csv(csv_file)
+        df = load_contact_file(csv_file)
         if len(df) == 0:
             print("Warning: CSV is empty.")
             return df

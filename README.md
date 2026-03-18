@@ -122,7 +122,12 @@ source install/setup.bash
 # ros2 launch mujoco_simulator mujoco_simulator.launch.py csv_format:=csv or binary
 # 修改 pm_v2.yaml protection: enabled:true 启用护具功能（thickness:设置厚度）
 ros2 launch mujoco_simulator mujoco_simulator.launch.py save_contact_csv:=true save_perturbation_csv:=true save_joint_state_csv:=true save_sensor_vibration_csv:=true save_joint_forces_csv:=true save_link_kinetic_energy_csv:=true save_policy_switch_csv:=true csv_format:=csv
-# save_perturbation_csv: 推力数据；save_policy_switch_csv: RL 摔倒切换时间戳（walking↔mimic↔damping）；csv_file_path: 指定目录（留空则 ~/data/mujoco_logs/时间戳/）
+# csv_format:=binary 时写 *.bin；policy_switch 同为 policy_switch.bin（魔数 MJPSW01）。脚本见 scripts/mujoco_data_io.py（load_data_file）
+# binary 完整性：接触/扰动队列满时阻塞不丢条；物理线程结束前 Drain 并 flush 全部日志流。**Linux 上物理线程使用 64MB 栈（pthread）**，缓解退出时 stack smashing。
+# link_kinetic_energy_data.bin 新格式含文件头 MJLKEN02 + 各 body 名（与 CSV 列名一致）；旧 bin 无头，分析脚本只能得到 body_0…（需重新采集）。
+# mesh 模型若仅足底 box 与地面相交，摔倒段 contact_force_by_link 可能几乎只有踝部；`serial_links_mesh.xml` 已在膝/躯干增加接地球体以便记录膝、胸腹与地面接触。
+# contact_data.bin：进程异常退出时可能夹一条半截记录导致后续整段无法按旧逻辑连续解析；`mujoco_data_io.read_binary_contact_data` 已支持错位后向前搜索重新对齐，避免 bin 里后半段其它 link 的接触力被整段丢弃。
+# save_perturbation_csv: 推力；save_policy_switch_csv: RL 切换；留空目录则 ~/data/mujoco_logs/时间戳/
 
 # # 推倒采样仿真器 - 支持交互式干扰力控制
 # # 基本启动

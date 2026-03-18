@@ -1,25 +1,16 @@
 #include <rclcpp/rclcpp.hpp>
+#include <chrono>
 #include <cstring>
 #include <signal.h>
 #include <iostream>
+#include <thread>
 #include "sim_manager.h"
 
-// 全局变量用于信号处理
-static bool g_shutdown_requested = false;
-
-// 信号处理函数
+// 信号处理函数：先请求 MuJoCo 退出，物理线程在结束前 Drain 接触 bin；勿在此 rclcpp::shutdown（会与写线程竞态）。
 void signal_handler(int signal) {
-  std::cout << "\nReceived signal " << signal << ", shutting down gracefully..." << std::endl;
-  g_shutdown_requested = true;
-  
-  // 强制关闭ROS上下文
-  try {
-    rclcpp::shutdown();
-  } catch (const std::exception& e) {
-    std::cerr << "Exception during shutdown: " << e.what() << std::endl;
-  } catch (...) {
-    std::cerr << "Unknown exception during shutdown" << std::endl;
-  }
+  (void)signal;
+  std::cout << "\n收到退出信号，正在结束仿真并刷盘接触日志..." << std::endl;
+  SimManager::GetInstance().RequestExitFromSignal();
 }
 
 int main(int argc, char** argv) {

@@ -25,6 +25,7 @@
 #include <ctime>
 #include <algorithm>
 #include <cstdlib>
+#include <cstdint>
 
 #include "config_loader.h"
 #include "sim_manager.h"
@@ -82,23 +83,16 @@ RosInterface::RosInterface(const std::shared_ptr<rclcpp::Node>& node, std::share
  * @details 关闭CSV文件并输出保存路径信息
  */
 RosInterface::~RosInterface() {
-  // 停止后台写入线程
+  // 若物理线程未调用 DrainBinaryWritersAndFlush，在此结束写入线程
   if (writer_threads_running_.load()) {
     writer_threads_running_ = false;
-    
-    // 通知所有等待的线程
     contact_queue_cv_.notify_all();
     perturbation_queue_cv_.notify_all();
-    
-    // 等待线程结束
-    if (contact_writer_thread_.joinable()) {
-      contact_writer_thread_.join();
-    }
-    if (perturbation_writer_thread_.joinable()) {
-      perturbation_writer_thread_.join();
-    }
-    
-    // 确保所有队列中的数据都被写入
+    if (contact_writer_thread_.joinable()) contact_writer_thread_.join();
+    if (perturbation_writer_thread_.joinable()) perturbation_writer_thread_.join();
+    FlushRemainingData();
+  } else {
+    // 已 Drain：仅再收一次队列尾（理论上为空）
     FlushRemainingData();
   }
   
@@ -206,6 +200,17 @@ bool RosInterface::Initialize() {
   if (csv_format_ != "csv" && csv_format_ != "binary") {
     RCLCPP_WARN(node_->get_logger(), "Invalid csv_format '%s', using 'csv'", csv_format_.c_str());
     csv_format_ = "csv";
+  }
+  // binary：更频繁 flush + 接触队列阻塞不丢数据；csv：较大缓冲
+  if (csv_format_ == "binary") {
+    recording_flush_interval_ = 10;
+    flush_interval_ = 10;
+    RCLCPP_INFO(node_->get_logger(),
+                "binary 日志：recording_flush_interval=%d，接触队列满时阻塞写入不丢数据",
+                recording_flush_interval_);
+  } else {
+    recording_flush_interval_ = 100;
+    flush_interval_ = 100;
   }
 
   // 获取关节数量（必须在初始化CSV文件之前获取，因为CSV头部需要用到这个值）
@@ -336,7 +341,8 @@ bool RosInterface::Initialize() {
       link_kinetic_energy_csv_file_.open(link_kinetic_energy_csv_file_path_, std::ios::out);
     }
     if (link_kinetic_energy_csv_file_.is_open()) {
-      link_kinetic_energy_csv_header_written_ = false;  // 新文件必须写表头
+      link_kinetic_energy_csv_header_written_ = false;
+      link_ke_bin_schema_written_ = false;
       // 注意：CSV头部将在第一次保存时根据model写入，因为此时还没有model
       RCLCPP_INFO(node_->get_logger(), "Link kinetic energy data will be saved to: %s (format: %s)",
                   link_kinetic_energy_csv_file_path_.c_str(), csv_format_.c_str());
@@ -346,19 +352,31 @@ bool RosInterface::Initialize() {
     }
   }
 
-  // 初始化 policy switch CSV（RL policy 切换事件）
+  // 初始化 policy switch（CSV 或 binary，与 csv_format 一致）
   if (save_policy_switch_csv_) {
     std::stringstream ss;
-    ss << run_dir << "/policy_switch.csv";
+    ss << run_dir << "/policy_switch" << ((csv_format_ == "binary") ? ".bin" : ".csv");
     policy_switch_csv_file_path_ = ss.str();
     std::lock_guard<std::mutex> lock(policy_switch_csv_mutex_);
-    policy_switch_csv_file_.open(policy_switch_csv_file_path_, std::ios::out);
-    if (policy_switch_csv_file_.is_open()) {
-      policy_switch_csv_file_ << "timestamp,from_mode,to_mode,mimic_direction\n";
-      policy_switch_csv_file_.flush();
-      RCLCPP_INFO(node_->get_logger(), "Policy switch data will be saved to: %s", policy_switch_csv_file_path_.c_str());
+    if (csv_format_ == "binary") {
+      policy_switch_csv_file_.open(policy_switch_csv_file_path_, std::ios::out | std::ios::binary);
+      if (policy_switch_csv_file_.is_open()) {
+        const char kPsMagic[8] = {'M', 'J', 'P', 'S', 'W', '0', '1', '\0'};
+        policy_switch_csv_file_.write(kPsMagic, 8);
+        policy_switch_csv_file_.flush();
+      }
     } else {
-      RCLCPP_ERROR(node_->get_logger(), "Failed to open policy switch CSV: %s", policy_switch_csv_file_path_.c_str());
+      policy_switch_csv_file_.open(policy_switch_csv_file_path_, std::ios::out);
+      if (policy_switch_csv_file_.is_open()) {
+        policy_switch_csv_file_ << "timestamp,from_mode,to_mode,mimic_direction\n";
+        policy_switch_csv_file_.flush();
+      }
+    }
+    if (policy_switch_csv_file_.is_open()) {
+      RCLCPP_INFO(node_->get_logger(), "Policy switch data will be saved to: %s (format: %s)",
+                  policy_switch_csv_file_path_.c_str(), csv_format_.c_str());
+    } else {
+      RCLCPP_ERROR(node_->get_logger(), "Failed to open policy switch file: %s", policy_switch_csv_file_path_.c_str());
       save_policy_switch_csv_ = false;
     }
   }
@@ -674,6 +692,7 @@ void RosInterface::CloseAllCsvFiles() {
       link_kinetic_energy_csv_file_.flush();
       link_kinetic_energy_csv_file_.close();
     }
+    link_ke_bin_schema_written_ = false;
   }
   {
     std::lock_guard<std::mutex> lock(policy_switch_csv_mutex_);
@@ -815,18 +834,28 @@ void RosInterface::OpenCsvFilesAtDir(const std::string& csv_dir) {
     } else {
       link_kinetic_energy_csv_file_.open(link_kinetic_energy_csv_file_path_, std::ios::out);
     }
-    link_kinetic_energy_csv_header_written_ = false;  // 新文件必须写表头
+    link_kinetic_energy_csv_header_written_ = false;
+    link_ke_bin_schema_written_ = false;
   }
 
   if (save_policy_switch_csv_) {
     std::stringstream ss;
-    ss << run_dir << "/policy_switch.csv";
+    ss << run_dir << "/policy_switch" << ((csv_format_ == "binary") ? ".bin" : ".csv");
     policy_switch_csv_file_path_ = ss.str();
     std::lock_guard<std::mutex> lock(policy_switch_csv_mutex_);
-    policy_switch_csv_file_.open(policy_switch_csv_file_path_, std::ios::out);
-    if (policy_switch_csv_file_.is_open()) {
-      policy_switch_csv_file_ << "timestamp,from_mode,to_mode,mimic_direction\n";
-      policy_switch_csv_file_.flush();
+    if (csv_format_ == "binary") {
+      policy_switch_csv_file_.open(policy_switch_csv_file_path_, std::ios::out | std::ios::binary);
+      if (policy_switch_csv_file_.is_open()) {
+        const char kPsMagic[8] = {'M', 'J', 'P', 'S', 'W', '0', '1', '\0'};
+        policy_switch_csv_file_.write(kPsMagic, 8);
+        policy_switch_csv_file_.flush();
+      }
+    } else {
+      policy_switch_csv_file_.open(policy_switch_csv_file_path_, std::ios::out);
+      if (policy_switch_csv_file_.is_open()) {
+        policy_switch_csv_file_ << "timestamp,from_mode,to_mode,mimic_direction\n";
+        policy_switch_csv_file_.flush();
+      }
     }
   }
 
@@ -896,10 +925,25 @@ void RosInterface::UpdateSimState(const mjModel* m, mjData* d) {
   if (save_policy_switch_csv_ && pending_policy_switch_.has_data && policy_switch_csv_file_.is_open()) {
     std::lock_guard<std::mutex> lock(policy_switch_csv_mutex_);
     if (pending_policy_switch_.has_data) {
-      policy_switch_csv_file_ << std::fixed << std::setprecision(6) << d->time << ","
-                              << "\"" << pending_policy_switch_.from_mode << "\","
-                              << "\"" << pending_policy_switch_.to_mode << "\","
-                              << "\"" << pending_policy_switch_.mimic_direction << "\"\n";
+      if (csv_format_ == "binary") {
+        double t = d->time;
+        policy_switch_csv_file_.write(reinterpret_cast<const char*>(&t), sizeof(t));
+        auto write_str = [&](const std::string& s) {
+          uint32_t n = static_cast<uint32_t>(s.size());
+          policy_switch_csv_file_.write(reinterpret_cast<const char*>(&n), sizeof(n));
+          if (n > 0) {
+            policy_switch_csv_file_.write(s.data(), static_cast<std::streamsize>(s.size()));
+          }
+        };
+        write_str(pending_policy_switch_.from_mode);
+        write_str(pending_policy_switch_.to_mode);
+        write_str(pending_policy_switch_.mimic_direction);
+      } else {
+        policy_switch_csv_file_ << std::fixed << std::setprecision(6) << d->time << ","
+                                << "\"" << pending_policy_switch_.from_mode << "\","
+                                << "\"" << pending_policy_switch_.to_mode << "\","
+                                << "\"" << pending_policy_switch_.mimic_direction << "\"\n";
+      }
       policy_switch_csv_file_.flush();
       pending_policy_switch_.has_data = false;
     }
@@ -2142,14 +2186,14 @@ void RosInterface::PublishContactForces(const mjModel* m, mjData* d) {
         // 确定要写入的行数
         int num_rows = write_two_rows ? 2 : 1;
         
-        for (int row = 0; row < num_rows; ++row) {
+        for (int row_idx = 0; row_idx < num_rows; ++row_idx) {
           // 确定当前行使用的绿球坐标和body名称
           mjtNum green_ball_x, green_ball_y, green_ball_z;
           std::string body1_name_for_row, body2_name_for_row;
           
           if (write_two_rows) {
             // 写入两行：第一行用body1的坐标系，第二行用body2的坐标系
-            if (row == 0) {
+            if (row_idx == 0) {
               // 第一行：使用body1的坐标系，不交换名字
               green_ball_x = (*csv_green_ball_pos_x)[i];
               green_ball_y = (*csv_green_ball_pos_y)[i];
@@ -2185,50 +2229,49 @@ void RosInterface::PublishContactForces(const mjModel* m, mjData* d) {
               csv_base_link_angvel_x && csv_base_link_angvel_y && csv_base_link_angvel_z &&
               csv_collision_link_pos_x && csv_collision_link_pos_y && csv_collision_link_pos_z &&
               csv_collision_link_quat_w && csv_collision_link_quat_x && csv_collision_link_quat_y && csv_collision_link_quat_z) {
-            ContactDataRow row;
-            row.sim_time = sim_time;
-            row.contact_id = i;
-            row.body1_name = body1_name_for_row;
-            row.body2_name = body2_name_for_row;
-            row.red_ball_pos[0] = (*csv_red_ball_pos_x)[i];
-            row.red_ball_pos[1] = (*csv_red_ball_pos_y)[i];
-            row.red_ball_pos[2] = (*csv_red_ball_pos_z)[i];
-            row.green_ball_pos[0] = green_ball_x;
-            row.green_ball_pos[1] = green_ball_y;
-            row.green_ball_pos[2] = green_ball_z;
-            row.world_forces[0] = (*csv_world_forces_x)[i];
-            row.world_forces[1] = (*csv_world_forces_y)[i];
-            row.world_forces[2] = (*csv_world_forces_z)[i];
-            row.force_magnitude = (*csv_contact_force_magnitudes)[i];
-            row.force_normal = (*csv_contact_force_normals)[i];
-            row.force_friction = (*csv_contact_force_frictions)[i];
-            row.world_torques[0] = (*csv_world_torques_x)[i];
-            row.world_torques[1] = (*csv_world_torques_y)[i];
-            row.world_torques[2] = (*csv_world_torques_z)[i];
-            row.base_link_pos[0] = (*csv_base_link_pos_x)[i];
-            row.base_link_pos[1] = (*csv_base_link_pos_y)[i];
-            row.base_link_pos[2] = (*csv_base_link_pos_z)[i];
-            row.base_link_quat[0] = (*csv_base_link_quat_w)[i];
-            row.base_link_quat[1] = (*csv_base_link_quat_x)[i];
-            row.base_link_quat[2] = (*csv_base_link_quat_y)[i];
-            row.base_link_quat[3] = (*csv_base_link_quat_z)[i];
-            row.base_link_vel[0] = (*csv_base_link_vel_x)[i];
-            row.base_link_vel[1] = (*csv_base_link_vel_y)[i];
-            row.base_link_vel[2] = (*csv_base_link_vel_z)[i];
-            row.base_link_angvel[0] = (*csv_base_link_angvel_x)[i];
-            row.base_link_angvel[1] = (*csv_base_link_angvel_y)[i];
-            row.base_link_angvel[2] = (*csv_base_link_angvel_z)[i];
-            row.collision_link_pos[0] = (*csv_collision_link_pos_x)[i];
-            row.collision_link_pos[1] = (*csv_collision_link_pos_y)[i];
-            row.collision_link_pos[2] = (*csv_collision_link_pos_z)[i];
-            row.collision_link_quat[0] = (*csv_collision_link_quat_w)[i];
-            row.collision_link_quat[1] = (*csv_collision_link_quat_x)[i];
-            row.collision_link_quat[2] = (*csv_collision_link_quat_y)[i];
-            row.collision_link_quat[3] = (*csv_collision_link_quat_z)[i];
+            ContactDataRow cdata;
+            cdata.sim_time = sim_time;
+            cdata.contact_id = i;
+            cdata.body1_name = body1_name_for_row;
+            cdata.body2_name = body2_name_for_row;
+            cdata.red_ball_pos[0] = (*csv_red_ball_pos_x)[i];
+            cdata.red_ball_pos[1] = (*csv_red_ball_pos_y)[i];
+            cdata.red_ball_pos[2] = (*csv_red_ball_pos_z)[i];
+            cdata.green_ball_pos[0] = green_ball_x;
+            cdata.green_ball_pos[1] = green_ball_y;
+            cdata.green_ball_pos[2] = green_ball_z;
+            cdata.world_forces[0] = (*csv_world_forces_x)[i];
+            cdata.world_forces[1] = (*csv_world_forces_y)[i];
+            cdata.world_forces[2] = (*csv_world_forces_z)[i];
+            cdata.force_magnitude = (*csv_contact_force_magnitudes)[i];
+            cdata.force_normal = (*csv_contact_force_normals)[i];
+            cdata.force_friction = (*csv_contact_force_frictions)[i];
+            cdata.world_torques[0] = (*csv_world_torques_x)[i];
+            cdata.world_torques[1] = (*csv_world_torques_y)[i];
+            cdata.world_torques[2] = (*csv_world_torques_z)[i];
+            cdata.base_link_pos[0] = (*csv_base_link_pos_x)[i];
+            cdata.base_link_pos[1] = (*csv_base_link_pos_y)[i];
+            cdata.base_link_pos[2] = (*csv_base_link_pos_z)[i];
+            cdata.base_link_quat[0] = (*csv_base_link_quat_w)[i];
+            cdata.base_link_quat[1] = (*csv_base_link_quat_x)[i];
+            cdata.base_link_quat[2] = (*csv_base_link_quat_y)[i];
+            cdata.base_link_quat[3] = (*csv_base_link_quat_z)[i];
+            cdata.base_link_vel[0] = (*csv_base_link_vel_x)[i];
+            cdata.base_link_vel[1] = (*csv_base_link_vel_y)[i];
+            cdata.base_link_vel[2] = (*csv_base_link_vel_z)[i];
+            cdata.base_link_angvel[0] = (*csv_base_link_angvel_x)[i];
+            cdata.base_link_angvel[1] = (*csv_base_link_angvel_y)[i];
+            cdata.base_link_angvel[2] = (*csv_base_link_angvel_z)[i];
+            cdata.collision_link_pos[0] = (*csv_collision_link_pos_x)[i];
+            cdata.collision_link_pos[1] = (*csv_collision_link_pos_y)[i];
+            cdata.collision_link_pos[2] = (*csv_collision_link_pos_z)[i];
+            cdata.collision_link_quat[0] = (*csv_collision_link_quat_w)[i];
+            cdata.collision_link_quat[1] = (*csv_collision_link_quat_x)[i];
+            cdata.collision_link_quat[2] = (*csv_collision_link_quat_y)[i];
+            cdata.collision_link_quat[3] = (*csv_collision_link_quat_z)[i];
             
             // 将数据加入队列（非阻塞，异步写入）
-            // 注意：关节角度、关节加速度和电机扭矩已移到独立的 joint_state_data.csv 文件中
-            EnqueueContactData(row);
+            EnqueueContactData(cdata);
           }
         }
       }
@@ -2318,6 +2361,57 @@ void RosInterface::PublishContactForces(const mjModel* m, mjData* d) {
  * @param data MuJoCo数据指针
  */
 
+
+void RosInterface::FlushAllRecordingStreams() {
+  {
+    std::lock_guard<std::mutex> lk(joint_forces_csv_mutex_);
+    if (joint_forces_csv_file_.is_open()) joint_forces_csv_file_.flush();
+  }
+  {
+    std::lock_guard<std::mutex> lk(sensor_vibration_csv_mutex_);
+    if (sensor_vibration_csv_file_.is_open()) sensor_vibration_csv_file_.flush();
+  }
+  {
+    std::lock_guard<std::mutex> lk(joint_state_csv_mutex_);
+    if (joint_state_csv_file_.is_open()) joint_state_csv_file_.flush();
+  }
+  {
+    std::lock_guard<std::mutex> lk(link_kinetic_energy_csv_mutex_);
+    if (link_kinetic_energy_csv_file_.is_open()) link_kinetic_energy_csv_file_.flush();
+  }
+  {
+    std::lock_guard<std::mutex> lk(policy_switch_csv_mutex_);
+    if (policy_switch_csv_file_.is_open()) policy_switch_csv_file_.flush();
+  }
+}
+
+void RosInterface::DrainBinaryWritersAndFlush() {
+  all_csv_enabled = false;
+  if (writer_threads_running_.load()) {
+    writer_threads_running_ = false;
+    contact_queue_cv_.notify_all();
+    perturbation_queue_cv_.notify_all();
+    if (contact_writer_thread_.joinable()) contact_writer_thread_.join();
+    if (perturbation_writer_thread_.joinable()) perturbation_writer_thread_.join();
+    FlushRemainingData();
+    {
+      std::lock_guard<std::mutex> lk(csv_mutex_);
+      if (csv_file_.is_open()) csv_file_.flush();
+    }
+    {
+      std::lock_guard<std::mutex> lk(perturbation_csv_mutex_);
+      if (perturbation_csv_file_.is_open()) perturbation_csv_file_.flush();
+    }
+  } else {
+    std::lock_guard<std::mutex> lk(csv_mutex_);
+    if (csv_file_.is_open()) csv_file_.flush();
+    std::lock_guard<std::mutex> lk2(perturbation_csv_mutex_);
+    if (perturbation_csv_file_.is_open()) perturbation_csv_file_.flush();
+  }
+  // 关节力/振动/joint_state/link_energy 等在物理线程内同步写入，此前从未在 Drain 中 flush；
+  // 若随后进程崩溃（如栈破坏），缓冲区尾部会丢失，导致 binary「记录不完整」。
+  FlushAllRecordingStreams();
+}
 
 void RosInterface::SetModelAndData(mjModel* model, mjData* data) {
   try {
@@ -2488,7 +2582,7 @@ void RosInterface::SaveJointForcesToCSV(const mjModel* m, mjData* d) {
       // 每N条记录flush一次
       static int flush_counter = 0;
       flush_counter++;
-      if (flush_counter >= 100) {
+      if (flush_counter >= recording_flush_interval_) {
         joint_forces_csv_file_.flush();
         flush_counter = 0;
       }
@@ -2551,14 +2645,18 @@ void RosInterface::SaveJointForcesToCSV(const mjModel* m, mjData* d) {
 // ==================== 异步写入函数实现 ====================
 
 void RosInterface::EnqueueContactData(const ContactDataRow& row) {
-  std::lock_guard<std::mutex> lock(contact_queue_mutex_);
-  
-  // 如果队列太大，丢弃最旧的数据（FIFO）
-  if (contact_data_queue_.size() >= MAX_QUEUE_SIZE) {
-    contact_data_queue_.pop();  // 移除最旧的数据
+  std::unique_lock<std::mutex> lock(contact_queue_mutex_);
+  if (csv_format_ == "binary") {
+    // binary：阻塞直至有空间，保证实验数据完整（物理步会略等写盘线程）
+    contact_queue_cv_.wait(lock, [this] {
+      return contact_data_queue_.size() < MAX_QUEUE_SIZE || !writer_threads_running_.load();
+    });
+    if (!writer_threads_running_.load()) {
+      return;
+    }
+  } else if (contact_data_queue_.size() >= MAX_QUEUE_SIZE) {
+    contact_data_queue_.pop();
     contact_queue_dropped_++;
-    
-    // 每丢弃1000条记录警告一次
     if (contact_queue_dropped_ % 1000 == 0) {
       RCLCPP_WARN_THROTTLE(node_->get_logger(), *node_->get_clock(), 5000,
                           "Contact data queue full (%zu), dropped %zu records. "
@@ -2566,20 +2664,23 @@ void RosInterface::EnqueueContactData(const ContactDataRow& row) {
                           contact_data_queue_.size(), contact_queue_dropped_);
     }
   }
-  
   contact_data_queue_.push(row);
+  lock.unlock();
   contact_queue_cv_.notify_one();
 }
 
 void RosInterface::EnqueuePerturbationData(const PerturbationDataRow& row) {
-  std::lock_guard<std::mutex> lock(perturbation_queue_mutex_);
-  
-  // 如果队列太大，丢弃最旧的数据（FIFO）
-  if (perturbation_data_queue_.size() >= MAX_QUEUE_SIZE) {
-    perturbation_data_queue_.pop();  // 移除最旧的数据
+  std::unique_lock<std::mutex> lock(perturbation_queue_mutex_);
+  if (csv_format_ == "binary") {
+    perturbation_queue_cv_.wait(lock, [this] {
+      return perturbation_data_queue_.size() < MAX_QUEUE_SIZE || !writer_threads_running_.load();
+    });
+    if (!writer_threads_running_.load()) {
+      return;
+    }
+  } else if (perturbation_data_queue_.size() >= MAX_QUEUE_SIZE) {
+    perturbation_data_queue_.pop();
     perturbation_queue_dropped_++;
-    
-    // 每丢弃1000条记录警告一次
     if (perturbation_queue_dropped_ % 1000 == 0) {
       RCLCPP_WARN_THROTTLE(node_->get_logger(), *node_->get_clock(), 5000,
                           "Perturbation data queue full (%zu), dropped %zu records. "
@@ -2587,8 +2688,8 @@ void RosInterface::EnqueuePerturbationData(const PerturbationDataRow& row) {
                           perturbation_data_queue_.size(), perturbation_queue_dropped_);
     }
   }
-  
   perturbation_data_queue_.push(row);
+  lock.unlock();
   perturbation_queue_cv_.notify_one();
 }
 
@@ -2667,6 +2768,7 @@ void RosInterface::ContactWriterThread() {
       
       lock.lock();
     }
+    contact_queue_cv_.notify_all();  // 唤醒因 binary 队列满而阻塞的 EnqueueContactData
   }
   
   // 最后flush一次
@@ -2732,6 +2834,7 @@ void RosInterface::PerturbationWriterThread() {
       
       lock.lock();
     }
+    perturbation_queue_cv_.notify_all();
   }
   
   // 最后flush一次
@@ -2742,34 +2845,34 @@ void RosInterface::PerturbationWriterThread() {
 }
 
 void RosInterface::WriteContactDataBinary(const ContactDataRow& row) {
-  // 写入固定大小的数据
-  csv_file_.write(reinterpret_cast<const char*>(&row.sim_time), sizeof(double));
-  csv_file_.write(reinterpret_cast<const char*>(&row.contact_id), sizeof(int));
-  
-  // 写入字符串长度和内容
-  int32_t body1_len = row.body1_name.length();
-  csv_file_.write(reinterpret_cast<const char*>(&body1_len), sizeof(int32_t));
-  csv_file_.write(row.body1_name.c_str(), body1_len);
-  
-  int32_t body2_len = row.body2_name.length();
-  csv_file_.write(reinterpret_cast<const char*>(&body2_len), sizeof(int32_t));
-  csv_file_.write(row.body2_name.c_str(), body2_len);
-  
-  // 写入数组数据
-  csv_file_.write(reinterpret_cast<const char*>(row.red_ball_pos), 3 * sizeof(double));
-  csv_file_.write(reinterpret_cast<const char*>(row.green_ball_pos), 3 * sizeof(double));
-  csv_file_.write(reinterpret_cast<const char*>(row.world_forces), 3 * sizeof(double));
-  csv_file_.write(reinterpret_cast<const char*>(&row.force_magnitude), sizeof(double));
-  csv_file_.write(reinterpret_cast<const char*>(&row.force_normal), sizeof(double));
-  csv_file_.write(reinterpret_cast<const char*>(&row.force_friction), sizeof(double));
-  csv_file_.write(reinterpret_cast<const char*>(row.world_torques), 3 * sizeof(double));
-  csv_file_.write(reinterpret_cast<const char*>(row.base_link_pos), 3 * sizeof(double));
-  csv_file_.write(reinterpret_cast<const char*>(row.base_link_quat), 4 * sizeof(double));
-  csv_file_.write(reinterpret_cast<const char*>(row.base_link_vel), 3 * sizeof(double));
-  csv_file_.write(reinterpret_cast<const char*>(row.base_link_angvel), 3 * sizeof(double));
-  csv_file_.write(reinterpret_cast<const char*>(row.collision_link_pos), 3 * sizeof(double));
-  csv_file_.write(reinterpret_cast<const char*>(row.collision_link_quat), 4 * sizeof(double));
-  // 注意：关节角度、关节加速度和电机扭矩已移到独立的 joint_state_data.csv 文件中
+  // 单条记录一次 write，降低进程被 kill 时留下半条记录的概率
+  std::string buf;
+  buf.reserve(400 + row.body1_name.size() + row.body2_name.size());
+  auto ap = [&buf](const void* p, size_t n) {
+    buf.append(static_cast<const char*>(p), n);
+  };
+  ap(&row.sim_time, sizeof(double));
+  ap(&row.contact_id, sizeof(int));
+  int32_t body1_len = static_cast<int32_t>(row.body1_name.length());
+  ap(&body1_len, sizeof(int32_t));
+  ap(row.body1_name.data(), row.body1_name.size());
+  int32_t body2_len = static_cast<int32_t>(row.body2_name.length());
+  ap(&body2_len, sizeof(int32_t));
+  ap(row.body2_name.data(), row.body2_name.size());
+  ap(row.red_ball_pos, 3 * sizeof(double));
+  ap(row.green_ball_pos, 3 * sizeof(double));
+  ap(row.world_forces, 3 * sizeof(double));
+  ap(&row.force_magnitude, sizeof(double));
+  ap(&row.force_normal, sizeof(double));
+  ap(&row.force_friction, sizeof(double));
+  ap(row.world_torques, 3 * sizeof(double));
+  ap(row.base_link_pos, 3 * sizeof(double));
+  ap(row.base_link_quat, 4 * sizeof(double));
+  ap(row.base_link_vel, 3 * sizeof(double));
+  ap(row.base_link_angvel, 3 * sizeof(double));
+  ap(row.collision_link_pos, 3 * sizeof(double));
+  ap(row.collision_link_quat, 4 * sizeof(double));
+  csv_file_.write(buf.data(), buf.size());
 }
 
 void RosInterface::WritePerturbationDataBinary(const PerturbationDataRow& row) {
@@ -2983,7 +3086,7 @@ void RosInterface::SaveSensorVibrationToCSV(const mjModel* m, mjData* d) {
     // 每N条记录flush一次
     static int flush_counter = 0;
     flush_counter++;
-    if (flush_counter >= 100) {
+    if (flush_counter >= recording_flush_interval_) {
       sensor_vibration_csv_file_.flush();
       flush_counter = 0;
     }
@@ -2999,7 +3102,7 @@ void RosInterface::SaveSensorVibrationToCSV(const mjModel* m, mjData* d) {
     // 每N条记录flush一次
     static int flush_counter = 0;
     flush_counter++;
-    if (flush_counter >= 100) {
+    if (flush_counter >= recording_flush_interval_) {
       sensor_vibration_csv_file_.flush();
       flush_counter = 0;
     }
@@ -3082,7 +3185,7 @@ void RosInterface::SaveJointStateToCSV(const mjModel* m, mjData* d) {
     // 每N条记录flush一次
     static int flush_counter = 0;
     flush_counter++;
-    if (flush_counter >= 100) {
+    if (flush_counter >= recording_flush_interval_) {
       joint_state_csv_file_.flush();
       flush_counter = 0;
     }
@@ -3126,7 +3229,7 @@ void RosInterface::SaveJointStateToCSV(const mjModel* m, mjData* d) {
     // 每N条记录flush一次
     static int flush_counter = 0;
     flush_counter++;
-    if (flush_counter >= 100) {
+    if (flush_counter >= recording_flush_interval_) {
       joint_state_csv_file_.flush();
       flush_counter = 0;
     }
@@ -3205,6 +3308,30 @@ void RosInterface::SaveLinkKineticEnergyToCSV(const mjModel* m, mjData* d) {
   }
   
   if (csv_format_ == "binary") {
+    if (!link_ke_bin_schema_written_) {
+      const char kLkMagic[8] = {'M', 'J', 'L', 'K', 'E', 'N', '0', '2'};
+      link_kinetic_energy_csv_file_.write(kLkMagic, 8);
+      int32_t nb_schema = static_cast<int32_t>(m->nbody);
+      link_kinetic_energy_csv_file_.write(reinterpret_cast<const char*>(&nb_schema), sizeof(nb_schema));
+      for (int bi = 0; bi < m->nbody; ++bi) {
+        std::string bname = m->names + m->name_bodyadr[bi];
+        for (char& c : bname) {
+          if (c == ' ' || c == ',') c = '_';
+        }
+        if (bname.empty()) {
+          bname = "body_" + std::to_string(bi);
+        }
+        int32_t slen = static_cast<int32_t>(bname.size());
+        link_kinetic_energy_csv_file_.write(reinterpret_cast<const char*>(&slen), sizeof(slen));
+        if (slen > 0) {
+          link_kinetic_energy_csv_file_.write(bname.data(), slen);
+        }
+      }
+      link_kinetic_energy_csv_file_.flush();
+      link_ke_bin_schema_written_ = true;
+      RCLCPP_INFO(node_->get_logger(),
+                  "Link kinetic energy binary schema (MJLKEN02) written: %d body names", m->nbody);
+    }
     // 二进制格式写入
     double sim_time = d->time;
     link_kinetic_energy_csv_file_.write(reinterpret_cast<const char*>(&sim_time), sizeof(double));
@@ -3294,7 +3421,7 @@ void RosInterface::SaveLinkKineticEnergyToCSV(const mjModel* m, mjData* d) {
     // 每N条记录flush一次
     static int flush_counter_bin = 0;
     flush_counter_bin++;
-    if (flush_counter_bin >= 100) {
+    if (flush_counter_bin >= recording_flush_interval_) {
       link_kinetic_energy_csv_file_.flush();
       flush_counter_bin = 0;
     }
@@ -3377,7 +3504,7 @@ void RosInterface::SaveLinkKineticEnergyToCSV(const mjModel* m, mjData* d) {
     // 每N条记录flush一次
     static int flush_counter_csv = 0;
     flush_counter_csv++;
-    if (flush_counter_csv >= 100) {
+    if (flush_counter_csv >= recording_flush_interval_) {
       link_kinetic_energy_csv_file_.flush();
       flush_counter_csv = 0;
     }

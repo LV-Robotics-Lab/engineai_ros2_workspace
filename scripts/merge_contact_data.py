@@ -11,6 +11,11 @@ from datetime import datetime
 import time
 import re
 
+_SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+if _SCRIPT_DIR not in sys.path:
+    sys.path.insert(0, _SCRIPT_DIR)
+from mujoco_data_io import load_contact_file, write_contact_data_bin
+
 def parse_fall_type_info(csv_file_path, log_dir):
     """
     从文件路径和目录名中解析摔倒类型、方向和csv时间编号
@@ -124,7 +129,13 @@ def parse_fall_type_info(csv_file_path, log_dir):
         print(f"  警告: 解析摔倒类型信息时出错: {e}")
         return None
 
-def merge_contact_csv_files(log_dir, output_file=None, add_fall_type_column=False, file_pattern="contact_data_*.csv"):
+def merge_contact_csv_files(
+    log_dir,
+    output_file=None,
+    add_fall_type_column=False,
+    file_pattern="contact_data_*.csv",
+    write_bin=False,
+):
     """
     合并指定目录下的所有CSV文件
     
@@ -137,16 +148,23 @@ def merge_contact_csv_files(log_dir, output_file=None, add_fall_type_column=Fals
     print(f"正在合并目录: {log_dir}")
     print(f"文件模式: {file_pattern}")
     
-    # 查找所有匹配模式的CSV文件
-    # 首先尝试在当前目录查找
-    pattern = os.path.join(log_dir, file_pattern)
-    csv_files = glob.glob(pattern)
+    # 查找 contact_data_* .csv 与 .bin（默认同时合并）
+    if file_pattern == "contact_data_*.csv":
+        csv_files = glob.glob(os.path.join(log_dir, "contact_data_*.csv"))
+        csv_files += glob.glob(os.path.join(log_dir, "contact_data_*.bin"))
+    else:
+        pattern = os.path.join(log_dir, file_pattern)
+        csv_files = glob.glob(pattern)
     is_recursive = False
     
     # 如果当前目录没有找到，递归查找子目录
     if not csv_files:
-        pattern_recursive = os.path.join(log_dir, "**", file_pattern)
-        csv_files = glob.glob(pattern_recursive, recursive=True)
+        if file_pattern == "contact_data_*.csv":
+            csv_files = glob.glob(os.path.join(log_dir, "**", "contact_data_*.csv"), recursive=True)
+            csv_files += glob.glob(os.path.join(log_dir, "**", "contact_data_*.bin"), recursive=True)
+        else:
+            pattern_recursive = os.path.join(log_dir, "**", file_pattern)
+            csv_files = glob.glob(pattern_recursive, recursive=True)
         if csv_files:
             print(f"在当前目录未找到匹配的文件，递归查找子目录...")
             is_recursive = True
@@ -199,20 +217,18 @@ def merge_contact_csv_files(log_dir, output_file=None, add_fall_type_column=Fals
             folder_name = os.path.basename(os.path.abspath(log_dir))
             sub_dir_name = os.path.basename(sub_dir) if sub_dir != "." else folder_name
             
+            ext_out = ".bin" if write_bin else ".csv"
             if output_file is None:
-                # 自动生成文件名：merged_contact_data_{子目录名}_{时间戳}.csv
-                # 使用绝对路径，避免在_merge_csv_files_from_list中重复拼接
-                sub_output_file = os.path.abspath(os.path.join(log_dir, f"merged_contact_data_{sub_dir_name}_{timestamp}.csv"))
+                sub_output_file = os.path.abspath(
+                    os.path.join(log_dir, f"merged_contact_data_{sub_dir_name}_{timestamp}{ext_out}")
+                )
             else:
-                # 如果指定了输出文件名，为每个子目录生成不同的文件名
                 base_name = os.path.splitext(os.path.basename(output_file))[0]
-                ext = os.path.splitext(output_file)[1] or ".csv"
-                # 使用子目录名称作为后缀，确保每个子目录的文件名不同
-                # 使用绝对路径，避免在_merge_csv_files_from_list中重复拼接
+                ext = ".bin" if write_bin else (os.path.splitext(output_file)[1] or ".csv")
                 sub_output_file = os.path.abspath(os.path.join(log_dir, f"{base_name}_{sub_dir_name}{ext}"))
-            
-            # 调用合并函数处理当前子目录的文件
-            merged_file = _merge_csv_files_from_list(sub_csv_files, sub_log_dir, sub_output_file, add_fall_type_column)
+            merged_file = _merge_csv_files_from_list(
+                sub_csv_files, sub_log_dir, sub_output_file, add_fall_type_column, write_bin=write_bin
+            )
             if merged_file:
                 output_files.append(merged_file)
         
@@ -232,9 +248,11 @@ def merge_contact_csv_files(log_dir, output_file=None, add_fall_type_column=Fals
         print(f"  {i}. {os.path.basename(file)}")
     
     # 调用合并函数处理文件列表
-    return _merge_csv_files_from_list(csv_files, log_dir, output_file, add_fall_type_column)
+    return _merge_csv_files_from_list(csv_files, log_dir, output_file, add_fall_type_column, write_bin=write_bin)
 
-def _merge_csv_files_from_list(csv_files, log_dir, output_file=None, add_fall_type_column=False):
+def _merge_csv_files_from_list(
+    csv_files, log_dir, output_file=None, add_fall_type_column=False, write_bin=False
+):
     """
     从文件列表合并CSV文件的内部函数
     
@@ -270,7 +288,7 @@ def _merge_csv_files_from_list(csv_files, log_dir, output_file=None, add_fall_ty
             
             # 读取CSV文件
             print(f"  📖 正在读取文件...")
-            df = pd.read_csv(csv_file)
+            df = load_contact_file(csv_file)
             read_time = time.time() - file_start_time
             print(f"  ✅ 读取完成: {len(df)} 行数据 (耗时: {read_time:.2f}秒)")
             
@@ -327,9 +345,9 @@ def _merge_csv_files_from_list(csv_files, log_dir, output_file=None, add_fall_ty
     # 生成输出文件名
     if output_file is None:
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        # 获取原文件夹名称
         folder_name = os.path.basename(os.path.abspath(log_dir))
-        output_file = os.path.join(log_dir, f"merged_contact_data_{folder_name}_{timestamp}.csv")
+        ext_out = ".bin" if write_bin else ".csv"
+        output_file = os.path.join(log_dir, f"merged_contact_data_{folder_name}_{timestamp}{ext_out}")
     elif not os.path.isabs(output_file):
         # 如果输出文件不是绝对路径，检查是否已经是完整路径（包含log_dir）
         # 如果output_file已经包含log_dir的路径，直接使用；否则拼接
@@ -342,73 +360,66 @@ def _merge_csv_files_from_list(csv_files, log_dir, output_file=None, add_fall_ty
             # 如果已经在log_dir下，直接使用（可能是从子目录合并时传入的完整路径）
             output_file = abs_output_file
     
-    # 保存合并后的文件
     print(f"\n{'='*60}")
-    print(f"💾 正在保存到: {output_file}")
+    print(f"💾 正在保存到: {output_file} ({'binary' if write_bin else 'CSV'})")
     print(f"{'='*60}")
-    
     save_start_time = time.time()
-    
-    # 分块保存以显示进度
     total_rows = len(merged_df)
-    chunk_size = max(1000, total_rows // 20)  # 至少分20个块，每块至少1000行
-    
-    print(f"📊 总行数: {total_rows:,}")
-    print(f"📦 分块大小: {chunk_size:,} 行/块")
-    print(f"🔄 预计分块数: {(total_rows + chunk_size - 1) // chunk_size}")
-    
-    # 创建进度显示
-    def save_with_progress():
-        import io
-        output_buffer = io.StringIO()
-        
-        # 写入CSV头部
-        merged_df.head(0).to_csv(output_buffer, index=False)
-        header_size = len(output_buffer.getvalue())
-        
-        # 分块写入数据
-        chunks_written = 0
-        total_chunks = (total_rows + chunk_size - 1) // chunk_size
-        
-        for start_idx in range(0, total_rows, chunk_size):
-            end_idx = min(start_idx + chunk_size, total_rows)
-            chunk_df = merged_df.iloc[start_idx:end_idx]
-            
-            # 写入数据块
-            chunk_buffer = io.StringIO()
-            chunk_df.to_csv(chunk_buffer, index=False, header=False)
-            chunk_data = chunk_buffer.getvalue()
-            
-            # 显示进度
-            chunks_written += 1
-            progress = (chunks_written / total_chunks) * 100
-            bar_length = 30
-            filled_length = int(bar_length * chunks_written // total_chunks)
-            bar = '█' * filled_length + '░' * (bar_length - filled_length)
-            
-            elapsed = time.time() - save_start_time
-            if chunks_written > 1:
-                avg_time_per_chunk = elapsed / chunks_written
-                remaining_chunks = total_chunks - chunks_written
-                estimated_remaining = remaining_chunks * avg_time_per_chunk
-                print(f"\r  💾 保存进度: [{bar}] {progress:.1f}% ({chunks_written}/{total_chunks}) "
-                      f"⏱️ 已用: {elapsed:.1f}s 预计剩余: {estimated_remaining:.1f}s", end='', flush=True)
-            else:
-                print(f"\r  💾 保存进度: [{bar}] {progress:.1f}% ({chunks_written}/{total_chunks}) "
-                      f"⏱️ 已用: {elapsed:.1f}s", end='', flush=True)
-            
-            # 将数据写入文件
-            with open(output_file, 'a' if chunks_written > 1 else 'w') as f:
-                if chunks_written == 1:
-                    # 第一次写入，包含头部
-                    f.write(merged_df.head(0).to_csv(index=False))
-                f.write(chunk_data)
-        
-        print()  # 换行
-    
-    # 执行分块保存
-    save_with_progress()
-    save_time = time.time() - save_start_time
+
+    if write_bin:
+        cols_drop = [c for c in ("source_file", "fall_type_info") if c in merged_df.columns]
+        df_bin = merged_df.drop(columns=cols_drop, errors="ignore")
+        print(f"📊 总行数: {total_rows:,} → 写入 .bin（与仿真 contact_data.bin 同格式，fig4_violin 可读）")
+        write_contact_data_bin(df_bin, output_file, num_joints=0)
+        save_time = time.time() - save_start_time
+    else:
+        chunk_size = max(1000, total_rows // 20)
+        print(f"📊 总行数: {total_rows:,}")
+        print(f"📦 分块大小: {chunk_size:,} 行/块")
+        print(f"🔄 预计分块数: {(total_rows + chunk_size - 1) // chunk_size}")
+
+        def save_with_progress():
+            import io
+
+            chunks_written = 0
+            total_chunks = (total_rows + chunk_size - 1) // chunk_size
+            for start_idx in range(0, total_rows, chunk_size):
+                end_idx = min(start_idx + chunk_size, total_rows)
+                chunk_df = merged_df.iloc[start_idx:end_idx]
+                chunk_buffer = io.StringIO()
+                chunk_df.to_csv(chunk_buffer, index=False, header=False)
+                chunk_data = chunk_buffer.getvalue()
+                chunks_written += 1
+                progress = (chunks_written / total_chunks) * 100
+                bar_length = 30
+                filled_length = int(bar_length * chunks_written // total_chunks)
+                bar = "█" * filled_length + "░" * (bar_length - filled_length)
+                elapsed = time.time() - save_start_time
+                if chunks_written > 1:
+                    avg_time_per_chunk = elapsed / chunks_written
+                    remaining_chunks = total_chunks - chunks_written
+                    estimated_remaining = remaining_chunks * avg_time_per_chunk
+                    print(
+                        f"\r  💾 保存进度: [{bar}] {progress:.1f}% ({chunks_written}/{total_chunks}) "
+                        f"⏱️ 已用: {elapsed:.1f}s 预计剩余: {estimated_remaining:.1f}s",
+                        end="",
+                        flush=True,
+                    )
+                else:
+                    print(
+                        f"\r  💾 保存进度: [{bar}] {progress:.1f}% ({chunks_written}/{total_chunks}) "
+                        f"⏱️ 已用: {elapsed:.1f}s",
+                        end="",
+                        flush=True,
+                    )
+                with open(output_file, "a" if chunks_written > 1 else "w") as f:
+                    if chunks_written == 1:
+                        f.write(merged_df.head(0).to_csv(index=False))
+                    f.write(chunk_data)
+            print()
+
+        save_with_progress()
+        save_time = time.time() - save_start_time
     
     file_size_mb = os.path.getsize(output_file) / (1024*1024)
     print(f"✅ 保存完成! (耗时: {save_time:.2f}秒)")
@@ -477,6 +488,8 @@ def main():
   
   # 指定输出文件名
   python3 merge_contact_data.py logs/test_poweroff_100 merged_output.csv --add-fall-type
+  python3 merge_contact_data.py logs/test_poweroff_100 --bin
+  python3 merge_contact_data.py logs/test_poweroff_100 merged_merged.bin
   
   # 合并已经合并过的CSV文件（二次合并）
   python3 merge_contact_data.py logs/test_poweroff_100 --pattern "merged_contact_data_*.csv"
@@ -488,11 +501,17 @@ def main():
                        help='添加"摔倒类型-方向-csv时间编号"列（格式：poweroff-backward-20251021_213713）')
     parser.add_argument('--pattern', default='contact_data_*.csv',
                        help='要合并的文件模式（默认：contact_data_*.csv）。例如：merged_contact_data_*.csv 用于合并已合并的文件')
-    
+    parser.add_argument(
+        "--bin",
+        action="store_true",
+        help="输出 merged_contact_data*.bin（与仿真二进制同格式，fig4_violin / mujoco_data_io 可读）；默认 CSV",
+    )
     args = parser.parse_args()
-    
     log_dir = args.log_directory
     output_file = args.output_file
+    write_bin = args.bin or (output_file is not None and str(output_file).lower().endswith(".bin"))
+    if args.bin and output_file and not str(output_file).lower().endswith(".bin"):
+        output_file = os.path.splitext(output_file)[0] + ".bin"
     add_fall_type_column = args.add_fall_type
     file_pattern = args.pattern
     
@@ -504,7 +523,9 @@ def main():
         print("✅ 已启用: 将添加'摔倒类型-方向-csv时间编号'列")
     
     # 合并CSV文件
-    merged_file = merge_contact_csv_files(log_dir, output_file, add_fall_type_column, file_pattern)
+    merged_file = merge_contact_csv_files(
+        log_dir, output_file, add_fall_type_column, file_pattern, write_bin=write_bin
+    )
     
     if merged_file:
         print(f"\n✅ 合并成功! 输出文件: {merged_file}")

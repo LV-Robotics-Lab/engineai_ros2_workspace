@@ -11,6 +11,12 @@ import sys
 import os
 import argparse
 from pathlib import Path
+import sys
+
+_SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+if _SCRIPT_DIR not in sys.path:
+    sys.path.insert(0, _SCRIPT_DIR)
+from mujoco_data_io import load_data_file
 
 # Set English font
 plt.rcParams['font.sans-serif'] = ['DejaVu Sans', 'Arial']
@@ -21,7 +27,7 @@ def load_joint_forces_csv(csv_file):
     print(f"Loading joint forces data: {csv_file}")
     
     try:
-        df = pd.read_csv(csv_file)
+        df = load_data_file(csv_file)
         print(f"Successfully loaded {len(df)} rows")
         return df
     except Exception as e:

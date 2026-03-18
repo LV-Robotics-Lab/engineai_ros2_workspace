@@ -815,15 +815,19 @@ def _apply_body_part_chunk(args):
 def read_csv_with_progress(csv_path, usecols=None, encoding='utf-8'):
     """
     读取CSV文件，支持分块读取和进度条显示（单进程）
-    
-    参数:
-        csv_path: CSV文件路径
-        usecols: 要读取的列（可选）
-        encoding: 编码方式，默认'utf-8'
-    
-    返回:
-        df: DataFrame
+    contact_data.bin 时整文件读入（无分块）。
     """
+    if str(csv_path).lower().endswith('.bin'):
+        _sd = os.path.dirname(os.path.abspath(__file__))
+        if _sd not in sys.path:
+            sys.path.insert(0, _sd)
+        from mujoco_data_io import load_contact_file
+        df = load_contact_file(csv_path)
+        if usecols is not None:
+            keep = [c for c in usecols if c in df.columns]
+            if keep:
+                df = df[keep]
+        return df
     file_size = os.path.getsize(csv_path)
     file_size_mb = file_size / (1024 * 1024)
     

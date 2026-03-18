@@ -54,6 +54,9 @@ class RosInterface {
   // Set the current mjModel and mjData
   void SetModelAndData(mjModel* model, mjData* data);
 
+  /** 物理线程结束前调用：停写队列、join 写入线程并 flush，避免进程异常退出时 bin 截断或栈错乱 */
+  void DrainBinaryWritersAndFlush();
+
   // Get the ROS node
   std::shared_ptr<rclcpp::Node> GetNode() const { return node_; }
 
@@ -151,6 +154,8 @@ class RosInterface {
   std::ofstream link_kinetic_energy_csv_file_;
   std::mutex link_kinetic_energy_csv_mutex_;
   bool link_kinetic_energy_csv_header_written_ = false;  // 每次打开新文件需重置，保证写表头
+  /** binary：首帧前写入 MJLKEN02 + 各 body 名，供 Python 与 CSV 列名一致 */
+  bool link_ke_bin_schema_written_ = false;
 
   // Policy switch CSV (RL policy 切换事件：walking↔mimic↔damping)
   bool save_policy_switch_csv_ = false;
@@ -213,10 +218,12 @@ class RosInterface {
   std::atomic<bool> writer_threads_running_{false};
   std::condition_variable contact_queue_cv_;
   std::condition_variable perturbation_queue_cv_;
-  int flush_interval_ = 100;  // 每N条记录flush一次，而不是每帧
+  int flush_interval_ = 100;  // 接触/扰动异步写线程：每 N 条 flush
+  /** 关节力/振动/joint_state/link_energy 等同步写：每 N 帧 flush（binary 时用更小值减少异常退出丢尾） */
+  int recording_flush_interval_ = 100;
   int contact_flush_counter_ = 0;
   int perturbation_flush_counter_ = 0;
-  static constexpr size_t MAX_QUEUE_SIZE = 10000;  // 队列最大大小，防止内存无限增长
+  static constexpr size_t MAX_QUEUE_SIZE = 10000;  // CSV 模式下队列满则丢最旧；binary 模式下阻塞直至有空间
   size_t contact_queue_dropped_ = 0;  // 丢弃的数据计数
   size_t perturbation_queue_dropped_ = 0;  // 丢弃的数据计数
 
@@ -234,6 +241,8 @@ class RosInterface {
   
   // 刷新剩余数据
   void FlushRemainingData();
+  /** flush 所有正在写入的日志流（物理线程结束前调用，避免仅 contact 落盘而其它 bin 仍在缓冲区） */
+  void FlushAllRecordingStreams();
   
   // 传感器震动数据记录函数
   void SaveSensorVibrationToCSV(const mjModel* m, mjData* d);

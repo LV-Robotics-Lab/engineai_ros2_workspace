@@ -77,7 +77,7 @@ def generate_launch_description():
     declare_csv_format_arg = DeclareLaunchArgument(
         'csv_format',
         default_value='csv',
-        description='CSV文件格式：csv（文本格式）或 binary（二进制格式，更快）'
+        description='日志格式：csv 或 binary（.bin，含 contact/joint/perturbation/policy_switch 等）'
     )
     
     declare_csv_path_arg = DeclareLaunchArgument(

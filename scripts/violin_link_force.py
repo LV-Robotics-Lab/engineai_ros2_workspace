@@ -4,6 +4,7 @@ import matplotlib.pyplot as plt
 from pathlib import Path
 import re
 import os
+import sys
 from multiprocessing import Pool, cpu_count
 
 # Try to import tqdm for progress bar
@@ -39,101 +40,90 @@ if not Path(file_path).exists():
     raise FileNotFoundError(f"File not found: {file_path}")
 print(f"      ✓ 文件存在: {file_path}")
 
-print(f"[2/9] 读取 CSV 文件...")
-# Get file size for progress indication
-file_size = os.path.getsize(file_path)
-file_size_mb = file_size / (1024 * 1024)
-print(f"      文件大小: {file_size_mb:.2f} MB")
-
-# First, check what columns are available in the CSV
-print(f"      检查 CSV 文件中的列...")
-try:
-    sample_df = pd.read_csv(file_path, nrows=1, engine='python', encoding='utf-8')
-except:
+print(f"[2/9] 读取 数据文件...")
+if str(file_path).lower().endswith(".bin"):
+    _sd = os.path.dirname(os.path.abspath(__file__))
+    if _sd not in sys.path:
+        sys.path.insert(0, _sd)
+    from mujoco_data_io import load_contact_file
+    data = load_contact_file(file_path)
+    print(f"      ✓ binary 读取 {len(data):,} 行")
+else:
+    file_size = os.path.getsize(file_path)
+    file_size_mb = file_size / (1024 * 1024)
+    print(f"      文件大小: {file_size_mb:.2f} MB")
+    print(f"      检查 CSV 文件中的列...")
     try:
-        sample_df = pd.read_csv(file_path, nrows=1, engine='python', encoding='latin-1')
-    except:
-        sample_df = pd.DataFrame()
-
-all_csv_columns = list(sample_df.columns) if not sample_df.empty else []
-print(f"      CSV 文件中的所有列: {all_csv_columns}")
-
-# Determine which columns to read
-columns_to_read = set()
-columns_to_read.add("body2_name")
-if "body1_name" in all_csv_columns:
-    columns_to_read.add("body1_name")
-if "force_normal" in all_csv_columns:
-    columns_to_read.add("force_normal")
-if "normal_force" in all_csv_columns:
-    columns_to_read.add("normal_force")
-if "force_magnitude" in all_csv_columns:
-    columns_to_read.add("force_magnitude")
-if "robot_frame_x" in all_csv_columns:
-    columns_to_read.add("robot_frame_x")
-if "robot_frame_y" in all_csv_columns:
-    columns_to_read.add("robot_frame_y")
-if "robot_frame_z" in all_csv_columns:
-    columns_to_read.add("robot_frame_z")
-
-print(f"      将读取以下列: {sorted(columns_to_read)}")
-use = lambda c: c in columns_to_read
-
-# Read with progress bar if tqdm is available
-if HAS_TQDM:
-    # Use chunksize to read in chunks and show progress
-    chunk_size = 50000  # Read 50k rows at a time for better performance
-    chunks = []
-    
-    # First, count total rows for progress bar
-    print(f"      正在计算文件总行数...")
-    try:
-        with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
-            total_lines = sum(1 for _ in f) - 1  # Subtract header
-    except:
-        # If UTF-8 fails, try latin-1
-        with open(file_path, 'r', encoding='latin-1', errors='ignore') as f:
-            total_lines = sum(1 for _ in f) - 1  # Subtract header
-    
-    print(f"      总行数: {total_lines:,}, 开始读取...")
-    
-    try:
-        reader = pd.read_csv(file_path, usecols=use, engine='c', encoding='utf-8', 
-                           chunksize=chunk_size, low_memory=False, memory_map=True)
-        total_chunks = (total_lines // chunk_size) + 1
-        for chunk in tqdm(reader, total=total_chunks, desc="      读取进度", unit="块", ncols=80):
-            chunks.append(chunk)
-        data = pd.concat(chunks, ignore_index=True)
-        print(f"      ✓ 使用 UTF-8 编码成功读取")
-    except (UnicodeDecodeError, UnicodeError, ValueError):
-        # 如果C引擎失败，尝试Python引擎
+        sample_df = pd.read_csv(file_path, nrows=1, engine='python', encoding='utf-8')
+    except Exception:
         try:
-            reader = pd.read_csv(file_path, usecols=use, engine='python', encoding='utf-8', chunksize=chunk_size)
-            chunks = []
+            sample_df = pd.read_csv(file_path, nrows=1, engine='python', encoding='latin-1')
+        except Exception:
+            sample_df = pd.DataFrame()
+    all_csv_columns = list(sample_df.columns) if not sample_df.empty else []
+    print(f"      CSV 文件中的所有列: {all_csv_columns}")
+    columns_to_read = set()
+    columns_to_read.add("body2_name")
+    if "body1_name" in all_csv_columns:
+        columns_to_read.add("body1_name")
+    if "force_normal" in all_csv_columns:
+        columns_to_read.add("force_normal")
+    if "normal_force" in all_csv_columns:
+        columns_to_read.add("normal_force")
+    if "force_magnitude" in all_csv_columns:
+        columns_to_read.add("force_magnitude")
+    if "robot_frame_x" in all_csv_columns:
+        columns_to_read.add("robot_frame_x")
+    if "robot_frame_y" in all_csv_columns:
+        columns_to_read.add("robot_frame_y")
+    if "robot_frame_z" in all_csv_columns:
+        columns_to_read.add("robot_frame_z")
+    print(f"      将读取以下列: {sorted(columns_to_read)}")
+    use = lambda c: c in columns_to_read
+    if HAS_TQDM:
+        chunk_size = 50000
+        chunks = []
+        print(f"      正在计算文件总行数...")
+        try:
+            with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
+                total_lines = sum(1 for _ in f) - 1
+        except Exception:
+            with open(file_path, 'r', encoding='latin-1', errors='ignore') as f:
+                total_lines = sum(1 for _ in f) - 1
+        print(f"      总行数: {total_lines:,}, 开始读取...")
+        try:
+            reader = pd.read_csv(file_path, usecols=use, engine='c', encoding='utf-8',
+                                 chunksize=chunk_size, low_memory=False, memory_map=True)
             total_chunks = (total_lines // chunk_size) + 1
             for chunk in tqdm(reader, total=total_chunks, desc="      读取进度", unit="块", ncols=80):
                 chunks.append(chunk)
             data = pd.concat(chunks, ignore_index=True)
             print(f"      ✓ 使用 UTF-8 编码成功读取")
+        except (UnicodeDecodeError, UnicodeError, ValueError):
+            try:
+                reader = pd.read_csv(file_path, usecols=use, engine='python', encoding='utf-8', chunksize=chunk_size)
+                chunks = []
+                total_chunks = (total_lines // chunk_size) + 1
+                for chunk in tqdm(reader, total=total_chunks, desc="      读取进度", unit="块", ncols=80):
+                    chunks.append(chunk)
+                data = pd.concat(chunks, ignore_index=True)
+                print(f"      ✓ 使用 UTF-8 编码成功读取")
+            except (UnicodeDecodeError, UnicodeError):
+                reader = pd.read_csv(file_path, usecols=use, engine='python', encoding='latin-1', chunksize=chunk_size)
+                chunks = []
+                total_chunks = (total_lines // chunk_size) + 1
+                for chunk in tqdm(reader, total=total_chunks, desc="      读取进度", unit="块", ncols=80):
+                    chunks.append(chunk)
+                data = pd.concat(chunks, ignore_index=True)
+                print(f"      ✓ 使用 latin-1 编码成功读取")
+    else:
+        print(f"      正在读取文件（这可能需要一些时间，建议安装 tqdm: pip install tqdm）...")
+        try:
+            data = pd.read_csv(file_path, usecols=use, engine='python', encoding='utf-8')
+            print(f"      ✓ 使用 UTF-8 编码成功读取")
         except (UnicodeDecodeError, UnicodeError):
-            # Try with different encoding if UTF-8 fails
-            reader = pd.read_csv(file_path, usecols=use, engine='python', encoding='latin-1', chunksize=chunk_size)
-            chunks = []
-            total_chunks = (total_lines // chunk_size) + 1
-            for chunk in tqdm(reader, total=total_chunks, desc="      读取进度", unit="块", ncols=80):
-                chunks.append(chunk)
-            data = pd.concat(chunks, ignore_index=True)
+            data = pd.read_csv(file_path, usecols=use, engine='python', encoding='latin-1')
             print(f"      ✓ 使用 latin-1 编码成功读取")
-else:
-    # Fallback: read normally but show simple progress messages
-    print(f"      正在读取文件（这可能需要一些时间，建议安装 tqdm: pip install tqdm）...")
-    try:
-        data = pd.read_csv(file_path, usecols=use, engine='python', encoding='utf-8')
-        print(f"      ✓ 使用 UTF-8 编码成功读取")
-    except (UnicodeDecodeError, UnicodeError):
-        # Try with different encoding if UTF-8 fails
-        data = pd.read_csv(file_path, usecols=use, engine='python', encoding='latin-1')
-        print(f"      ✓ 使用 latin-1 编码成功读取")
 
 print(f"      原始数据行数: {len(data):,}")
 print(f"      实际读取的列: {list(data.columns)}")

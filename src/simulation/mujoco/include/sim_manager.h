@@ -6,8 +6,12 @@
 #include <mutex>
 #include <rclcpp/rclcpp.hpp>
 #include <string_view>
-#include <thread>
 #include <vector>
+#if defined(__linux__)
+#include <pthread.h>
+#else
+#include <thread>
+#endif
 #include <string>
 #include <utility>
 #include <Eigen/Dense>
@@ -37,6 +41,9 @@ class SimManager {
 
   // Run the simulation
   void Run();
+
+  /** SIGINT/SIGTERM：请求退出仿真循环；物理线程结束前会 Drain 接触 bin，避免半截记录。 */
+  void RequestExitFromSignal();
 
   // Controller callback used by MuJoCo
   void TorqueController(const mjModel* m, mjData* d);
@@ -147,12 +154,21 @@ bool IsContactVisualizationEnabled();
   // 该函数会修改d->efc_force来减少接触力
   void ApplyProtectionToContactForces();
 
+#if defined(__linux__)
+  static void* PhysicsThreadTrampoline(void* arg);
+#endif
+
   // Private member variables
   rclcpp::Node::SharedPtr node_;
   std::shared_ptr<ConfigLoader> config_loader_;
   std::unique_ptr<mujoco::RosInterface> ros_interface_;
   std::unique_ptr<mujoco::Simulate> sim_;
+#if defined(__linux__)
+  pthread_t physics_pthread_{0};
+  bool physics_pthread_started_{false};
+#else
   std::thread physics_thread_;
+#endif
 
   // MuJoCo model and data
   mjModel* m_ = nullptr;
