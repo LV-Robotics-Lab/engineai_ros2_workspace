@@ -157,6 +157,30 @@ ament_target_dependencies(rl_basic_example_XZL
   std_msgs
 )
 
+# Add rl_basic_example_AMP executable
+add_executable(rl_basic_example_AMP
+  src/rl_basic_example_AMP.cc
+  ${rl_basic_example_src_files}
+)
+
+target_include_directories(rl_basic_example_AMP
+  PUBLIC
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src>
+    ${ENGINEAI_ROBOTICS_THIRD_PARTY}/include
+)
+
+target_link_libraries(rl_basic_example_AMP
+  yaml-cpp::yaml-cpp
+  Eigen3::Eigen
+  ${ENGINEAI_ROBOTICS_THIRD_PARTY}/lib/libMNN.so
+)
+
+ament_target_dependencies(rl_basic_example_AMP
+  rclcpp
+  interface_protocol
+  std_msgs
+)
+
 # Add rl_basic_example_CHR executable
 # Note: We don't link rl_dance library (it requires basic_param), 
 # but we can use csv_loader header-only functions
@@ -208,6 +232,7 @@ install(TARGETS
   joint_test_example
   rl_basic_example
   rl_basic_example_XZL
+  rl_basic_example_AMP
   rl_basic_example_CHR
   RUNTIME DESTINATION lib/${PROJECT_NAME}
 )
