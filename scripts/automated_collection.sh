@@ -8,8 +8,17 @@
 # 运控选择：XZL 或 CHR
 CONTROLLER=XZL
 
-# 日志/CSV 根目录（可修改，如 /mnt/ssd/data）
+# 保存格式：csv（文本）或 bin（二进制，体积小、写入快）
+SAVE_FORMAT=csv
+
+# 日志/数据根目录（可修改，如 /mnt/ssd/data）
 LOG_BASE_DIR="${HOME}/data/mujoco_logs"
+
+SAVE_FORMAT=$(echo "$SAVE_FORMAT" | tr '[:upper:]' '[:lower:]')
+case "$SAVE_FORMAT" in
+  csv|bin) ;;
+  *) echo "错误: SAVE_FORMAT 仅支持 csv 或 bin，当前: $SAVE_FORMAT"; exit 1 ;;
+esac
 
 TOTAL_EXPERIMENTS=80
 EXPERIMENT_DURATION=15
@@ -25,6 +34,7 @@ echo "=========================================="
 echo "运控: $CONTROLLER ($RL_LAUNCH)"
 echo "实验次数: $TOTAL_EXPERIMENTS"
 echo "实验持续时间: ${EXPERIMENT_DURATION}秒"
+echo "保存格式: $SAVE_FORMAT"
 echo "=========================================="
 
 # 工作目录：脚本所在目录的上一级
@@ -162,7 +172,7 @@ for ((i=1; i<=TOTAL_EXPERIMENTS; i++)); do
         save_joint_state_csv:=true \
         save_link_kinetic_energy_csv:=true \
         save_policy_switch_csv:=true \
-        csv_format:=csv \
+        csv_format:=$SAVE_FORMAT \
         csv_file_path:="$RUN_CSV_DIR" &
     MUJOCO_PID=$!
 
@@ -183,4 +193,4 @@ echo ""
 echo "=========================================="
 echo "所有实验完成！"
 echo "=========================================="
-echo "CSV文件保存在: $LOG_BASE_DIR"
+echo "数据文件（$SAVE_FORMAT）保存在: $LOG_BASE_DIR"
