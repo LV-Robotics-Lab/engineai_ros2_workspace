@@ -62,7 +62,7 @@ static int AngleDegToFallBin8(double angle_deg) {
 
 class RlBasicRunnerDAC : public rclcpp::Node {
  public:
-  explicit RlBasicRunnerDAC(const std::string& config_file_dir, const std::string& config_file_name = "rl_basic_param_DACyaml") : Node("rl_basic_runner_DAC") {
+  explicit RlBasicRunnerDAC(const std::string& config_file_dir, const std::string& config_file_name = "rl_basic_param_DAC.yaml") : Node("rl_basic_runner_DAC") {
     std::string config_file = config_file_dir + "/" + config_file_name;
     RCLCPP_INFO(get_logger(), "Loading config file: %s", config_file.c_str());
     config_ = YAML::LoadFile(config_file);
@@ -2147,7 +2147,7 @@ int main(int argc, char** argv) {
     return 1;
   }
 
-  std::string config_file_name = "rl_basic_param_DACyaml";
+  std::string config_file_name = "rl_basic_param_DAC.yaml";
   if (argc >= 3) {
     config_file_name = argv[2];
   }

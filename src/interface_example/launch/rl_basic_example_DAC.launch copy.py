@@ -20,7 +20,7 @@ def generate_launch_description():
         raise FileNotFoundError(f"Config directory not found: {config_dir}")
     
     # Check if DAC config file exists
-    dac_config_file = os.path.join(config_dir, 'rl_basic_param_DACyaml')
+    dac_config_file = os.path.join(config_dir, 'rl_basic_param_DAC.yaml')
     if not os.path.exists(dac_config_file):
         raise FileNotFoundError(f"DAC config file not found: {dac_config_file}")
     print(f"Using DAC config file: {dac_config_file}")
@@ -41,7 +41,7 @@ def generate_launch_description():
         package='interface_example',
         executable='rl_basic_example_DAC',
         name='rl_basic_example_DAC',
-        arguments=[config_dir, 'rl_basic_param_DACyaml'],
+        arguments=[config_dir, 'rl_basic_param_DAC.yaml'],
         output='screen',
         emulate_tty=True,
     )
