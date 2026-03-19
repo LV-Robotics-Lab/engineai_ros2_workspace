@@ -211,12 +211,34 @@ pip install mujoco==3.3.6
 # 合并特定方向的数据（生成1个文件）指定输出文件名
 python3 scripts/merge_contact_data.py logs/4in1 merged_4in1.csv --pattern "all_directions_merged_*.csv"
 
-## 第一步：分别合并4个方向的数据（每个方向生成1个文件）
-python3 scripts/merge_contact_data.py logs/test_poweroff_100 --add-fall-type
-# 注意：第一步会为每个方向生成一个文件，所以不能指定单个输出文件名
+## 第一步：分别合并 8 个方向的数据（每个方向生成 1 个文件）
 
-## 第二步：把4个方向的合并文件再合并成一个大文件（这些文件已经包含fall_type_info列）
-python3 scripts/merge_contact_data.py logs/test_poweroff_100 all_directions_merged.csv --pattern "merged_contact_data_*.csv"
+适用于类似目录：`/home/wang22/data/mujoco_logs/only_active_push_1600/8dir-200.0N-0.4s-20260317_235134/`。
+该目录下通常为 `forward-200.0N-1/<timestamp>/contact_data.*` 这种结构，所以需要按方向聚合：
+
+```bash
+python3 scripts/merge_contact_data.py \
+  /home/wang22/data/mujoco_logs/only_passive_push_1600/8dir-200.0N-0.4s-20260317_122531 \
+  --add-fall-type \
+  --group-by-direction \
+  --min-force-n 400
+```
+
+`--min-force-n 400`：合并前删掉 **|force_normal| &lt; 400 N** 的行（无 `force_normal` 列时用 `force_magnitude`），减小下游体积与内存；与 **`--fast-append` 不能同时使用**（第二步二次合并若需过滤，应在第一步已过滤）。
+
+注意：这一步会为每个方向生成一个文件，所以不要指定单个 `output_file`。
+
+如需输出二进制（更省空间/更快，且 `fig4_violin.py` 支持读 `.bin`），可加 `--bin`。
+
+## 第二步：把 8 个方向的合并文件再合并成一个大文件（这些文件已经包含 fall_type_info 列）
+
+```bash
+python3 scripts/merge_contact_data.py \
+  /home/wang22/data/mujoco_logs/only_passive_push_1600/8dir-200.0N-0.4s-20260317_122531 \
+  all_directions_merged.csv \
+  --pattern "merged_contact_data_*.csv" \
+  --fast-append
+```
 
 
 
@@ -256,8 +278,12 @@ python3 scripts/mujoco_xml_contact_display.py logs/test_push_100/merged_contact_
 # 参数4: 坐标系统 (world|urdf) - 可选，默认为urdf
 
 # 各部位碰撞力风琴图
+```bash
 python3 scripts/violin_link_force.py
-python3 scripts/fig4_violin.py
+# 指定 CSV 路径，仅绘制 force_normal 小提琴图
+python3 scripts/fig4_violin.py /path/to/all_directions_merged.csv
+python3 scripts/fig4_violin.py /path/to/all_directions_merged.csv -o 输出目录
+```
 1. Shoulder: shoulder_pitch, shoulder_roll;
 2. Elbow: shoulder_yaw, elbow_yaw, elbow_pitch;
 3. Torso: torso, 不分左右;
@@ -265,34 +291,71 @@ python3 scripts/fig4_violin.py
 5. Knee: hip_yaw(robot_frame_z < 0.55m), knee_pitch # (robot_frame_z >0.23m)
 # 6. Crus: knee_pitch(robot_frame_z<0.23m)
 
-# grid map of force
-## 基本用法（会自动生成输出文件名） 只绘制force图： --force-only
-python3 scripts/plot_contact_grid.py logs/4in1/merged_4in1.csv --target-force 1
+# 接触力 / 护具厚度网格图（`plot_contact_grid.py`）
+# - 单位约定：
+#   - `--target-force`：kN（仅 `chr` 方法）
+#   - `--target-pressure`：MPa（仅 `zzq` 方法）
+#   - CSV 内 `force_normal` 等一般为 N，勿混用。
+# - 主要输出（默认未指定 `-o`）：
+#   - 力图：`${stem}_force_grid_plot_${method}.png`
+#   - 厚度图：`${stem}_thickness_grid_plot_${method}.png`
+#   - 表面积图：`${stem}_surface_area_grid_plot_${method}.png`
+#   - 压强图：`${stem}_pressure_grid_plot_${method}.png`
+# - YZ 护具查表（TSV，仅生成厚度图且未 `--no-save-yz-tsv` 时输出）：
+#   - 前/后：`yz_map_front${_sfx}.tsv` / `yz_map_back${_sfx}.tsv`
+#   - `_sfx`：从 CSV 父目录名解析最后一个 `YYYYMMDD_HHMMSS`；否则对父目录名做安全化短后缀
+#   - TSV 网格步长（方格大小）：`--yz-map-step`（默认 `0.05m`；文件头会写 `Pixel = xxxm`）
+#   - 前后划分：`robot_frame_x >= 0` -> front；`robot_frame_x < 0` -> back
+#   - PNG -> TSV 映射：TSV 先用逐点厚度（与厚度 PNG 同管道）计算厚度，再把每个 PNG hexbin 的多边形覆盖到 TSV 的 2D 矩形格上，格内取 `max`（因此 TSV 方格数/位置不一定等于 hexbin 个数）
+# - 可选调试/对照：
+#   - `--dump-thickness-hex-csv`：把厚度 PNG 用的 `hexbin(reduce=max)` 聚合表写成 `${thickness_png_stem}_hexbin_aggregate.csv`
+#     （非像素解码、非必须；用于核对“哪些 hexbin hex 会导致 PNG 的哪些值”。）
+#   - `--compare-yz-hex-tsv`：终端打印 PNG hexbin（混合前后点）与 `yz_map_front/back.tsv`（单侧）非零位置对照（可配 `--compare-yz-max-print`）。
+# - 指定输出前缀 `-o` 时：
+#   - 文件名后缀会变为 `${prefixStem}_force_${method}.png`、`${prefixStem}_thickness_${method}.png`、`${prefixStem}_surface_${method}.png`、`${prefixStem}_pressure_${method}.png`
+# ```bash
+# 下面用 MERGED_CSV 表示你的合并接触 CSV（需含 robot_frame_*、force_normal 等）
+MERGED_CSV=/home/wang22/data/mujoco_logs/only_passive_push_1600/8dir-200.0N-0.4s-20260317_122531/all_directions_merged.csv
 
-# 使用 chr 方法（默认）
-python scripts/plot_contact_grid.py logs/4in1/merged_4in1.csv --method chr --target-force 1.0
+# 默认：力图 + 厚度图（chr）；--target-force 1.0 即 1 kN；PNG 与 YZ TSV 默认写出
+python3 scripts/plot_contact_grid.py "$MERGED_CSV" --target-force 1.0 --no-hardcode --no-force-filter  # 1.0 = 1 kN
 
-# 使用 zzq 方法
-# 禁用强制厚度设置
-python scripts/plot_contact_grid.py logs/4in1/merged_4in1.csv --method zzq --target-pressure 10.0 --no-hardcode --no-force-filter
+# 同上：
+python3 scripts/plot_contact_grid.py "$MERGED_CSV" --target-force 1.0  # 1.0 kN
 
-## 指定输出路径
-python3 scripts/plot_contact_grid.py logs/4in1/merged_contact_data_4in1_20251026_194302_clustered_20251111_012128.csv -o output.png
+# 只画力图，不画厚度 / 表面积 / 压强（不会写 TSV）
+python3 scripts/plot_contact_grid.py "$MERGED_CSV" --target-force 1.0 --force-only  # 1.0 kN
 
-## 自定义网格分辨率和颜色映射
-python3 scripts/plot_contact_grid.py logs/4in1/merged_contact_data_4in1_20251026_194302_clustered_20251111_012128.csv -b 100 -c plasma
+# 将 YZ 护具 TSV 写到指定目录（仍走默认 chr，可省略 --method）
+python3 scripts/plot_contact_grid.py "$MERGED_CSV" --target-force 1.0 \
+  --yz-tsv-dir src/interface_example/config/pm01/rl_basic/basic/protector_map  # 1.0 kN
 
-## 使用默认大小（两个图都是 10x8）
-python3 scripts/plot_contact_grid.py logs/4in1/merged_contact_data_4in1_20251026_194302_clustered_20251111_012128.csv
+# 画厚度图但不写 TSV
+python3 scripts/plot_contact_grid.py "$MERGED_CSV" --target-force 1.0 --no-save-yz-tsv  # 1.0 kN
 
-## 设置两个图都使用相同大小
-python3 scripts/plot_contact_grid.py logs/4in1/merged_contact_data_4in1_20251026_194302_clustered_20251111_012128.csv --figsize 12 10
+# 导出厚度 PNG 同源的 hexbin 聚合表（用于核对；非必须）
+python3 scripts/plot_contact_grid.py "$MERGED_CSV" --target-force 1.0 --dump-thickness-hex-csv
 
-## 分别设置两个图的大小
-python3 scripts/plot_contact_grid.py logs/4in1/merged_contact_data_4in1_20251026_194302_clustered_20251111_012128.csv --force-figsize 12 8 --thickness-figsize 12 10
+# 终端对照：PNG hexbin 与 yz_map TSV 非零位置对照
+python3 scripts/plot_contact_grid.py "$MERGED_CSV" --target-force 1.0 --compare-yz-hex-tsv
 
-## 只设置力图大小，厚度图使用默认值
-python3 scripts/plot_contact_grid.py logs/4in1/merged_contact_data_4in1_20251026_194302_clustered_20251111_012128.csv --force-figsize 12 8
+# 细分 TSV 网格（例如 0.05m -> 0.025m）
+python3 scripts/plot_contact_grid.py "$MERGED_CSV" --target-force 1.0 --thickness-only --yz-map-step 0.025
+
+# zzq 方法（须指定目标压强 MPa）；常配合关闭硬编码厚度与力滤波
+python3 scripts/plot_contact_grid.py "$MERGED_CSV" --method zzq --target-pressure 10.0 --no-hardcode --no-force-filter  # 10.0 MPa
+
+# 指定图片输出前缀（力图/厚度图等会基于该路径生成多个 PNG）
+python3 scripts/plot_contact_grid.py "$MERGED_CSV" --target-force 1.0 -o /tmp/contact_grid_out.png  # 1.0 kN
+
+# hexbin 分辨率与 colormap
+python3 scripts/plot_contact_grid.py "$MERGED_CSV" --target-force 1.0 -b 100 -c plasma  # 1.0 kN
+
+# 图尺寸（cm）：全局 / 力图 / 厚度图
+python3 scripts/plot_contact_grid.py "$MERGED_CSV" --target-force 1.0 --figsize 12 10  # 1.0 kN
+python3 scripts/plot_contact_grid.py "$MERGED_CSV" --target-force 1.0 --force-figsize 12 8 --thickness-figsize 12 10  # 1.0 kN
+python3 scripts/plot_contact_grid.py "$MERGED_CSV" --target-force 1.0 --force-figsize 12 8  # 1.0 kN
+```
 
 
 
@@ -630,5 +693,16 @@ python3 scripts/calculate_fall_risk.py \
 
 # 
 
+```
+
+## 批量采样的数据处理
+
+- 目录可为「实验文件夹下直接放日志」，或「实验文件夹/时间戳/」下再放日志（连续采集常见后者）；脚本两种都支持。
+- 每个**实际日志目录**内的 `risk_results_*.csv` 仍由 `calculate_fall_risk.py` 写在该目录（与原始 csv/bin 同文件夹）。
+- **`--root` 下**：`all_runs_summary.csv`（全批次各 risk **平均值**，1 行）、`per_run_risk.csv`（每次实验一行明细）、`stats_by_direction.csv`、`stats_overall.txt`。
+
+```bash
+python3 scripts/batch_calculate_fall_risk.py \
+  --root /home/wang22/data/mujoco_logs/only_active_push_1600/8dir-200.0N-0.4s-20260317_235134
 ```
 

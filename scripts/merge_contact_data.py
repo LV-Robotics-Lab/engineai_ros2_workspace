@@ -16,6 +16,42 @@ if _SCRIPT_DIR not in sys.path:
     sys.path.insert(0, _SCRIPT_DIR)
 from mujoco_data_io import load_contact_file, write_contact_data_bin
 
+_DIRECTION_ORDER = [
+    # longer first to avoid forward_left being parsed as forward
+    "forward_left",
+    "forward_right",
+    "backward_left",
+    "backward_right",
+    "forward",
+    "backward",
+    "left",
+    "right",
+]
+
+
+def extract_direction_from_text(text: str):
+    if not text:
+        return None
+    t = str(text).lower()
+    for d in _DIRECTION_ORDER:
+        if d in t:
+            return d
+    return None
+
+
+def extract_direction_from_path(path: str):
+    """从路径各级目录名中提取方向（支持 8 方向）。"""
+    try:
+        parts = os.path.abspath(path).split(os.sep)
+    except Exception:
+        parts = [str(path)]
+    for part in parts:
+        d = extract_direction_from_text(part)
+        if d:
+            return d
+    return None
+
+
 def parse_fall_type_info(csv_file_path, log_dir):
     """
     从文件路径和目录名中解析摔倒类型、方向和csv时间编号
@@ -35,17 +71,19 @@ def parse_fall_type_info(csv_file_path, log_dir):
         # 从文件名中提取时间戳（格式：YYYYMMDD_HHMMSS）
         # 对于CSV时间编号，通常取第一个时间戳（例如：contact_data_backward-00.0N-0.5s-20251021_213710_20251025_235705.csv）
         # 第一个时间戳是CSV时间编号，第二个可能是合并时间戳
-        time_pattern = r'(\d{8}_\d{6})'
-        time_matches = re.findall(time_pattern, file_name)
-        # 如果只有一个时间戳，使用它；如果有多个，优先使用第一个（CSV时间编号）
-        csv_time = time_matches[0] if time_matches else None
-        
-        if not csv_time:
-            return None
-        
-        # 获取相对于log_dir的文件路径
         abs_csv_path = os.path.abspath(csv_file_path)
         abs_log_dir = os.path.abspath(log_dir)
+
+        time_pattern = r'(\d{8}_\d{6})'
+        time_matches = re.findall(time_pattern, file_name)
+        csv_time = time_matches[0] if time_matches else None
+        # contact_data.csv 无时间戳时，用父目录名（如 20260317_123521）
+        if not csv_time:
+            parent = os.path.basename(os.path.dirname(abs_csv_path))
+            if re.match(r"^\d{8}_\d{6}$", parent):
+                csv_time = parent
+        if not csv_time:
+            return None
         
         # 从文件路径中向上查找父目录，找到包含test_前缀的目录（如test_poweroff_100）
         # 这样可以正确处理子目录中的文件
@@ -72,6 +110,8 @@ def parse_fall_type_info(csv_file_path, log_dir):
             fall_type = 'slip'
         elif 'stumble' in folder_name.lower():
             fall_type = 'stumble'
+        elif 'passive' in folder_name.lower() and 'push' in folder_name.lower():
+            fall_type = 'passive_push'
         elif 'push' in folder_name.lower():
             fall_type = 'push'
         else:
@@ -80,45 +120,16 @@ def parse_fall_type_info(csv_file_path, log_dir):
             if fall_type_match:
                 fall_type = fall_type_match.group(1)
         
-        # 从文件路径中提取方向
-        # 检查路径中是否包含方向信息（backward, forward, left, right等）
-        direction = None
-        path_parts = abs_csv_path.split(os.sep)
-        for part in path_parts:
-            part_lower = part.lower()
-            if 'backward' in part_lower:
-                direction = 'backward'
-                break
-            elif 'forward' in part_lower:
-                direction = 'forward'
-                break
-            elif 'left' in part_lower:
-                direction = 'left'
-                break
-            elif 'right' in part_lower:
-                direction = 'right'
-                break
-        
-        # 如果路径中没有找到方向，尝试从文件名中提取
+        # 从路径/文件名中提取方向（支持 8 方向）
+        direction = extract_direction_from_path(abs_csv_path)
         if not direction:
-            file_lower = file_name.lower()
-            if 'backward' in file_lower:
-                direction = 'backward'
-            elif 'forward' in file_lower:
-                direction = 'forward'
-            elif 'left' in file_lower:
-                direction = 'left'
-            elif 'right' in file_lower:
-                direction = 'right'
-        
-        # 如果仍然没有找到方向，使用默认值或从文件名中提取
+            direction = extract_direction_from_text(file_name)
         if not direction:
-            # 尝试从文件名中提取（例如：contact_data_backward-00.0N-0.5s-...）
-            direction_match = re.search(r'(backward|forward|left|right)', file_name.lower())
-            if direction_match:
-                direction = direction_match.group(1)
-            else:
-                direction = 'unknown'
+            direction_match = re.search(
+                r"(forward_left|forward_right|backward_left|backward_right|backward|forward|left|right)",
+                file_name.lower(),
+            )
+            direction = direction_match.group(1) if direction_match else "unknown"
         
         if fall_type and direction and csv_time:
             return f"{fall_type}-{direction}-{csv_time}"
@@ -129,12 +140,73 @@ def parse_fall_type_info(csv_file_path, log_dir):
         print(f"  警告: 解析摔倒类型信息时出错: {e}")
         return None
 
+
+def _glob_contact_logs(log_dir: str, *, recursive: bool) -> list:
+    """
+    仿真可能写出 contact_data_YYYYMMDD_HHMMSS.csv，也可能只有 contact_data.csv / .bin（无时间戳后缀）。
+    默认合并时需两者都收进来。
+    """
+    patterns = (
+        "contact_data_*.csv",
+        "contact_data_*.bin",
+        "contact_data.csv",
+        "contact_data.bin",
+    )
+    found: list = []
+    if recursive:
+        for p in patterns:
+            found.extend(glob.glob(os.path.join(log_dir, "**", p), recursive=True))
+    else:
+        for p in patterns:
+            found.extend(glob.glob(os.path.join(log_dir, p)))
+    # 去重、排序
+    seen = set()
+    out = []
+    for f in found:
+        a = os.path.abspath(f)
+        if a not in seen:
+            seen.add(a)
+            out.append(a)
+    return sorted(out)
+
+
+def _filter_rows_min_force(df, min_force_n, basename_for_log=""):
+    """
+    丢弃「力」小于 min_force_n (N) 的行。
+    优先用 force_normal（取绝对值），否则 force_magnitude。
+    """
+    if min_force_n is None or min_force_n <= 0:
+        return df
+    if "force_normal" in df.columns:
+        col = "force_normal"
+        series = pd.to_numeric(df[col], errors="coerce").abs()
+    elif "force_magnitude" in df.columns:
+        col = "force_magnitude"
+        series = pd.to_numeric(df[col], errors="coerce").abs()
+    else:
+        print(f"  ⚠️  {basename_for_log}: 无 force_normal/force_magnitude，跳过最小力过滤")
+        return df
+    before = len(df)
+    mask = series >= float(min_force_n)
+    dropped = int((~mask).sum())
+    out = df.loc[mask].copy()
+    if dropped:
+        print(
+            f"  ✂️  最小力过滤 (≥{min_force_n:g} N，列 {col}): "
+            f"删除 {dropped:,} 行，保留 {len(out):,} 行"
+        )
+    return out
+
+
 def merge_contact_csv_files(
     log_dir,
     output_file=None,
     add_fall_type_column=False,
     file_pattern="contact_data_*.csv",
     write_bin=False,
+    group_by_direction=False,
+    fast_append=False,
+    min_force_n=None,
 ):
     """
     合并指定目录下的所有CSV文件
@@ -143,15 +215,14 @@ def merge_contact_csv_files(
         log_dir: 包含CSV文件的目录
         output_file: 输出文件名，如果为None则自动生成
         add_fall_type_column: 是否添加"摔倒类型-方向-csv时间编号"列
-        file_pattern: 要合并的文件模式，默认为"contact_data_*.csv"
+        file_pattern: 要合并的文件模式，默认为 contact_data 日志（含无后缀的 contact_data.csv）
+        min_force_n: 若设置，每个文件读入后丢弃力小于该值（N）的行；优先 |force_normal|
     """
     print(f"正在合并目录: {log_dir}")
     print(f"文件模式: {file_pattern}")
     
-    # 查找 contact_data_* .csv 与 .bin（默认同时合并）
     if file_pattern == "contact_data_*.csv":
-        csv_files = glob.glob(os.path.join(log_dir, "contact_data_*.csv"))
-        csv_files += glob.glob(os.path.join(log_dir, "contact_data_*.bin"))
+        csv_files = _glob_contact_logs(log_dir, recursive=False)
     else:
         pattern = os.path.join(log_dir, file_pattern)
         csv_files = glob.glob(pattern)
@@ -160,8 +231,7 @@ def merge_contact_csv_files(
     # 如果当前目录没有找到，递归查找子目录
     if not csv_files:
         if file_pattern == "contact_data_*.csv":
-            csv_files = glob.glob(os.path.join(log_dir, "**", "contact_data_*.csv"), recursive=True)
-            csv_files += glob.glob(os.path.join(log_dir, "**", "contact_data_*.bin"), recursive=True)
+            csv_files = _glob_contact_logs(log_dir, recursive=True)
         else:
             pattern_recursive = os.path.join(log_dir, "**", file_pattern)
             csv_files = glob.glob(pattern_recursive, recursive=True)
@@ -173,50 +243,88 @@ def merge_contact_csv_files(
         print(f"在目录 {log_dir} 及其子目录中没有找到匹配 {file_pattern} 的文件")
         return None
     
-    # 如果是递归查找，且使用的是默认模式（contact_data_*.csv），按子目录分组
-    # 如果使用自定义模式（如merged_contact_data_*.csv），直接合并所有文件，不分组
+    # 如果是递归查找，且使用的是默认模式（contact_data_*.csv），支持按方向或按子目录分组
+    # 如果使用自定义模式（如 merged_contact_data_*.csv），直接合并所有文件，不分组
     if is_recursive and file_pattern == "contact_data_*.csv":
-        # 按子目录分组CSV文件
         from collections import defaultdict
-        csv_by_dir = defaultdict(list)
         abs_log_dir = os.path.abspath(log_dir)
-        
+
+        if group_by_direction:
+            csv_by_group = defaultdict(list)  # direction -> files
+            for csv_file in csv_files:
+                d = extract_direction_from_path(csv_file) or "unknown"
+                csv_by_group[d].append(os.path.abspath(csv_file))
+            for k in csv_by_group:
+                csv_by_group[k].sort()
+            print(f"找到 {len(csv_files)} 个文件，按方向分为 {len(csv_by_group)} 组:")
+            for k, files in sorted(csv_by_group.items()):
+                print(f"  🧭 {k}: {len(files)} 个文件")
+
+            output_files = []
+            for direction, sub_csv_files in sorted(csv_by_group.items()):
+                print(f"\n{'='*60}")
+                print(f"🔄 处理方向: {direction}")
+                print(f"{'='*60}")
+                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                ext_out = ".bin" if write_bin else ".csv"
+                if output_file is None:
+                    sub_output_file = os.path.abspath(
+                        os.path.join(log_dir, f"merged_contact_data_{direction}_{timestamp}{ext_out}")
+                    )
+                else:
+                    base_name = os.path.splitext(os.path.basename(output_file))[0]
+                    ext = ".bin" if write_bin else (os.path.splitext(output_file)[1] or ".csv")
+                    sub_output_file = os.path.abspath(os.path.join(log_dir, f"{base_name}_{direction}{ext}"))
+
+                merged_file = _merge_csv_files_from_list(
+                    sub_csv_files,
+                    log_dir,
+                    sub_output_file,
+                    add_fall_type_column,
+                    write_bin=write_bin,
+                    min_force_n=min_force_n,
+                )
+                if merged_file:
+                    output_files.append(merged_file)
+
+            if output_files:
+                print(f"\n{'='*60}")
+                print(f"✅ 按方向合并完成! 共生成 {len(output_files)} 个文件:")
+                for f in output_files:
+                    print(f"  📄 {f}")
+                return output_files[0] if len(output_files) == 1 else output_files
+            return None
+
+        # 默认：按子目录分组（保持原行为）
+        csv_by_dir = defaultdict(list)
         for csv_file in csv_files:
             abs_csv_file = os.path.abspath(csv_file)
-            # 获取相对于log_dir的目录路径
             rel_path = os.path.relpath(abs_csv_file, abs_log_dir)
-            # 获取文件所在的子目录（相对于log_dir）
-            sub_dir = os.path.dirname(rel_path)
-            if not sub_dir:  # 如果文件就在log_dir下
-                sub_dir = "."
+            sub_dir = os.path.dirname(rel_path) or "."
             csv_by_dir[sub_dir].append(abs_csv_file)
-        
-        # 对每个子目录的CSV文件进行排序
+
         for sub_dir in csv_by_dir:
             csv_by_dir[sub_dir].sort()
-        
+
         print(f"找到 {len(csv_files)} 个CSV文件，分布在 {len(csv_by_dir)} 个子目录中:")
         for sub_dir, files in sorted(csv_by_dir.items()):
             print(f"  📁 {sub_dir}: {len(files)} 个文件")
-        
-        # 对每个子目录分别合并
+
         output_files = []
         for sub_dir, sub_csv_files in sorted(csv_by_dir.items()):
             print(f"\n{'='*60}")
             print(f"🔄 处理子目录: {sub_dir}")
             print(f"{'='*60}")
-            
-            # 使用子目录路径作为新的log_dir来合并
+
             if sub_dir == ".":
                 sub_log_dir = log_dir
             else:
                 sub_log_dir = os.path.join(log_dir, sub_dir)
-            
-            # 生成子目录的输出文件名
+
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             folder_name = os.path.basename(os.path.abspath(log_dir))
             sub_dir_name = os.path.basename(sub_dir) if sub_dir != "." else folder_name
-            
+
             ext_out = ".bin" if write_bin else ".csv"
             if output_file is None:
                 sub_output_file = os.path.abspath(
@@ -227,31 +335,89 @@ def merge_contact_csv_files(
                 ext = ".bin" if write_bin else (os.path.splitext(output_file)[1] or ".csv")
                 sub_output_file = os.path.abspath(os.path.join(log_dir, f"{base_name}_{sub_dir_name}{ext}"))
             merged_file = _merge_csv_files_from_list(
-                sub_csv_files, sub_log_dir, sub_output_file, add_fall_type_column, write_bin=write_bin
+                sub_csv_files,
+                sub_log_dir,
+                sub_output_file,
+                add_fall_type_column,
+                write_bin=write_bin,
+                min_force_n=min_force_n,
             )
             if merged_file:
                 output_files.append(merged_file)
-        
+
         if output_files:
             print(f"\n{'='*60}")
             print(f"✅ 所有子目录合并完成! 共生成 {len(output_files)} 个文件:")
             for f in output_files:
                 print(f"  📄 {f}")
             return output_files[0] if len(output_files) == 1 else output_files
-        else:
-            return None
+        return None
     
     # 如果不是递归查找，按原来的方式处理（当前目录下的所有文件合并成一个）
     csv_files.sort()
     print(f"找到 {len(csv_files)} 个CSV文件:")
     for i, file in enumerate(csv_files, 1):
         print(f"  {i}. {os.path.basename(file)}")
+
+    if fast_append and not write_bin and file_pattern != "contact_data_*.csv":
+        # fast append: 只做表头 + 按行追加（跳过 pandas concat 与统计），用于二次合并 merged_contact_data_*.csv
+        abs_log_dir = os.path.abspath(log_dir)
+        out_path = output_file
+        if out_path is None:
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            folder_name = os.path.basename(os.path.abspath(log_dir))
+            out_path = os.path.join(log_dir, f"merged_contact_data_{folder_name}_{timestamp}.csv")
+        elif not os.path.isabs(str(out_path)):
+            abs_out = os.path.abspath(str(out_path))
+            if not abs_out.startswith(abs_log_dir):
+                out_path = os.path.join(log_dir, str(out_path))
+            else:
+                out_path = abs_out
+        out_path = os.path.abspath(str(out_path))
+
+        if not csv_files:
+            print("未找到可追加的 CSV 文件。")
+            return None
+
+        print(f"\n⚡ fast-append 模式：将 {len(csv_files)} 个 CSV 按行追加到：{out_path}")
+
+        header = None
+        with open(out_path, "w", encoding="utf-8", newline="") as fout:
+            for idx, fpath in enumerate(csv_files):
+                with open(fpath, "r", encoding="utf-8", errors="ignore", newline="") as fin:
+                    h = fin.readline()
+                    if not h:
+                        continue
+                    if idx == 0:
+                        header = h
+                        fout.write(header)
+                    else:
+                        if header is not None and h != header:
+                            print(f"警告: 表头不一致，文件={fpath} 将仍继续追加（可能影响下游解析）")
+                        # header mismatch 时仍跳过当前文件表头，直接追加内容
+                    for line in fin:
+                        fout.write(line)
+
+        print("✅ fast-append 完成。")
+        return out_path
     
     # 调用合并函数处理文件列表
-    return _merge_csv_files_from_list(csv_files, log_dir, output_file, add_fall_type_column, write_bin=write_bin)
+    return _merge_csv_files_from_list(
+        csv_files,
+        log_dir,
+        output_file,
+        add_fall_type_column,
+        write_bin=write_bin,
+        min_force_n=min_force_n,
+    )
 
 def _merge_csv_files_from_list(
-    csv_files, log_dir, output_file=None, add_fall_type_column=False, write_bin=False
+    csv_files,
+    log_dir,
+    output_file=None,
+    add_fall_type_column=False,
+    write_bin=False,
+    min_force_n=None,
 ):
     """
     从文件列表合并CSV文件的内部函数
@@ -291,6 +457,13 @@ def _merge_csv_files_from_list(
             df = load_contact_file(csv_file)
             read_time = time.time() - file_start_time
             print(f"  ✅ 读取完成: {len(df)} 行数据 (耗时: {read_time:.2f}秒)")
+
+            df = _filter_rows_min_force(
+                df, min_force_n, basename_for_log=os.path.basename(csv_file)
+            )
+            if len(df) == 0:
+                print(f"  ⚠️  最小力过滤后无数据，跳过该文件")
+                continue
             
             # 添加源文件信息 - 使用文件名（不含扩展名）作为标识
             source_name = os.path.splitext(os.path.basename(csv_file))[0]  # 去掉.csv扩展名
@@ -493,6 +666,9 @@ def main():
   
   # 合并已经合并过的CSV文件（二次合并）
   python3 merge_contact_data.py logs/test_poweroff_100 --pattern "merged_contact_data_*.csv"
+
+  # 丢弃 |force_normal| < 400 N 的行再合并（减小大表体积）
+  python3 merge_contact_data.py logs/8dir_run --group-by-direction --min-force-n 400
         '''
     )
     parser.add_argument('log_directory', help='包含CSV文件的目录（可以是方向子目录或父目录）')
@@ -500,11 +676,32 @@ def main():
     parser.add_argument('--add-fall-type', action='store_true', 
                        help='添加"摔倒类型-方向-csv时间编号"列（格式：poweroff-backward-20251021_213713）')
     parser.add_argument('--pattern', default='contact_data_*.csv',
-                       help='要合并的文件模式（默认：contact_data_*.csv）。例如：merged_contact_data_*.csv 用于合并已合并的文件')
+                       help='默认 contact_data_*.csv 会同时匹配 contact_data.csv/.bin（无时间戳）。'
+                            '也可用 merged_contact_data_*.csv 等自定义模式')
     parser.add_argument(
         "--bin",
         action="store_true",
         help="输出 merged_contact_data*.bin（与仿真二进制同格式，fig4_violin / mujoco_data_io 可读）；默认 CSV",
+    )
+    parser.add_argument(
+        "--group-by-direction",
+        action="store_true",
+        help="当递归合并 contact_data_*.{csv,bin} 时，按 8 方向（forward/forward_left/...）聚合输出；"
+             "适用于 8dir-... 这类批量采集根目录（否则会按子目录分组输出大量文件）",
+    )
+    parser.add_argument(
+        "--fast-append",
+        action="store_true",
+        help="二次合并专用：当你把已经按方向合并好的 merged_contact_data_*.csv 再合成一个大文件时，"
+             "启用此模式会跳过 pandas concat 与统计，使用按行追加（只支持 CSV）。",
+    )
+    parser.add_argument(
+        "--min-force-n",
+        type=float,
+        default=None,
+        metavar="N",
+        help="合并前丢弃力过小的行（单位 N）。优先按 force_normal 的绝对值比较，无该列则用 force_magnitude。"
+             "例如 400 表示只保留 |force_normal|≥400 的行。与 --fast-append 不兼容（fast-append 不按行解析）。",
     )
     args = parser.parse_args()
     log_dir = args.log_directory
@@ -521,16 +718,38 @@ def main():
     
     if add_fall_type_column:
         print("✅ 已启用: 将添加'摔倒类型-方向-csv时间编号'列")
+    if args.min_force_n is not None:
+        if args.fast_append:
+            print("错误: --min-force-n 与 --fast-append 不能同时使用（fast-append 不按行解析 CSV）")
+            sys.exit(1)
+        print(f"✅ 已启用: 最小力过滤 ≥ {args.min_force_n:g} N（force_normal 优先，取绝对值）")
     
     # 合并CSV文件
     merged_file = merge_contact_csv_files(
-        log_dir, output_file, add_fall_type_column, file_pattern, write_bin=write_bin
+        log_dir,
+        output_file,
+        add_fall_type_column,
+        file_pattern,
+        write_bin=write_bin,
+        group_by_direction=args.group_by_direction,
+        fast_append=args.fast_append,
+        min_force_n=args.min_force_n,
     )
     
     if merged_file:
         print(f"\n✅ 合并成功! 输出文件: {merged_file}")
         print(f"\n现在可以使用以下命令来可视化合并后的数据:")
-        print(f"python3 scripts/mujoco_xml_contact_display.py {merged_file} src/simulation/mujoco/assets/resource/pm_v2_mesh.xml robot_frame 1500  "" true true")
+        print(
+            f"python3 scripts/mujoco_xml_contact_display.py {merged_file} "
+            f"src/simulation/mujoco/assets/resource/pm_v2_mesh.xml robot_frame 1500 \"\" true true"
+        )
+        print("\n现在可以使用以下命令来生成护具厚度图与 YZ 护具 TSV（默认写出，文件名带 CSV 父目录时间后缀，如 yz_map_front_20260317_122531.tsv）:")
+        print(
+            f"python3 scripts/plot_contact_grid.py {merged_file} --target-force 1.0 "
+            f"--no-hardcode --no-force-filter  # target-force 单位 kN"
+        )
+        print("\n现在可以使用以下命令来绘制各部位 force_normal 小提琴图:")
+        print(f"python3 scripts/fig4_violin.py {merged_file}")
     else:
         print("❌ 合并失败")
         sys.exit(1)

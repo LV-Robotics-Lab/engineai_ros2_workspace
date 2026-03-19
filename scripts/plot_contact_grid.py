@@ -10,10 +10,12 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import matplotlib.colors as mcolors
 from matplotlib.colors import LinearSegmentedColormap, BoundaryNorm, ListedColormap
+from matplotlib.path import Path as MplPath
 import matplotlib.font_manager as fm
 import numpy as np
 import argparse
 import os
+import re
 import sys
 from pathlib import Path
 from multiprocessing import Pool, cpu_count
@@ -1394,10 +1396,239 @@ def plot_contact_grid(csv_path=None, df=None, output_path=None, bins=50, cmap=No
     plt.close()
 
 
+def compute_per_point_thickness_for_thickness_grid(
+    df,
+    csv_path=None,
+    density=0.4,
+    target_force=3.0,
+    method="chr",
+    target_pressure=None,
+    force_12mm_in_z_range=True,
+    enable_force_filter=True,
+):
+    """
+    与 plot_thickness_grid 中生成厚度图的数据管道完全一致（供厚度 hexbin 与 YZ 护具 TSV 共用）：
+    world 过滤、按位最大力或聚类肘过滤、y 单位换算、逐点 calculate_thicknesses、
+    body_part、knee 12mm / elbow 6mm、无法满足目标时改为 24mm。
+
+    返回:
+        y, z, x: 与逐点 thicknesses 对齐的坐标（y 已为米）
+        thicknesses: 每个接触点的厚度 (mm)
+        force_column: 使用的力列名
+    """
+    df = df.copy()
+
+    force_column = "force_normal" if "force_normal" in df.columns else "force_magnitude"
+    if force_column not in df.columns:
+        raise ValueError("CSV文件缺少必要的力列: force_normal 和 force_magnitude 都不存在")
+
+    required_columns = ["robot_frame_z", "robot_frame_y", force_column]
+    missing_columns = [col for col in required_columns if col not in df.columns]
+    if missing_columns:
+        raise ValueError(f"CSV文件缺少必要的列: {missing_columns}")
+
+    print(f"绘图使用力列: {force_column}")
+
+    is_already_processed = "body_part" in df.columns and len(df) < 5000000
+
+    if not is_already_processed:
+        if "body1_name" in df.columns:
+            before_filter = len(df)
+            df = df[df["body1_name"] == "world"].copy()
+            after_filter = len(df)
+            if before_filter > after_filter:
+                print(f"过滤body1_name，只保留'world': {before_filter} -> {after_filter} 行")
+
+        if csv_path is not None:
+            csv_file = Path(csv_path)
+            is_clustered = "clustered" in csv_file.stem.lower() or "contact_count" in df.columns
+        else:
+            is_clustered = "contact_count" in df.columns
+
+        if not is_clustered:
+            df = find_max_force_per_position(df, force_column=force_column, enable_force_filter=enable_force_filter)
+        else:
+            print("检测到聚类后的CSV文件，应用过滤...")
+            if enable_force_filter:
+                df = filter_elbow_forces(df, force_column=force_column)
+    else:
+        print(f"数据已处理过（{len(df)} 行），跳过重复处理")
+
+    z = df["robot_frame_z"].values
+    y = df["robot_frame_y"].values
+    force = df[force_column].values
+    x = df["robot_frame_x"].values if "robot_frame_x" in df.columns else np.zeros(len(df), dtype=float)
+
+    if len(y) > 0 and np.abs(y).max() > 10:
+        y = y / 100.0
+        df["robot_frame_y"] = y
+
+    if method == "chr":
+        print(f"正在计算保护层厚度（方法={method}, 密度={density}, 目标力={target_force}kN）...")
+    else:
+        print(f"正在计算保护层厚度（方法={method}, 目标压强={target_pressure}MPa）...")
+    thicknesses = calculate_thicknesses(
+        force, density=density, target_force=target_force, method=method, target_pressure=target_pressure
+    )
+
+    if "body_part" not in df.columns:
+        print(f"      正在分类身体部分以应用knee区域厚度提升...")
+        if len(df) > 10000:
+            n_jobs = max(1, cpu_count() - 2)
+            df = apply_body_part_multiprocess(df, n_jobs=n_jobs)
+        else:
+            df = apply_body_part_multiprocess(df, n_jobs=1)
+
+    if force_12mm_in_z_range:
+        thicknesses = set_thickness_to_12mm_in_z_range(thicknesses, df, z)
+        thicknesses = set_elbow_thickness_to_6mm(thicknesses, df, z)
+
+    invalid_mask = np.isnan(thicknesses)
+    invalid_count = np.sum(invalid_mask)
+    if invalid_count > 0:
+        print(f"警告: {invalid_count} 个接触点无法满足目标要求（即使使用最大厚度）")
+
+        invalid_df = df[invalid_mask].copy()
+        invalid_df["force_kn"] = invalid_df[force_column] / 1000.0
+        invalid_df["thickness_mm"] = np.nan
+
+        if "body_part" not in invalid_df.columns:
+            if len(invalid_df) > 1000:
+                n_jobs = max(1, cpu_count() - 2)
+                print(f"      正在分类无法满足要求的点（{len(invalid_df)} 行数据，使用 {n_jobs} 个进程）...")
+                invalid_df = apply_body_part_multiprocess(invalid_df, n_jobs=n_jobs)
+            else:
+                invalid_df["body_part"] = invalid_df.apply(get_body_part, axis=1)
+        else:
+            print(f"      跳过分类（已有body_part列）")
+
+        print(f"\n无法满足目标要求（目标力={target_force}kN，最大厚度24mm仍无法满足）的接触点:")
+        print("-" * 200)
+        print(
+            f"{'身体部分':<20} {'力(N)':<15} {'力(kN)':<15} {'厚度(mm)':<15} {'位置(x,y,z)':<30} {'body1':<25} {'body2':<25} {'fail-type':<30}"
+        )
+        print("-" * 200)
+
+        invalid_df_sorted = invalid_df.sort_values(by=force_column, ascending=False)
+        for idx, row in invalid_df_sorted.iterrows():
+            body_part = row["body_part"]
+            force_n = row[force_column]
+            force_kn = row["force_kn"]
+            x_pos = row.get("robot_frame_x", 0.0) if "robot_frame_x" in row.index else 0.0
+            y_pos = row.get("robot_frame_y", 0.0) if "robot_frame_y" in row.index else 0.0
+            z_pos = row.get("robot_frame_z", 0.0) if "robot_frame_z" in row.index else 0.0
+            body1_name = (
+                str(row.get("body1_name", "N/A"))
+                if "body1_name" in row.index and pd.notna(row.get("body1_name"))
+                else "N/A"
+            )
+            body2_name = (
+                str(row.get("body2_name", "N/A"))
+                if "body2_name" in row.index and pd.notna(row.get("body2_name"))
+                else "N/A"
+            )
+            fail_type = (
+                str(row.get("fall_type_info", "N/A"))
+                if "fall_type_info" in row.index and pd.notna(row.get("fall_type_info"))
+                else "N/A"
+            )
+
+            position_str = f"({x_pos:.3f},{y_pos:.3f},{z_pos:.3f})"
+            print(
+                f"{body_part:<20} {force_n:<15.2f} {force_kn:<15.3f} {'N/A':<15} {position_str:<30} {body1_name:<25} {body2_name:<25} {fail_type:<30}"
+            )
+
+        print("-" * 200)
+        print(f"（共 {invalid_count} 个点）\n")
+
+        max_thickness = 24
+        thicknesses = np.where(invalid_mask, max_thickness, thicknesses)
+
+    return y, z, x, thicknesses, force_column
+
+
+def _collect_tsv_nonzero_rows(grid_mm, y_centers, z_centers):
+    """(robot_frame_y, robot_frame_z, thickness_mm) 列表，按 y,z 排序。"""
+    rows = []
+    for iz in range(grid_mm.shape[0]):
+        for iy in range(grid_mm.shape[1]):
+            v = float(grid_mm[iz, iy])
+            if v > 0.5:
+                rows.append((float(y_centers[iy]), float(z_centers[iz]), v))
+    rows.sort(key=lambda t: (t[0], t[1]))
+    return rows
+
+
+def _collect_hex_nonzero_rows(offsets, hvals):
+    """hexbin 有厚度数据的六边形中心 (y,z,mm)，按 y,z 排序。"""
+    off = np.asarray(offsets, dtype=float)
+    hv = np.asarray(hvals, dtype=float).ravel()
+    n = min(len(off), len(hv))
+    rows = []
+    for i in range(n):
+        v = float(hv[i])
+        if v > 0.5:
+            rows.append((float(off[i, 0]), float(off[i, 1]), v))
+    rows.sort(key=lambda t: (t[0], t[1]))
+    return rows
+
+
+def _print_yz_hex_tsv_compare(side_label, hex_rows, tsv_rows, max_print=120):
+    """
+    打印「该侧 hexbin 非零六边形」与「TSV 非零矩形格心」供对照。
+    说明：混合厚度 PNG 的色块是前后合一的 hexbin，与这里「单侧」列表不同。
+    """
+    print(f"\n  --- YZ 对照 [{side_label}] （hex=该侧 hexbin 非零格；TSV=0.05m 格心采样后非零）---")
+    print(f"  hex 非零个数: {len(hex_rows)}  |  TSV 非零个数: {len(tsv_rows)}")
+    print(f"  [hex {side_label}]  y(m)      z(m)      mm")
+    for i, (yy, zz, mm) in enumerate(hex_rows[:max_print]):
+        print(f"    {i+1:4d}  {yy:8.4f}  {zz:8.4f}  {mm:6.0f}")
+    if len(hex_rows) > max_print:
+        print(f"    ... 省略 {len(hex_rows) - max_print} 行 hex")
+    print(f"  [TSV {side_label}]  y(m)      z(m)      mm")
+    for i, (yy, zz, mm) in enumerate(tsv_rows[:max_print]):
+        print(f"    {i+1:4d}  {yy:8.4f}  {zz:8.4f}  {mm:6.0f}")
+    if len(tsv_rows) > max_print:
+        print(f"    ... 省略 {len(tsv_rows) - max_print} 行 TSV")
+
+    if hex_rows and tsv_rows:
+        hx = np.array([[r[0], r[1]] for r in hex_rows], dtype=float)
+        far = 0
+        max_d = 0.0
+        for yy, zz, _ in tsv_rows:
+            d = np.hypot(hx[:, 0] - yy, hx[:, 1] - zz)
+            dm = float(np.min(d))
+            max_d = max(max_d, dm)
+            if dm > 0.06:
+                far += 1
+        print(f"  粗检: TSV 非零格心到最近 hex 中心 最大距离 {max_d:.4f} m；>0.06m 的格数 {far}/{len(tsv_rows)}")
+
+
+def _print_mixed_thickness_hex_positions(hb, max_print=120):
+    """打印厚度 PNG 使用的混合 hexbin 非零格（与 *_hexbin_aggregate.csv 一致）。"""
+    off = np.asarray(hb.get_offsets(), dtype=float)
+    arr = np.asarray(hb.get_array(), dtype=float)
+    if hasattr(arr, "filled"):
+        arr = arr.filled(np.nan)
+    rows_all = _collect_hex_nonzero_rows(off, arr)
+    y_lo, y_hi = THICKNESS_GRID_Y_LIM
+    z_lo, z_hi = THICKNESS_GRID_Z_LIM
+    rows_vis = [r for r in rows_all if y_lo <= r[0] <= y_hi and z_lo <= r[1] <= z_hi]
+    print("\n  --- 混合厚度 PNG：hexbin 非零六边形中心（前后合一，与色块一致）---")
+    print(f"  轴内非零: {len(rows_vis)} 个 | 全 extent 非零: {len(rows_all)} 个")
+    print("  idx    y(m)        z(m)        mm")
+    for i, (yy, zz, mm) in enumerate(rows_vis[:max_print]):
+        print(f"    {i+1:4d}  {yy:8.4f}  {zz:8.4f}  {mm:6.0f}")
+    if len(rows_vis) > max_print:
+        print(f"    ... 省略 {len(rows_vis) - max_print} 行")
+
+
 def plot_thickness_grid(csv_path=None, df=None, output_path=None, bins=50, cmap=None, figsize=(10, 8), 
                        density=0.4, target_force=3.0, margin_left=5.0, margin_right=5.0, 
                        margin_top=5.0, margin_bottom=5.0, method='chr', target_pressure=None,
-                       force_12mm_in_z_range=True, enable_force_filter=True):
+                       force_12mm_in_z_range=True, enable_force_filter=True,
+                       _yz_thickness_precomputed=None, hexbin_dump_csv=None,
+                       print_mixed_hex_compare=False, compare_max_print=120):
     """
     绘制保护层厚度的网格颜色图
     
@@ -1419,6 +1650,12 @@ def plot_thickness_grid(csv_path=None, df=None, output_path=None, bins=50, cmap=
         force_12mm_in_z_range: 是否启用强制厚度设置（默认True）
                                包括：1) 将z坐标在(0.32, 0.48)范围内的点设置为12mm
                                     2) 将elbow/shoulder部位z坐标在(0.8, 1.0)范围内的点设置为6mm
+        _yz_thickness_precomputed: 可选，``compute_per_point_thickness_for_thickness_grid`` 的返回值
+            ``(y, z, x, thicknesses, force_column)``，传入则跳过重复计算（供 main 与 YZ TSV 共用）。
+        hexbin_dump_csv: 若提供路径，将 PNG 所用 ``hexbin`` 的六边形中心与 ``thickness_mm`` 写入 CSV
+            （与图同源，非像素解码；前后侧点混合，与 ``yz_map_front`` 仅 x>=0 不同）。
+        print_mixed_hex_compare: 为 True 时在终端打印混合 hexbin 非零格位置（与 PNG 色块一致）。
+        compare_max_print: 上述打印与 ``--compare-yz-hex-tsv`` 各表最多行数。
     """
     # 如果没有指定颜色映射，使用离散的橙色默认映射
     if cmap is None:
@@ -1431,147 +1668,24 @@ def plot_thickness_grid(csv_path=None, df=None, output_path=None, bins=50, cmap=
             print(f"警告: 无法找到颜色映射 '{cmap}'，使用默认的离散橙色映射")
             cmap = create_discrete_orange_cmap()
     
-    # 读取CSV文件（如果df未提供）
-    if df is None:
-        if csv_path is None:
-            raise ValueError("必须提供csv_path或df参数")
-        print(f"正在读取CSV文件: {csv_path}")
-        df = read_csv_with_progress(csv_path)
+    if _yz_thickness_precomputed is not None:
+        y, z, _x, thicknesses, _fc_pre = _yz_thickness_precomputed
     else:
-        df = df.copy()
-    
-    # 确定使用的力列（优先使用force_normal，与统计部分保持一致）
-    force_column = 'force_normal' if 'force_normal' in df.columns else 'force_magnitude'
-    if force_column not in df.columns:
-        raise ValueError(f"CSV文件缺少必要的力列: force_normal 和 force_magnitude 都不存在")
-    
-    # 检查必要的列是否存在
-    required_columns = ['robot_frame_z', 'robot_frame_y', force_column]
-    missing_columns = [col for col in required_columns if col not in df.columns]
-    if missing_columns:
-        raise ValueError(f"CSV文件缺少必要的列: {missing_columns}")
-    
-    print(f"绘图使用力列: {force_column}")
-    
-    # 检查数据是否已经处理过（如果已经有body_part列，且数据行数较少，说明已经处理过）
-    # 原始数据通常有数千万行，处理后会减少到数百万行
-    is_already_processed = 'body_part' in df.columns and len(df) < 5000000
-    
-    if not is_already_processed:
-        # 首先过滤，只保留body1_name是'world'的数据
-        if 'body1_name' in df.columns:
-            before_filter = len(df)
-            df = df[df['body1_name'] == 'world'].copy()
-            after_filter = len(df)
-            if before_filter > after_filter:
-                print(f"过滤body1_name，只保留'world': {before_filter} -> {after_filter} 行")
-        
-        # 检查是否是原始CSV（通过检查是否有contact_count列，或者文件名是否包含"clustered"）
-        if csv_path is not None:
-            csv_file = Path(csv_path)
-            is_clustered = 'clustered' in csv_file.stem.lower() or 'contact_count' in df.columns
-        else:
-            # 如果csv_path为None，只通过contact_count列判断
-            is_clustered = 'contact_count' in df.columns
-        
-        if not is_clustered:
-            # 原始CSV：按位置分组，找到每个位置的最大力
-            df = find_max_force_per_position(df, force_column=force_column, enable_force_filter=enable_force_filter)
-        else:
-            print("检测到聚类后的CSV文件，应用过滤...")
-            # 对于聚类后的CSV，也需要应用elbow过滤
-            if enable_force_filter:
-                df = filter_elbow_forces(df, force_column=force_column)
-    else:
-        print(f"数据已处理过（{len(df)} 行），跳过重复处理")
-    
-    # 提取数据
-    z = df['robot_frame_z'].values
-    y = df['robot_frame_y'].values
-    force = df[force_column].values
-    
-    # 将 y 从 cm 转换为 m（如果数据是 cm 单位）
-    # 根据标签显示为 cm，但实际数据可能是 m，这里先假设是 cm 需要转换
-    # 如果数据已经是 m，转换不会影响（除以 100 再乘以 100 会恢复原值）
-    # 但为了安全，我们检查数据范围：如果最大值小于 1，可能是 m；如果大于 10，可能是 cm
-    if len(y) > 0 and np.abs(y).max() > 10:
-        # 数据可能是 cm，转换为 m
-        y = y / 100.0
-    
-    # 计算每个接触点的厚度
-    if method == 'chr':
-        print(f"正在计算保护层厚度（方法={method}, 密度={density}, 目标力={target_force}kN）...")
-    else:
-        print(f"正在计算保护层厚度（方法={method}, 目标压强={target_pressure}MPa）...")
-    thicknesses = calculate_thicknesses(force, density=density, target_force=target_force, 
-                                       method=method, target_pressure=target_pressure)
-    
-    # 对于knee组中z坐标在(0.3, 0.5)区域的点，提升厚度一个级别（因为应力集中）
-    # 确保df有body_part列
-    if 'body_part' not in df.columns:
-        print(f"      正在分类身体部分以应用knee区域厚度提升...")
-        if len(df) > 10000:
-            n_jobs = max(1, cpu_count() - 2)
-            df = apply_body_part_multiprocess(df, n_jobs=n_jobs)
-        else:
-            df = apply_body_part_multiprocess(df, n_jobs=1)
-    
-    # 对于任何部位z坐标在(0.3, 0.5)范围内的点，将厚度直接设置为12mm（如果开关开启）
-    if force_12mm_in_z_range:
-        thicknesses = set_thickness_to_12mm_in_z_range(thicknesses, df, z)
-        # 对于elbow组中z坐标在(0.8, 1.0)区域的点，将厚度设置为6mm
-        thicknesses = set_elbow_thickness_to_6mm(thicknesses, df, z)
-    
-    # 统计无法满足要求的点（None值已被转换为nan）
-    invalid_mask = np.isnan(thicknesses)
-    invalid_count = np.sum(invalid_mask)
-    if invalid_count > 0:
-        print(f"警告: {invalid_count} 个接触点无法满足目标要求（即使使用最大厚度）")
-        
-        # 收集无法满足要求的点的详细信息
-        invalid_df = df[invalid_mask].copy()
-        invalid_df['force_kn'] = invalid_df[force_column] / 1000.0
-        invalid_df['thickness_mm'] = np.nan
-        
-        # 添加身体部分列（使用多进程加速，如果还没有body_part列）
-        if 'body_part' not in invalid_df.columns:
-            if len(invalid_df) > 1000:
-                n_jobs = max(1, cpu_count() - 2)
-                print(f"      正在分类无法满足要求的点（{len(invalid_df)} 行数据，使用 {n_jobs} 个进程）...")
-                invalid_df = apply_body_part_multiprocess(invalid_df, n_jobs=n_jobs)
-            else:
-                invalid_df['body_part'] = invalid_df.apply(get_body_part, axis=1)
-        else:
-            print(f"      跳过分类（已有body_part列）")
-        
-        # 打印无法满足要求的点
-        print(f"\n无法满足目标要求（目标力={target_force}kN，最大厚度24mm仍无法满足）的接触点:")
-        print("-" * 200)
-        print(f"{'身体部分':<20} {'力(N)':<15} {'力(kN)':<15} {'厚度(mm)':<15} {'位置(x,y,z)':<30} {'body1':<25} {'body2':<25} {'fail-type':<30}")
-        print("-" * 200)
-        
-        # 按力从大到小排序，打印所有无法满足要求的点
-        invalid_df_sorted = invalid_df.sort_values(by=force_column, ascending=False)
-        for idx, row in invalid_df_sorted.iterrows():
-            body_part = row['body_part']
-            force_n = row[force_column]
-            force_kn = row['force_kn']
-            x_pos = row.get('robot_frame_x', 0.0) if 'robot_frame_x' in row.index else 0.0
-            y_pos = row.get('robot_frame_y', 0.0) if 'robot_frame_y' in row.index else 0.0
-            z_pos = row.get('robot_frame_z', 0.0) if 'robot_frame_z' in row.index else 0.0
-            body1_name = str(row.get('body1_name', 'N/A')) if 'body1_name' in row.index and pd.notna(row.get('body1_name')) else 'N/A'
-            body2_name = str(row.get('body2_name', 'N/A')) if 'body2_name' in row.index and pd.notna(row.get('body2_name')) else 'N/A'
-            fail_type = str(row.get('fall_type_info', 'N/A')) if 'fall_type_info' in row.index and pd.notna(row.get('fall_type_info')) else 'N/A'
-            
-            position_str = f"({x_pos:.3f},{y_pos:.3f},{z_pos:.3f})"
-            print(f"{body_part:<20} {force_n:<15.2f} {force_kn:<15.3f} {'N/A':<15} {position_str:<30} {body1_name:<25} {body2_name:<25} {fail_type:<30}")
-        
-        print("-" * 200)
-        print(f"（共 {invalid_count} 个点）\n")
-        
-        # 将None/nan替换为最大厚度值，以便绘图
-        max_thickness = 24  # 最大可选厚度
-        thicknesses = np.where(invalid_mask, max_thickness, thicknesses)
+        if df is None:
+            if csv_path is None:
+                raise ValueError("必须提供csv_path或df参数")
+            print(f"正在读取CSV文件: {csv_path}")
+            df = read_csv_with_progress(csv_path)
+        y, z, _x, thicknesses, _fc = compute_per_point_thickness_for_thickness_grid(
+            df,
+            csv_path=csv_path,
+            density=density,
+            target_force=target_force,
+            method=method,
+            target_pressure=target_pressure,
+            force_12mm_in_z_range=force_12mm_in_z_range,
+            enable_force_filter=enable_force_filter,
+        )
     
     # 创建图形
     fig, ax = plt.subplots(figsize=figsize)
@@ -1605,6 +1719,9 @@ def plot_thickness_grid(csv_path=None, df=None, output_path=None, bins=50, cmap=
     # 使用离散颜色映射
     hb = ax.hexbin(y, z, C=thicknesses, gridsize=bins, cmap=cmap, reduce_C_function=np.max,
                    norm=norm)
+
+    if print_mixed_hex_compare:
+        _print_mixed_thickness_hex_positions(hb, max_print=compare_max_print)
     
     # 添加颜色条，使用shrink参数控制大小
     # 使用离散颜色条，显示为块状
@@ -1662,6 +1779,9 @@ def plot_thickness_grid(csv_path=None, df=None, output_path=None, bins=50, cmap=
         print(f"图片已保存到: {output_path}")
     else:
         plt.show()
+
+    if hexbin_dump_csv:
+        write_thickness_hexbin_aggregate_csv(hb, hexbin_dump_csv, gridsize=bins, method=method)
     
     plt.close()
 
@@ -2144,6 +2264,440 @@ def plot_pressure_grid(csv_path=None, df=None, stl_path=None, output_path=None, 
     plt.close()
 
 
+# YZ 护具 map 网格：与 protector_map/yz_map_front.tsv、yz_map_back.tsv 一致
+YZ_MAP_Y_MIN, YZ_MAP_Y_MAX, YZ_MAP_STEP = -0.4, 0.4, 0.05
+YZ_MAP_Z_MIN, YZ_MAP_Z_MAX = 0.0, 1.4
+
+# 厚度/力图坐标轴显示范围（与 plot_thickness_grid 中 set_xlim/set_ylim 一致；轴外为白边）
+THICKNESS_GRID_Y_LIM = (-0.35, 0.35)  # 横轴 robot_frame_y (m)
+THICKNESS_GRID_Z_LIM = (0.1, 1.2)  # 纵轴 robot_frame_z (m)
+
+
+def write_thickness_hexbin_aggregate_csv(hb, csv_path, gridsize, method="chr"):
+    """
+    写出与厚度 PNG 中 ``ax.hexbin`` **完全一致**的聚合表（非 PNG 栅格像素）。
+    每行：六边形中心 ``robot_frame_y``、``robot_frame_z``、``thickness_mm``（即 ``reduce_C_function=max`` 结果）。
+    """
+    off = np.asarray(hb.get_offsets(), dtype=float)
+    arr = np.asarray(hb.get_array(), dtype=float)
+    if hasattr(arr, "filled"):
+        arr = arr.filled(np.nan)
+    n = min(len(off), len(arr))
+    if n == 0:
+        print(f"  警告: hexbin 无单元，未写入 {csv_path}")
+        return
+    off = off[:n]
+    arr = arr[:n]
+    y_lo, y_hi = THICKNESS_GRID_Y_LIM
+    z_lo, z_hi = THICKNESS_GRID_Z_LIM
+    inside = (off[:, 0] >= y_lo) & (off[:, 0] <= y_hi) & (off[:, 1] >= z_lo) & (off[:, 1] <= z_hi)
+    df = pd.DataFrame(
+        {
+            "robot_frame_y": off[:, 0],
+            "robot_frame_z": off[:, 1],
+            "thickness_mm": arr,
+            "inside_plot_axes": inside,
+        }
+    )
+    Path(csv_path).parent.mkdir(parents=True, exist_ok=True)
+    with open(csv_path, "w", encoding="utf-8") as f:
+        f.write(
+            f"# Same hexbin as thickness PNG: gridsize={gridsize}, method={method}, reduce_C_function=max\n"
+        )
+        f.write(
+            "# NOT raster pixels; one row per hex cell with data. Compare yz_map_front.tsv (x>=0 only) separately.\n"
+        )
+    df.to_csv(csv_path, mode="a", index=False)
+    n_in = int(np.sum(inside))
+    print(f"  已写出 hexbin 聚合 CSV（与 PNG 同源）: {csv_path}  (共 {n} 个有数据六边形, 轴内约 {n_in} 个)")
+    vc = df.loc[inside, "thickness_mm"].value_counts().sort_index()
+    if len(vc):
+        print("  轴内 thickness_mm 计数:")
+        for val, cnt in vc.items():
+            print(f"    {val:g} mm: {cnt:d}")
+
+
+def _yz_map_tsv_suffix_from_csv(csv_path: str) -> str:
+    """
+    从 CSV 所在父目录名取后缀，便于同目录多批数据不互相覆盖。
+    优先匹配目录名中的 YYYYMMDD_HHMMSS（取最后一个），否则用父目录名做安全化短后缀。
+    例如 8dir-200.0N-0.4s-20260317_122531 -> _20260317_122531
+    """
+    parent_name = Path(csv_path).resolve().parent.name
+    matches = re.findall(r"(\d{8}_\d{6})", parent_name)
+    if matches:
+        return f"_{matches[-1]}"
+    safe = re.sub(r"[^a-zA-Z0-9._-]+", "_", parent_name).strip("_")
+    if not safe or safe == ".":
+        return ""
+    if len(safe) > 64:
+        safe = safe[:64]
+    return f"_{safe}"
+
+
+def _write_yz_map_tsv(
+    filepath,
+    grid_mm,
+    side_label,
+    density=0.4,
+    hex_bins=None,
+    yz_map_step=0.05,
+):
+    """将 (nz, ny) 厚度网格写成 protector map 格式的 TSV。"""
+    y_centers = np.arange(YZ_MAP_Y_MIN, YZ_MAP_Y_MAX + 1e-9, yz_map_step)
+    z_centers = np.arange(YZ_MAP_Z_MIN, YZ_MAP_Z_MAX + 1e-9, yz_map_step)
+    ny, nz = len(y_centers), len(z_centers)
+    lines = [
+        f"# YZ protector map, {side_label}. Pixel = {yz_map_step}m. Thickness mm per cell.",
+        f"# density {density}",
+    ]
+    if hex_bins is not None:
+        lines.append(
+            f"# 厚度值与厚度 PNG 相同：hexbin gridsize={hex_bins}、reduce=max；"
+            f"再写入本矩形格中心所在六边形的值（前/后仅 x 分区）"
+        )
+    lines.append("z\\y\t" + "\t".join(f"{y:.2f}" for y in y_centers))
+    for i, z in enumerate(z_centers):
+        if i < grid_mm.shape[0]:
+            row_vals = "\t".join(str(int(round(v))) if not np.isnan(v) else "0" for v in grid_mm[i, :])
+        else:
+            row_vals = "\t".join("0" for _ in range(ny))
+        lines.append(f"{z:.2f}\t{row_vals}")
+    Path(filepath).parent.mkdir(parents=True, exist_ok=True)
+    with open(filepath, "w", encoding="utf-8") as f:
+        f.write("\n".join(lines) + "\n")
+    print(f"  已写入: {filepath}")
+
+
+def _hexbin_max_paths_for_tsv(y_sub, z_sub, c_sub, gridsize, extent):
+    """
+    与 plot_thickness_grid 中一致：ax.hexbin(y,z,C=..., gridsize, reduce_C_function=np.max, extent=...)。
+
+    返回:
+        paths: PolyCollection 的路径列表（常为 **1 个模板**）
+        offsets: (N,2) 每个六边形中心在数据坐标中的平移（必须与 arr 行数一致）
+        arr: 每个六边形的 reduce 后厚度
+    """
+    if len(y_sub) == 0:
+        return [], np.zeros((0, 2)), np.array([])
+    fig, ax = plt.subplots(figsize=(1, 1))
+    ax.set_axis_off()
+    hb = ax.hexbin(
+        y_sub,
+        z_sub,
+        C=c_sub,
+        gridsize=gridsize,
+        reduce_C_function=np.max,
+        extent=extent,
+        linewidths=0,
+    )
+    paths = hb.get_paths()
+    offsets = np.asarray(hb.get_offsets(), dtype=float)
+    arr = np.asarray(hb.get_array(), dtype=float)
+    if hasattr(arr, "filled"):
+        arr = arr.filled(np.nan)
+    arr = np.nan_to_num(arr, nan=0.0)
+    plt.close(fig)
+    return paths, offsets, arr
+
+
+def _rect_centers_sample_hexbin_max(paths, offsets, hex_vals, y_centers, z_centers):
+    """
+    对每个矩形格中心 (y,z)，判断落在哪个六边形内并取厚度 max。
+    matplotlib hexbin 的 Polygon 顶点多为「模板 + get_offsets() 平移」，不能直接用 path.contains_points。
+    """
+    ny, nz = len(y_centers), len(z_centers)
+    grid = np.zeros((nz, ny), dtype=float)
+    n_hex = len(hex_vals)
+    if n_hex == 0 or offsets.shape[0] == 0:
+        return grid
+    n_hex = int(min(n_hex, offsets.shape[0]))
+    yy, zz = np.meshgrid(y_centers, z_centers, indexing="xy")
+    pts = np.column_stack([yy.ravel(), zz.ravel()])
+    flat = np.zeros(len(pts), dtype=float)
+
+    if len(paths) == 1:
+        tmpl = np.asarray(paths[0].vertices, dtype=float)
+        for i in range(n_hex):
+            v = float(hex_vals[i])
+            if not np.isfinite(v):
+                continue
+            poly = MplPath(tmpl + offsets[i])
+            try:
+                inside = poly.contains_points(pts)
+            except Exception:
+                inside = np.array([poly.contains_point(tuple(pt)) for pt in pts])
+            flat = np.where(inside, np.maximum(flat, v), flat)
+    else:
+        for i in range(min(n_hex, len(paths))):
+            v = float(hex_vals[i])
+            if not np.isfinite(v):
+                continue
+            ov = offsets[i] if i < offsets.shape[0] else np.zeros(2)
+            poly = MplPath(np.asarray(paths[i].vertices, dtype=float) + ov)
+            try:
+                inside = poly.contains_points(pts)
+            except Exception:
+                inside = np.array([poly.contains_point(tuple(pt)) for pt in pts])
+            flat = np.where(inside, np.maximum(flat, v), flat)
+    return flat.reshape(nz, ny)
+
+
+def _mask_yz_grid_outside_thickness_axes(grid_mm, y_centers, z_centers):
+    """将厚度图坐标轴外的格置 0（与 PNG 白边一致；护具表格外圈常不应有虚假厚度）。"""
+    y_lo, y_hi = THICKNESS_GRID_Y_LIM
+    z_lo, z_hi = THICKNESS_GRID_Z_LIM
+    yy, zz = np.meshgrid(y_centers, z_centers, indexing="xy")
+    outside = (yy < y_lo) | (yy > y_hi) | (zz < z_lo) | (zz > z_hi)
+    out = np.array(grid_mm, dtype=float, copy=True)
+    out[outside] = 0.0
+    return out
+
+
+def _build_grid_from_hexbin_offsets(offsets, hex_vals, ny, nz):
+    """
+    将 hexbin 六边形中心(offset)映射到 TSV 的固定 0.05m 矩形格索引，
+    并在同一矩形格内对厚度取 max。
+
+    相比“格心是否落入 hex 多边形内”的点内判断，这种方式不会因为 hex 很小而导致 TSV 极度稀疏。
+    """
+    grid = np.zeros((nz, ny), dtype=float)
+    if offsets is None or len(offsets) == 0:
+        return grid
+    off = np.asarray(offsets, dtype=float)
+    hv = np.asarray(hex_vals, dtype=float).ravel()
+    n = min(len(off), len(hv))
+    if n == 0:
+        return grid
+    off = off[:n]
+    hv = hv[:n]
+
+    yi = np.clip(np.round((off[:, 0] - YZ_MAP_Y_MIN) / YZ_MAP_STEP).astype(int), 0, ny - 1)
+    zi = np.clip(np.round((off[:, 1] - YZ_MAP_Z_MIN) / YZ_MAP_STEP).astype(int), 0, nz - 1)
+    flat = grid.ravel()
+    lin = zi * ny + yi
+    np.maximum.at(flat, lin, hv)
+    return flat.reshape(nz, ny)
+
+
+def _build_grid_from_hexbin_polygon_intersect(paths, offsets, hex_vals, y_centers, z_centers):
+    """
+    将 hexbin 的非零单元映射到 0.05m 固定矩形格：
+    对每个 hex 多边形与每个候选矩形格做相交判定（用角点/中心点/多边形顶点判定），
+    若相交则该矩形格取 max(thickness)。
+
+    这样比“只用 hex 中心点落格”更符合“六边形颜色块覆盖到的区域”直觉。
+    """
+    ny, nz = len(y_centers), len(z_centers)
+    grid = np.zeros((nz, ny), dtype=float)
+    if not paths or offsets is None or len(offsets) == 0:
+        return grid
+
+    tmpl = np.asarray(paths[0].vertices, dtype=float)
+    if tmpl.ndim != 2 or tmpl.shape[1] != 2:
+        return grid
+
+    # y_centers/z_centers 按相同步长生成；这里用 y_step 推导半径，避免固定写死 0.05m
+    if len(y_centers) < 2:
+        return grid
+    y_step = float(y_centers[1] - y_centers[0])
+    half = y_step / 2.0
+    eps = 1e-12
+
+    off = np.asarray(offsets, dtype=float)
+    hv = np.asarray(hex_vals, dtype=float).ravel()
+    n = min(len(off), len(hv))
+    if n == 0:
+        return grid
+
+    y_min = float(np.min(y_centers))
+    z_min = float(np.min(z_centers))
+
+    for i in range(n):
+        v = float(hv[i])
+        if not np.isfinite(v) or v <= 0:
+            continue
+        ov = off[i]
+        poly_verts = tmpl + ov
+        poly = MplPath(poly_verts)
+
+        y_poly_min = float(np.min(poly_verts[:, 0]))
+        y_poly_max = float(np.max(poly_verts[:, 0]))
+        z_poly_min = float(np.min(poly_verts[:, 1]))
+        z_poly_max = float(np.max(poly_verts[:, 1]))
+
+        # 候选方格索引：使用矩形覆盖范围 [center-half, center+half]
+        iy0 = int(np.floor((y_poly_min - half - y_min) / y_step))
+        iy1 = int(np.ceil((y_poly_max + half - y_min) / y_step))
+        # z 轴步长与 y_step 维持一致（由 TSV grid 生成方式保证）
+        iz0 = int(np.floor((z_poly_min - half - z_min) / y_step))
+        iz1 = int(np.ceil((z_poly_max + half - z_min) / y_step))
+        iy0 = max(0, iy0)
+        iz0 = max(0, iz0)
+        iy1 = min(ny - 1, iy1)
+        iz1 = min(nz - 1, iz1)
+        if iy0 > iy1 or iz0 > iz1:
+            continue
+
+        # rectangle corners and center for each candidate cell
+        for iz in range(iz0, iz1 + 1):
+            zc = float(z_centers[iz])
+            z0 = zc - half
+            z1 = zc + half
+            for iy in range(iy0, iy1 + 1):
+                yc = float(y_centers[iy])
+                y0 = yc - half
+                y1 = yc + half
+
+                rect_corners = np.array(
+                    [[y0, z0], [y1, z0], [y0, z1], [y1, z1]],
+                    dtype=float,
+                )
+                rect_center = np.array([[yc, zc]], dtype=float)
+
+                # 任一几何特征落在多边形内 -> 相交（对凸多边形足够）
+                inter = False
+                try:
+                    if np.any(poly.contains_points(rect_corners, radius=eps)):
+                        inter = True
+                    elif poly.contains_points(rect_center, radius=eps)[0]:
+                        inter = True
+                    else:
+                        inside_poly_vertex = np.any(
+                            (poly_verts[:, 0] >= y0 - eps)
+                            & (poly_verts[:, 0] <= y1 + eps)
+                            & (poly_verts[:, 1] >= z0 - eps)
+                            & (poly_verts[:, 1] <= z1 + eps)
+                        )
+                        inter = bool(inside_poly_vertex)
+                except Exception:
+                    # 兜底：逐点 contains_point
+                    inside_any = any(poly.contains_point(tuple(pt)) for pt in rect_corners)
+                    inter = inside_any or poly.contains_point((yc, zc))
+
+                if inter:
+                    grid[iz, iy] = max(grid[iz, iy], v)
+
+    return grid
+
+
+def export_yz_protector_map_tsv(
+    df,
+    front_tsv_path,
+    back_tsv_path,
+    csv_path=None,
+    density=0.4,
+    target_force=3.0,
+    method="chr",
+    target_pressure=None,
+    force_12mm_in_z_range=True,
+    enable_force_filter=True,
+    _yz_thickness_precomputed=None,
+    hex_bins=50,
+    compare_yz_hex_tsv=False,
+    compare_yz_max_print=120,
+    yz_map_step=0.05,
+):
+    """
+    生成 yz_map_front*.tsv / yz_map_back*.tsv（护具 0.05m 矩形格，与 protector_map 同格式）。
+
+    逐点厚度与 ``*_thickness_grid_plot_<method>.png`` 相同（``compute_per_point_thickness_for_thickness_grid``）。
+
+    **与 PNG 一致的聚合**：对 ``robot_frame_x >= 0`` / ``< 0`` 分别做与厚度图相同的
+    ``hexbin(y,z,C=厚度, gridsize=hex_bins, reduce_C_function=np.max, extent=全数据 y/z)``，
+    然后把每个 hex 的 **中心点** 映射到护具固定的 0.05m 矩形格索引上，矩形格内取 ``max``。
+    最后将 **厚度图坐标轴外**（y∉[-0.35,0.35] 或 z∉[0.1,1.2]）的格置 0，与 PNG 白边一致。
+
+    即 front/back 分别对应「只对前侧 / 后侧点画一张同 ``-b`` 的厚度 hexbin」在格中心的读数。
+    默认「前后混画」的 PNG 在同一 (y,z) 上可能更大（前后取 max），属预期差异。
+    """
+    if "robot_frame_x" not in df.columns:
+        raise ValueError("导出 YZ 护具 TSV 需要列 robot_frame_x（用于区分前/后侧）")
+
+    y_centers = np.arange(YZ_MAP_Y_MIN, YZ_MAP_Y_MAX + 1e-9, yz_map_step)
+    z_centers = np.arange(YZ_MAP_Z_MIN, YZ_MAP_Z_MAX + 1e-9, yz_map_step)
+    ny, nz = len(y_centers), len(z_centers)
+
+    if _yz_thickness_precomputed is not None:
+        y, z, x, point_thickness_mm, _fc_pre = _yz_thickness_precomputed
+    else:
+        y, z, x, point_thickness_mm, _fc = compute_per_point_thickness_for_thickness_grid(
+            df,
+            csv_path=csv_path,
+            density=density,
+            target_force=target_force,
+            method=method,
+            target_pressure=target_pressure,
+            force_12mm_in_z_range=force_12mm_in_z_range,
+            enable_force_filter=enable_force_filter,
+        )
+
+    front_mask = x >= 0
+    back_mask = x < 0
+    n_front = int(np.sum(front_mask))
+    n_back = int(np.sum(back_mask))
+    print(f"  前侧 (x>=0): {n_front:,} 点, 后侧 (x<0): {n_back:,} 点 (按 robot_frame_x 区分)")
+
+    ymin, ymax = float(np.min(y)), float(np.max(y))
+    zmin, zmax = float(np.min(z)), float(np.max(z))
+    extent = (ymin, ymax, zmin, zmax)
+    print(
+        f"  YZ TSV：hexbin 与厚度图一致 extent y=[{ymin:.4f},{ymax:.4f}] z=[{zmin:.4f},{zmax:.4f}], gridsize={hex_bins}"
+    )
+
+    def build_grid_hexbin(mask):
+        take = np.where(mask)[0]
+        if len(take) == 0:
+            z0 = np.zeros((nz, ny), dtype=float)
+            return z0, np.zeros((0, 2), dtype=float), np.array([])
+        ys = y[take]
+        zs = z[take]
+        cs = point_thickness_mm[take]
+        paths, offsets, hvals = _hexbin_max_paths_for_tsv(ys, zs, cs, hex_bins, extent)
+        # 关键：按 hex 多边形与 0.05m 矩形格“相交”映射，避免中心点落格导致遗漏。
+        g = _build_grid_from_hexbin_polygon_intersect(
+            paths, offsets, hvals, y_centers=y_centers, z_centers=z_centers
+        )
+        g = _mask_yz_grid_outside_thickness_axes(g, y_centers, z_centers)
+        return g, offsets, hvals
+
+    print(
+        f"导出 YZ 护具 map（hexbin 同 PNG，采样到 {yz_map_step}m 矩形格）:\n"
+        f"  {front_tsv_path}\n"
+        f"  {back_tsv_path}"
+    )
+    grid_front, off_f, hv_f = build_grid_hexbin(front_mask)
+    grid_back, off_b, hv_b = build_grid_hexbin(back_mask)
+    if compare_yz_hex_tsv:
+        hf = _collect_hex_nonzero_rows(off_f, hv_f)
+        tf = _collect_tsv_nonzero_rows(grid_front, y_centers, z_centers)
+        _print_yz_hex_tsv_compare("front (x>=0)", hf, tf, max_print=compare_yz_max_print)
+        hb = _collect_hex_nonzero_rows(off_b, hv_b)
+        tb = _collect_tsv_nonzero_rows(grid_back, y_centers, z_centers)
+        _print_yz_hex_tsv_compare("back (x<0)", hb, tb, max_print=compare_yz_max_print)
+        print(
+            "  提示: 厚度 PNG 为前后点混合 hexbin，与上表「单侧 hex」行数/位置会不同；"
+            "混合 hex 见 --dump-thickness-hex-csv 生成的 *_hexbin_aggregate.csv"
+        )
+    _write_yz_map_tsv(
+        front_tsv_path,
+        grid_front,
+        "front (x >= 0)",
+        density=density,
+        hex_bins=hex_bins,
+        yz_map_step=yz_map_step,
+    )
+    _write_yz_map_tsv(
+        back_tsv_path,
+        grid_back,
+        "back (x < 0)",
+        density=density,
+        hex_bins=hex_bins,
+        yz_map_step=yz_map_step,
+    )
+    print("  ✓ 护具 TSV 导出完成")
+
+
 def main():
     parser = argparse.ArgumentParser(description='绘制接触力数据、保护层厚度、表面积和压强的网格颜色图')
     parser.add_argument('csv_path', type=str, help='CSV文件路径')
@@ -2171,6 +2725,31 @@ def main():
     parser.add_argument('--search-radius', type=float, default=0.01, help='表面积计算搜索半径（米，默认: 0.01）')
     parser.add_argument('--no-hardcode', action='store_true', help='禁用强制厚度设置（默认启用）。包括：1) z坐标在(0.32, 0.48)范围内的点设置为12mm；2) elbow/shoulder部位z坐标在(0.8, 1.0)范围内的点设置为6mm')
     parser.add_argument('--no-force-filter', action='store_true', help='禁用force滤波（默认启用）。包括：1) 过滤elbow部位的特定数据；2) 限制z坐标在0.8~1.0范围内的力值')
+    parser.add_argument('--no-save-yz-tsv', action='store_true', help='生成护具厚度图时不写出 yz_map_front_*.tsv / yz_map_back_*.tsv（默认会写出，文件名含父目录时间后缀）')
+    parser.add_argument('--yz-tsv-dir', type=str, default=None, help='YZ 护具 TSV 输出目录（默认与厚度图相同目录）')
+    parser.add_argument(
+        '--yz-map-step',
+        type=float,
+        default=0.05,
+        help='YZ 护具 TSV 网格步长（m，默认 0.05；可用 0.025 变细一倍）',
+    )
+    parser.add_argument(
+        '--dump-thickness-hex-csv',
+        action='store_true',
+        help='保存厚度 PNG 时额外写出同目录下 *_thickness_*_hexbin_aggregate.csv：每个有数据六边形的中心 y/z 与 thickness_mm（与图同源，非 PNG 像素；前后点混合，与 yz_map_front 仅 x>=0 不同）',
+    )
+    parser.add_argument(
+        '--compare-yz-hex-tsv',
+        action='store_true',
+        help='终端打印：①混合厚度 PNG 的 hex 非零位置 ②导出 TSV 时前/后单侧 hex 与 TSV 非零格对照（可加 --compare-yz-max-print 控制行数）',
+    )
+    parser.add_argument(
+        '--compare-yz-max-print',
+        type=int,
+        default=120,
+        metavar='N',
+        help='与 --compare-yz-hex-tsv 配合，每段列表最多打印 N 行（默认 120）',
+    )
     
     args = parser.parse_args()
     
@@ -2185,10 +2764,18 @@ def main():
         print("错误: 使用zzq方法时必须提供--target-pressure参数")
         return
     
-    # 检查文件是否存在
-    if not os.path.exists(args.csv_path):
-        print(f"错误: 文件不存在: {args.csv_path}")
+    # 检查 CSV 路径（空串常见于未 export MERGED_CSV 却写了 "$MERGED_CSV"）
+    csv_in = (args.csv_path or "").strip()
+    if not csv_in:
+        print("错误: 第一个参数 CSV 路径为空。")
+        print('  若使用变量，请先导出再运行，例如:')
+        print('    export MERGED_CSV=/home/you/.../all_directions_merged.csv')
+        print("  或把 CSV 的绝对路径直接写在命令最前面（不要用未定义的 $MERGED_CSV）。")
         return
+    if not os.path.exists(csv_in):
+        print(f"错误: 文件不存在: {csv_in}")
+        return
+    args.csv_path = csv_in
     
     csv_file = Path(args.csv_path)
     
@@ -2416,13 +3003,50 @@ def main():
         else:
             thickness_output = Path(args.output).parent / f"{Path(args.output).stem}_thickness_{method}.png"
         
+        want_yz_tsv = (
+            (not args.no_save_yz_tsv)
+            and df_for_plotting is not None
+            and "robot_frame_x" in df_for_plotting.columns
+            and (
+                ("force_normal" in df_for_plotting.columns)
+                or ("force_magnitude" in df_for_plotting.columns)
+            )
+        )
+        yz_pipe = None
+        if want_yz_tsv:
+            print("\n" + "="*60)
+            print("保护层厚度计算（厚度图与 YZ TSV 共用，仅执行一次）")
+            print("="*60)
+            try:
+                yz_pipe = compute_per_point_thickness_for_thickness_grid(
+                    df_for_plotting,
+                    csv_path=args.csv_path,
+                    density=density,
+                    target_force=target_force,
+                    method=method,
+                    target_pressure=target_pressure,
+                    force_12mm_in_z_range=not args.no_hardcode,
+                    enable_force_filter=not args.no_force_filter,
+                )
+            except Exception as e:
+                print(f"厚度管道预计算失败（厚度图将单独计算；YZ TSV 导出将再尝试）: {e}")
+                import traceback
+                traceback.print_exc()
+                yz_pipe = None
+        
+        hexbin_csv_path = None
+        if args.dump_thickness_hex_csv:
+            hexbin_csv_path = str(
+                thickness_output.parent / f"{thickness_output.stem}_hexbin_aggregate.csv"
+            )
+        
         try:
             print("\n" + "="*60)
             print("绘制保护层厚度图")
             print("="*60)
             plot_thickness_grid(
-                df=df_for_plotting.copy() if df_for_plotting is not None else None,
-                csv_path=args.csv_path if df_for_plotting is None else None,
+                df=None if yz_pipe is not None else (df_for_plotting.copy() if df_for_plotting is not None else None),
+                csv_path=args.csv_path if yz_pipe is None else None,
                 output_path=str(thickness_output),
                 bins=args.bins,
                 cmap=args.cmap,
@@ -2436,12 +3060,48 @@ def main():
                 method=method,
                 target_pressure=target_pressure,
                 force_12mm_in_z_range=not args.no_hardcode,
-                enable_force_filter=not args.no_force_filter
+                enable_force_filter=not args.no_force_filter,
+                _yz_thickness_precomputed=yz_pipe,
+                hexbin_dump_csv=hexbin_csv_path,
+                print_mixed_hex_compare=args.compare_yz_hex_tsv,
+                compare_max_print=args.compare_yz_max_print,
             )
         except Exception as e:
             print(f"绘制厚度图时出错: {e}")
             import traceback
             traceback.print_exc()
+        
+        # 生成护具图时可选：另存为 2 个 TSV（与 protector_map 同格式）
+        if want_yz_tsv:
+            yz_dir = Path(args.yz_tsv_dir) if args.yz_tsv_dir else (Path(args.output).parent if args.output else csv_file.parent)
+            yz_dir = yz_dir.resolve()
+            _sfx = _yz_map_tsv_suffix_from_csv(args.csv_path)
+            front_path = yz_dir / f"yz_map_front{_sfx}.tsv"
+            back_path = yz_dir / f"yz_map_back{_sfx}.tsv"
+            try:
+                export_yz_protector_map_tsv(
+                    df_for_plotting,
+                    str(front_path),
+                    str(back_path),
+                    csv_path=args.csv_path,
+                    density=density,
+                    target_force=target_force,
+                    method=method,
+                    target_pressure=target_pressure,
+                    force_12mm_in_z_range=not args.no_hardcode,
+                    enable_force_filter=not args.no_force_filter,
+                    _yz_thickness_precomputed=yz_pipe,
+                    hex_bins=args.bins,
+                    compare_yz_hex_tsv=args.compare_yz_hex_tsv,
+                    compare_yz_max_print=args.compare_yz_max_print,
+                    yz_map_step=args.yz_map_step,
+                )
+            except Exception as e:
+                print(f"导出 YZ TSV 护具时出错: {e}")
+                import traceback
+                traceback.print_exc()
+        elif (not args.no_save_yz_tsv) and df_for_plotting is not None:
+            print("  跳过 YZ TSV 导出：数据缺少 robot_frame_x 或力列(force_normal/force_magnitude)")
     
     # 绘制表面积图
     if not args.force_only and not args.thickness_only and not args.pressure_only and stl_path is not None:

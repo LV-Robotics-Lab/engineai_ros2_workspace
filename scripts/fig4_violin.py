@@ -7,6 +7,8 @@ import seaborn as sns
 from pathlib import Path
 import re
 import os
+import sys
+import argparse
 from multiprocessing import Pool, cpu_count
 
 # Try to import brokenaxes for axis break functionality
@@ -1307,34 +1309,57 @@ def plot_pixel_pressures_violin(csv_path, figsize=(12.6, 6), dpi=300, group_by='
     print("✓ 所有步骤完成！")
 
 
-# 使用示例
+# 命令行入口：仅绘制 force_normal 小提琴图
 if __name__ == "__main__":
-    # 示例1: 绘制像素压力小提琴图（原有功能）
-    # plot_pixel_pressures_violin('results/fig5_all_pixel_pressures.csv')
-    
-    # 示例2: 绘制 force_normal 小提琴图（新功能）
-    # 从 body2_name 和 force_normal 读取数据，对 body2_name 进行分类后绘制
-    
-    # ===== 配置参数 =====
-    # 过滤小于此值的力数据（单位：kN），y轴最小值将从该值开始
-    FORCE_MIN_KN = 4  # 过滤小于2kN的数据
-    
-    # y轴范围设置方式：
-    # - True: 使用99分位数（更好地显示中位数附近的数据，小提琴图细节更清晰）
-    # - False: 使用实际最大值（显示所有数据，但可能有极值压缩）
-    USE_QUANTILE = False  # 改为 False 使用实际最大值
-    
-    csv_path = os.path.expanduser("~/data/mujoco_logs/4in1/merged_4in1.csv")
+    parser = argparse.ArgumentParser(description="从接触 CSV 绘制 force_normal 小提琴图（按身体部位分组）")
+    parser.add_argument(
+        "csv_path",
+        nargs="?",
+        default=None,
+        help="接触数据 CSV 路径。不传则使用默认路径。",
+    )
+    parser.add_argument(
+        "--output-dir", "-o",
+        default=None,
+        help="小提琴图 PNG/SVG 输出目录；不指定则输出到 CSV 所在目录",
+    )
+    parser.add_argument(
+        "--force-min-kn",
+        type=float,
+        default=4.0,
+        help="过滤小于此值的力 (kN)，默认 4.0",
+    )
+    parser.add_argument(
+        "--use-quantile",
+        action="store_true",
+        help="y 轴使用 99 分位数（否则用实际最大值）",
+    )
+    args = parser.parse_args()
+
+    csv_path = args.csv_path
+    if csv_path is None:
+        csv_path = os.path.expanduser("~/data/mujoco_logs/4in1/merged_4in1.csv")
+    csv_path = os.path.abspath(os.path.expanduser(csv_path))
+    if not os.path.isfile(csv_path):
+        print(f"错误: 文件不存在: {csv_path}")
+        sys.exit(1)
+
+    output_path = None
+    if args.output_dir:
+        Path(args.output_dir).mkdir(parents=True, exist_ok=True)
+        base = os.path.splitext(os.path.basename(csv_path))[0]
+        output_path = os.path.join(args.output_dir, f"{base}_force_normal_violin.png")
+
     plot_force_normal_violin(
         csv_path=csv_path,
         figsize=(12.6, 6),
         dpi=300,
-        output_path=None,  # 自动生成文件名：{csv文件名}_force_normal_violin.png
-        force_max=None,  # 可选：过滤超过此值的 force_normal，例如 force_max=10000（单位：N）
-        force_min_kN=FORCE_MIN_KN,  # 过滤小于此值的力数据（单位：kN）
-        use_quantile=USE_QUANTILE,  # y轴范围设置方式
-        margin_left=10,  # 左边距（百分比）
-        margin_bottom=15.0,  # 下边距（百分比）
-        margin_right=1.0,  # 右边距（百分比）
-        margin_top=8.0  # 上边距（百分比）
+        output_path=output_path,
+        force_max=None,
+        force_min_kN=args.force_min_kn,
+        use_quantile=args.use_quantile,
+        margin_left=10,
+        margin_bottom=15.0,
+        margin_right=1.0,
+        margin_top=8.0,
     )

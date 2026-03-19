@@ -201,14 +201,17 @@ def select_thickness_simple(F_before, density=0.4, target_force=3.0):
     # 延迟初始化计算器（静默模式，不打印信息）
     if _calculator is None:
         import sys
+        import os
         from io import StringIO
         
+        # 参数文件使用本模块所在目录，避免从其他目录运行脚本时找不到
+        _params_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), "fitted_parameters.json")
         # 临时重定向stdout以抑制打印
         old_stdout = sys.stdout
         sys.stdout = StringIO()
         
         try:
-            _calculator = ForceCalculator()
+            _calculator = ForceCalculator(params_file=_params_file)
         finally:
             sys.stdout = old_stdout
     

@@ -1,0 +1,367 @@
+#!/usr/bin/env python3
+"""
+批量对「一次大规模采集」根目录下的每个实验子文件夹调用 calculate_fall_risk.py，
+合并各次 summary，并写出整体 / 按推力方向的统计。
+
+典型目录结构（与 automated_collection*.sh 一致）::
+
+    /path/to/only_active_push_1600/8dir-200.0N-0.4s-20260317_235134/
+        forward-200.0N-1/
+            20260317_235138/   # 实际 csv/bin 常在这一层（连续采集切换路径时）
+        forward_left-200.0N-2/
+        ...
+
+支持两种布局：日志直接在 ``forward-200.0N-1/`` 下，或在 ``forward-200.0N-1/<时间戳>/`` 下。
+
+用法示例::
+
+    cd /path/to/engineai_ros2_workspace
+    python3 scripts/batch_calculate_fall_risk.py \\
+        --root /home/wang22/data/mujoco_logs/only_active_push_1600/8dir-200.0N-0.4s-20260317_235134
+
+单次 risk 结果仍在各实验子目录（与原始 csv/bin 同文件夹）。
+批量汇总默认写在 --root（与各子实验文件夹同级）::
+
+    all_runs_summary.csv   # 1 行：全批次各分项 risk 的算术平均 + n_runs
+    per_run_risk.csv       # 每行一次实验的明细（原合并表）
+    stats_by_direction.csv
+    stats_overall.txt
+"""
+
+from __future__ import annotations
+
+import argparse
+import re
+import subprocess
+import sys
+import time
+from pathlib import Path
+from typing import List, Optional, Tuple
+
+import pandas as pd
+
+# 与 calculate_fall_risk 同目录，保证可 import mujoco_data_io
+SCRIPTS_DIR = Path(__file__).resolve().parent
+CALCULATE_FALL_RISK = SCRIPTS_DIR / "calculate_fall_risk.py"
+
+try:
+    from mujoco_data_io import resolve_paths_from_log_dir
+except ImportError:
+    resolve_paths_from_log_dir = None  # type: ignore
+
+
+def is_valid_run_dir(d: Path) -> bool:
+    if not d.is_dir():
+        return False
+    if resolve_paths_from_log_dir is None:
+        return any(d.glob("contact_data*.csv")) or any(d.glob("contact_data*.bin"))
+    r = resolve_paths_from_log_dir(str(d))
+    need = ("contact", "sensor_vibration", "joint_state", "joint_forces")
+    return all(r.get(k) for k in need)
+
+
+def parse_run_folder_name(name: str) -> Tuple[str, Optional[str], Optional[int]]:
+    """
+    例如 forward_left-200.0N-42 -> direction=forward_left, force=200.0, run_index=42
+    解析失败则 direction 为原名，force/run_index 为 None。
+    """
+    m = re.match(r"^(.+)-([\d.]+)N-(\d+)$", name)
+    if not m:
+        return name, None, None
+    return m.group(1), m.group(2), int(m.group(3))
+
+
+def discover_run_dirs(root: Path) -> List[Path]:
+    """收集含完整日志的目录：一级子目录，或 一级/时间戳 二级目录。"""
+    found: List[Path] = []
+    subs = sorted(
+        [p for p in root.iterdir() if p.is_dir() and not p.name.startswith(".")],
+        key=lambda p: p.name,
+    )
+    for p in subs:
+        if is_valid_run_dir(p):
+            found.append(p)
+            continue
+        nested = sorted(
+            [q for q in p.iterdir() if q.is_dir() and not q.name.startswith(".")],
+            key=lambda q: q.name,
+        )
+        for q in nested:
+            if is_valid_run_dir(q):
+                found.append(q)
+
+    def sort_key(path: Path) -> Tuple[int, str]:
+        rel = path.relative_to(root)
+        idx = 10**9
+        for part in rel.parts:
+            _, _, j = parse_run_folder_name(part)
+            if j is not None:
+                idx = j
+                break
+        return (idx, str(rel))
+
+    return sorted(found, key=sort_key)
+
+
+def meta_from_log_dir(log_dir: Path, root: Path) -> Tuple[str, str, Optional[str], Optional[int]]:
+    """run_folder 相对 root；direction/force/run_index 从路径里形如 xxx-200.0N-12 的一段解析。"""
+    try:
+        run_folder = str(log_dir.relative_to(root))
+    except ValueError:
+        run_folder = log_dir.name
+    direction: str = run_folder
+    force_n: Optional[str] = None
+    run_idx: Optional[int] = None
+    for part in Path(run_folder).parts:
+        d, f, r = parse_run_folder_name(part)
+        if r is not None:
+            direction, force_n, run_idx = d, f, r
+            break
+    return run_folder, direction, force_n, run_idx
+
+
+def _format_eta(sec: Optional[float]) -> str:
+    if sec is None or sec < 0 or (sec != sec):  # nan
+        return "—"
+    if sec >= 3600:
+        h, r = int(sec // 3600), sec % 3600
+        return f"{h}h{int(r // 60)}m"
+    if sec >= 60:
+        m, s = int(sec // 60), sec % 60
+        return f"{m}m{int(s)}s"
+    return f"{sec:.0f}s"
+
+
+def run_single_calculate(log_dir: Path) -> int:
+    cmd = [sys.executable, str(CALCULATE_FALL_RISK), "--log-dir", str(log_dir)]
+    env = {**__import__("os").environ}
+    r = subprocess.run(
+        cmd,
+        cwd=str(SCRIPTS_DIR),
+        env=env,
+    )
+    return r.returncode
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(
+        description="批量对实验子目录调用 calculate_fall_risk.py 并汇总统计",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=__doc__,
+    )
+    parser.add_argument(
+        "--root",
+        type=str,
+        required=True,
+        help="采集批次根目录，其下每个子文件夹为一次实验（含 contact/joint_state 等）",
+    )
+    parser.add_argument(
+        "--output-dir",
+        type=str,
+        default=None,
+        help="汇总 CSV/统计输出目录，默认与 --root 相同（与各实验子目录同级）",
+    )
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="只列出将处理的子目录，不调用 calculate_fall_risk",
+    )
+    parser.add_argument(
+        "--skip-existing",
+        action="store_true",
+        help="若子目录已有 risk_results_summary.csv 则跳过计算（仅合并/统计时用已有结果）",
+    )
+    parser.add_argument(
+        "--max-runs",
+        type=int,
+        default=0,
+        help="最多处理前 N 个子目录，0 表示不限制（调试用）",
+    )
+    parser.add_argument(
+        "--no-continue-on-error",
+        action="store_true",
+        help="任一次 calculate 失败则立即退出（默认：失败跳过，继续其余目录）",
+    )
+    args = parser.parse_args()
+    continue_on_error = not args.no_continue_on_error
+
+    root = Path(args.root).expanduser().resolve()
+    if not root.is_dir():
+        print(f"错误: 不是目录: {root}", file=sys.stderr)
+        return 1
+
+    if not CALCULATE_FALL_RISK.is_file():
+        print(f"错误: 未找到 {CALCULATE_FALL_RISK}", file=sys.stderr)
+        return 1
+
+    out_dir = Path(args.output_dir).expanduser().resolve() if args.output_dir else root
+    if args.output_dir:
+        out_dir.mkdir(parents=True, exist_ok=True)
+
+    run_dirs = discover_run_dirs(root)
+    if not run_dirs:
+        n1 = sum(1 for p in root.iterdir() if p.is_dir() and not p.name.startswith("."))
+        print(f"在 {root} 下未发现含完整日志的目录（一级子目录数: {n1}）。")
+        print(
+            "需要每个实验目录（或 实验/时间戳 子目录）下同时存在 "
+            "contact_data*、sensor_vibration_data*、joint_state_data*、joint_forces_data*（csv 或 bin）。",
+            file=sys.stderr,
+        )
+        return 1
+
+    if args.max_runs > 0:
+        run_dirs = run_dirs[: args.max_runs]
+
+    print(f"根目录: {root}")
+    print(f"将处理 {len(run_dirs)} 个实验子目录")
+    print(f"汇总输出目录: {out_dir}")
+
+    if args.dry_run:
+        for p in run_dirs:
+            try:
+                print(f"  {p.relative_to(root)}")
+            except ValueError:
+                print(f"  {p}")
+        return 0
+
+    failed: List[str] = []
+    summary_paths: List[Path] = []
+
+    n_total = len(run_dirs)
+
+    def needs_subprocess(ld: Path) -> bool:
+        sf = ld / "risk_results_summary.csv"
+        if args.skip_existing and sf.is_file():
+            return False
+        return True
+
+    def count_pending_calc(from_index_0: int) -> int:
+        return sum(1 for j in range(from_index_0, n_total) if needs_subprocess(run_dirs[j]))
+
+    calc_durations: List[float] = []
+    t_batch0 = time.perf_counter()
+
+    for i, log_dir in enumerate(run_dirs, 1):
+        summary_file = log_dir / "risk_results_summary.csv"
+        label = str(log_dir.relative_to(root))
+        idx0 = i - 1
+        remaining_dirs = n_total - i + 1
+        pending_calc = count_pending_calc(idx0)
+        if calc_durations:
+            avg_s = sum(calc_durations) / len(calc_durations)
+            # 完成当前项后还剩多少次 subprocess
+            after_this = pending_calc - (1 if needs_subprocess(log_dir) else 0)
+            eta_sec = max(0.0, avg_s * after_this)
+        else:
+            eta_sec = None
+
+        elapsed_batch = time.perf_counter() - t_batch0
+        print(
+            f"  [进度] 目录剩余 {remaining_dirs}/{n_total} | "
+            f"待计算子进程 {pending_calc} 次 | "
+            f"已用 {_format_eta(elapsed_batch)} | "
+            f"预计剩余 {_format_eta(eta_sec)}",
+            flush=True,
+        )
+
+        if args.skip_existing and summary_file.is_file():
+            print(f"[{i}/{n_total}] 跳过(已有summary): {label}")
+            summary_paths.append(summary_file)
+            continue
+
+        print(f"[{i}/{n_total}] 计算: {label}")
+        t0 = time.perf_counter()
+        code = run_single_calculate(log_dir)
+        dt = time.perf_counter() - t0
+        calc_durations.append(dt)
+        print(f"  本次耗时 {dt:.1f}s | 最近平均 {sum(calc_durations)/len(calc_durations):.1f}s/次", flush=True)
+        if code != 0:
+            print(f"  失败 (exit {code}): {label}", file=sys.stderr)
+            failed.append(label)
+            if not continue_on_error:
+                return code
+            continue
+        if summary_file.is_file():
+            summary_paths.append(summary_file)
+        else:
+            print(f"  警告: 未生成 {summary_file}", file=sys.stderr)
+            failed.append(label)
+
+    rows = []
+    for sp in summary_paths:
+        try:
+            df = pd.read_csv(sp)
+        except Exception as e:
+            print(f"警告: 无法读取 {sp}: {e}", file=sys.stderr)
+            continue
+        if df.empty:
+            continue
+        row = df.iloc[0].to_dict()
+        log_dir = sp.parent
+        run_folder, direction, force_n, run_idx = meta_from_log_dir(log_dir, root)
+        row["run_folder"] = run_folder
+        row["direction"] = direction
+        row["force_N"] = force_n
+        row["run_index"] = run_idx
+        rows.append(row)
+
+    if not rows:
+        print("没有可合并的 summary 行。", file=sys.stderr)
+        return 1 if failed else 0
+
+    merged = pd.DataFrame(rows)
+    id_cols = ["run_folder", "direction", "force_N", "run_index"]
+    rest = [c for c in merged.columns if c not in id_cols]
+    merged = merged[[c for c in id_cols if c in merged.columns] + rest]
+
+    detail_csv = out_dir / "per_run_risk.csv"
+    merged.to_csv(detail_csv, index=False, float_format="%.6f")
+    print(f"\n已写入: {detail_csv} ({len(merged)} 行，逐实验明细)")
+
+    # all_runs_summary：全批次各 risk 列算术平均
+    mean_keys = [
+        "contact_risk",
+        "vibration_risk",
+        "motor_risk",
+        "jointforce_risk",
+        "all_risk",
+    ]
+    summary_row: dict = {"n_runs": len(merged)}
+    for k in mean_keys:
+        if k in merged.columns:
+            summary_row[k] = float(merged[k].mean())
+    summary_df = pd.DataFrame([summary_row])
+    all_csv = out_dir / "all_runs_summary.csv"
+    summary_df.to_csv(all_csv, index=False, float_format="%.6f")
+    print(f"已写入: {all_csv}（全批次平均值，1 行）")
+
+    if "all_risk" in merged.columns:
+        g = merged.groupby("direction", dropna=False)
+        agg = g["all_risk"].agg(["count", "mean", "std", "min", "max"])
+        agg = agg.rename(columns={"count": "n"})
+        agg_path = out_dir / "stats_by_direction.csv"
+        agg.to_csv(agg_path, float_format="%.6f")
+        print(f"已写入: {agg_path}")
+
+    txt_lines = [
+        f"batch_root: {root}",
+        f"runs_merged: {len(merged)}",
+        f"runs_failed: {len(failed)}",
+    ]
+    if failed:
+        txt_lines.append("failed_folders: " + ", ".join(failed[:20]))
+        if len(failed) > 20:
+            txt_lines.append(f"... and {len(failed) - 20} more")
+
+    desc = merged.describe(include="all")
+    txt_path = out_dir / "stats_overall.txt"
+    with open(txt_path, "w", encoding="utf-8") as f:
+        f.write("\n".join(txt_lines) + "\n\n")
+        f.write(str(desc))
+    print(f"已写入: {txt_path}")
+
+    return 1 if failed else 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

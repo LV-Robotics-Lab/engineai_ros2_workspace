@@ -6,7 +6,7 @@
 # 8方向循环：0=前, 45=左前, 90=左, 135=左后, 180=后, 225=右后, 270=右, 315=右前
 
 # 运控选择：XZL 或 CHR
-CONTROLLER=CHR
+CONTROLLER=XZL
 
 # 保存格式：csv（文本）或 bin（二进制，体积小、写入快）
 SAVE_FORMAT=csv
@@ -20,7 +20,7 @@ case "$SAVE_FORMAT" in
   *) echo "错误: SAVE_FORMAT 仅支持 csv 或 bin，当前: $SAVE_FORMAT"; exit 1 ;;
 esac
 
-TOTAL_EXPERIMENTS=8
+TOTAL_EXPERIMENTS=1600
 EXPERIMENT_DURATION=8
 DIRECTION_ANGLES=(0 45 90 135 180 225 270 315)
 DIRECTION_NAMES=("forward" "forward_left" "left" "backward_left" "backward" "backward_right" "right" "forward_right")
