@@ -226,6 +226,45 @@ ament_target_dependencies(rl_basic_example_CHR
   interface_protocol
 )
 
+# Add rl_basic_example_DAC executable
+add_executable(rl_basic_example_DAC
+  src/rl_basic_example_DAC.cc
+  ${rl_basic_example_src_files}
+  ${rl_dance_csv_loader_src}
+)
+
+target_include_directories(rl_basic_example_DAC
+  PUBLIC
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src>
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src/rl_dance/include>
+    ${ENGINEAI_ROBOTICS_THIRD_PARTY}/include
+)
+if(DEFINED ENV{CONDA_PREFIX})
+  target_include_directories(rl_basic_example_DAC PUBLIC $ENV{CONDA_PREFIX}/include)
+endif()
+target_compile_definitions(rl_basic_example_DAC PRIVATE GLOG_NO_ABBREVIATED_SEVERITIES)
+
+target_link_libraries(rl_basic_example_DAC
+  yaml-cpp::yaml-cpp
+  Eigen3::Eigen
+  ${ENGINEAI_ROBOTICS_THIRD_PARTY}/lib/libMNN.so
+  glog::glog
+)
+
+if(DEFINED ENV{CONDA_PREFIX})
+  set_target_properties(rl_basic_example_DAC PROPERTIES
+    BUILD_WITH_INSTALL_RPATH TRUE
+    INSTALL_RPATH_USE_LINK_PATH TRUE
+    INSTALL_RPATH "$ENV{CONDA_PREFIX}/lib:${ENGINEAI_ROBOTICS_THIRD_PARTY}/lib"
+  )
+endif()
+
+ament_target_dependencies(rl_basic_example_DAC
+  rclcpp
+  interface_protocol
+  std_msgs
+)
+
 
 install(TARGETS
   hold_joint_status
@@ -234,6 +273,7 @@ install(TARGETS
   rl_basic_example_XZL
   rl_basic_example_AMP
   rl_basic_example_CHR
+  rl_basic_example_DAC
   RUNTIME DESTINATION lib/${PROJECT_NAME}
 )
 

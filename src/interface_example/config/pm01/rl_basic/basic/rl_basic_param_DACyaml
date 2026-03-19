@@ -1,0 +1,267 @@
+# PM01 flat tracking mimic policy
+# 单帧 observation 顺序:
+# [command(pos+vel), motion_anchor_ori_b(6D), base_ang_vel, joint_pos_rel, joint_vel_rel, last_action]
+periods: 0.02
+motion_states:
+  # 旋风踢 1.0scale
+  # dance_1:
+  #   observation_type: "mimic_future"
+  #   data_path: "rl_dance/trajectories/dance_base1.csv"
+  #   policy_path: "rl_dance/policies/spinkick/best_kick_ori.mnn"
+  #   traj_frame: [0, -1]
+  #   residual_control: false
+  #   csv_dt: 0.02
+  #   remote_control_key: ["START", "A"]  # 按键组合：START + B
+  #   enable: true
+  #   auto_transition: "dance_2"
+  #   proprioception_obs_with_yaw: false
+  #   use_quat_error: true
+  #   use_gravity_error: false
+  # 韦伯斯特空翻 0.85scale
+  dance_1:
+  #优先用wbst_500_addl2 40000begin_wbst_450
+    observation_type: "mimic_flat"
+    # data_path: "rl_dance/trajectories/dance2.csv"
+    # data_path: "rl_dance/trajectories/kf_robot_0.8_320.csv"
+    # data_path 和 policy_path 已由 mimic_trajectories 和 mimic_policies 替代
+    # data_path: "trajectories/toFront_1_converted_50fps.csv"
+    # policy_path: "policies/toFront_3.mnn"
+    mimic_policies:
+      forward: "policies/toFront_13_force.mnn"
+      forward_left: "policies/toLeftFront_13_force.mnn"
+      left: "policies/toLeft_13_force.mnn"
+      backward_left: "policies/toLeftBack_13_force.mnn"
+      backward: "policies/toBack_13_force.mnn"
+      backward_right: "policies/toRightBack_13_force.mnn"
+      right: "policies/toRight_13_force.mnn"
+      forward_right: "policies/toRightFront_13_force.mnn"
+    mimic_trajectories:
+      forward: "trajectories/toFront_1_converted_50fps.csv"
+      forward_left: "trajectories/toLeftFront_1_converted_50fps.csv"
+      left: "trajectories/toLeft_1_converted_50fps.csv"
+      backward_left: "trajectories/toLeftBack_1_converted_50fps.csv"
+      backward: "trajectories/toBack_1_converted_50fps.csv"
+      backward_right: "trajectories/toRightBack_1_converted_50fps.csv"
+      right: "trajectories/toRight_1_converted_50fps.csv"
+      forward_right: "trajectories/toRightFront_1_converted_50fps.csv" # 轨迹开头脚滑
+    # policy_path: "rl_dance/policies/new_kf_addrand/model_70000.mnn"
+    # policy_path: "rl_dance/policies/wbst/kf3_85.mnn"
+    # data_path: "rl_dance/trajectories/wbst_best.csv"
+    # policy_path: "rl_dance/policies/wbst/wbst_best85.mnn"
+    traj_frame: [0, 250]  # 播放完整轨迹
+    residual_control: false  # 不使用残差控制dance2221
+    csv_dt: 0.02 #0.00833  # 120Hz采样率
+    remote_control_key: ["START", "B"]  # 按键组合：START + A
+    enable: true
+    auto_transition: false
+    proprioception_obs_with_yaw: false
+    use_quat_error: false
+    use_gravity_error: false
+
+
+  # # 第二节广播体操
+  # radio_gymnastics_2:
+  #   observation_type: "mimic_future"
+  #   data_path: "pm_v2/rl_mimic_radio_gymnastics/trajectories/radio_gymnastics_section2.csv"
+  #   policy_path: "pm_v2/rl_mimic_radio_gymnastics/policies/section2_future_frames.mnn"
+  #   traj_frame: [0, -1]
+  #   residual_control: false
+  #   csv_dt: 0.00833
+  #   remote_control_key: ["B"]
+  #   enable: true
+  #   auto_transition: "false"  # 完成后退出
+  #   proprioception_obs_with_yaw: false
+
+# flat tracking mimic policy 是单帧输入
+num_observations: 129
+num_include_obs_steps: 1
+
+# 观测配置
+observations:
+  num_single_observations: 129
+  
+  # 各观测类型的配置
+  observation_type:
+    mimic_flat:
+      num_include_obs_steps: 1
+
+  # 观测scale配置
+  observation_scale:
+    observation_scale_linear_vel: 1.0
+    observation_scale_angular_vel: 1.0
+    observation_scale_dof_pos: 1.0
+    observation_scale_dof_vel: 1.0
+    observation_scale_quat: 1.0
+
+# 其他参数保持不变...
+active_joint_names:
+  - "J00_HIP_PITCH_L"
+  - "J01_HIP_ROLL_L"
+  - "J02_HIP_YAW_L"
+  - "J03_KNEE_PITCH_L"
+  - "J04_ANKLE_PITCH_L"
+  - "J05_ANKLE_ROLL_L"
+  - "J06_HIP_PITCH_R"
+  - "J07_HIP_ROLL_R"
+  - "J08_HIP_YAW_R"
+  - "J09_KNEE_PITCH_R"
+  - "J10_ANKLE_PITCH_R"
+  - "J11_ANKLE_ROLL_R"
+  - "J12_WAIST_YAW"
+  - "J13_SHOULDER_PITCH_L"
+  - "J14_SHOULDER_ROLL_L"
+  - "J15_SHOULDER_YAW_L"
+  - "J16_ELBOW_PITCH_L"
+  - "J17_ELBOW_YAW_L"
+  - "J18_SHOULDER_PITCH_R"
+  - "J19_SHOULDER_ROLL_R"
+  - "J20_SHOULDER_YAW_R"
+  - "J21_ELBOW_PITCH_R"
+  - "J22_ELBOW_YAW_R"
+  - "J23_HEAD_YAW"
+
+default_joint_q:
+  - [-0.06, 0.0, 0.0, 0.12, -0.06, 0.0]  # 左腿
+  - [-0.06, 0.0, 0.0, 0.12, -0.06, 0.0]  # 右腿
+  - [0.0]  # 腰部
+  - [0.0, 0.15, 0.0, -0.25, 0.0]  # 左臂
+  - [0.0, -0.15, 0.0, -0.25, 0.0]  # 右臂
+  - [0.0]  # 头部
+
+joint_kp:
+  - [178.8, 178.8, 26.5, 178.8, 26.5, 26.5]
+  - [178.8, 178.8, 26.5, 178.8, 26.5, 26.5]
+  - [26.5]
+  - [26.5, 26.5, 26.5, 26.5, 26.5]
+  - [26.5, 26.5, 26.5, 26.5, 26.5]
+  - [26.5]
+
+joint_kd:
+  - [11.4, 11.4, 1.7, 11.4, 0.5, 0.5]
+  - [11.4, 11.4, 1.7, 11.4, 0.5, 0.5]
+  - [1.7]
+  - [1.7, 1.7, 1.7, 1.7, 1.7]
+  - [1.7, 1.7, 1.7, 1.7, 1.7]
+  - [1.7]
+
+# 进入 mimic 时从轨迹第 0 帧开始，不按俯仰匹配；可减轻 left 等动作因起跳帧不匹配导致的不稳定
+mimic_start_from_zero: false
+# 1.0
+action_scale:
+  - [0.229, 0.229, 0.491, 0.229, 0.491, 0.491]
+  - [0.229, 0.229, 0.491, 0.229, 0.491, 0.491]
+  - [0.491]
+  - [0.491, 0.491, 0.491, 0.491, 0.491]
+  - [0.491, 0.491, 0.491, 0.491, 0.491]
+  - [0.491]
+  # - [0.195, 0.195, 0.418, 0.195, 0.418, 0.418]
+  # - [0.195, 0.195, 0.418, 0.195, 0.418, 0.418]
+  # - [0.418]
+  # - [0.418, 0.418, 0.418, 0.418, 0.418]
+  # - [0.418, 0.418, 0.418, 0.418, 0.418]
+  # - [0.418]
+# 0.85 
+action_scale85:
+  # - [0.229, 0.229, 0.491, 0.229, 0.491, 0.491]
+  # - [0.229, 0.229, 0.491, 0.229, 0.491, 0.491]
+  # - [0.491]
+  # - [0.491, 0.491, 0.491, 0.491, 0.491]
+  # - [0.491, 0.491, 0.491, 0.491, 0.491]
+  # - [0.491]
+  - [0.195, 0.195, 0.418, 0.195, 0.418, 0.418]
+  - [0.195, 0.195, 0.418, 0.195, 0.418, 0.418]
+  - [0.418]
+  - [0.418, 0.418, 0.418, 0.418, 0.418]
+  - [0.418, 0.418, 0.418, 0.418, 0.418]
+  - [0.418]
+# 0.9 
+# action_scale:
+#   - [0.206, 0.206, 0.442, 0.206, 0.442, 0.442]
+#   - [0.206, 0.206, 0.442, 0.206, 0.442, 0.442]
+#   - [0.442]
+#   - [0.442, 0.442, 0.442, 0.442, 0.442]
+#   - [0.442, 0.442, 0.442, 0.442, 0.442]
+#   - [0.442]
+
+# 关节速度掩码 (踝关节不使用速度控制)
+qd_mask:
+  - [1.0, 1.0, 1.0, 1.0, 0, 0]  # 左腿
+  - [1.0, 1.0, 1.0, 1.0, 0, 0]  # 右腿
+  - [1.0]  # 腰部
+  - [1.0, 1.0, 1.0, 1.0, 1.0]  # 左臂
+  - [1.0, 1.0, 1.0, 1.0, 1.0]  # 右臂
+  - [1.0]  # 头部
+
+action_clip: 1000.0
+observation_clip: 20000.0
+transition_time: 0.01
+
+# IMU 和线速度偏置参数
+imu_install_delta_bias: 0.0
+linear_vel_delta_bias: 0.0
+
+# 命令处理参数
+remote_command_sampling_frequency: 50.0
+remote_command_cut_off_frequency: 5.0
+enable_remote_command_lpf: true
+command_scale: [1.0, 1.0, 1.0]
+command_bias: [0.0, 0.0, 0.0]
+
+# 扭矩限制
+torque_limit: True
+max_torque_joint:
+  - [164, 164, 52, 164, 52, 52]
+  - [164, 164, 52, 164, 52, 52]
+  - [52]
+  - [52, 52, 52, 52, 52]
+  - [52, 52, 52, 52, 52]
+  - [52]
+# max_torque_joint:
+#   - [147.6, 147.6, 46.8, 147.6, 46.8, 46.8]
+#   - [147.6, 147.6, 46.8, 147.6, 46.8, 46.8]
+#   - [46.8]
+#   - [46.8, 46.8, 46.8, 46.8, 46.8]
+#   - [46.8, 46.8, 46.8, 46.8, 46.8]
+#   - [46.8]
+# max_torque_joint:
+#   - [139.4, 139.4, 44.2, 139.4, 44.2, 44.2]
+#   - [139.4, 139.4, 44.2, 139.4, 44.2, 44.2]
+#   - [44.2]
+#   - [44.2, 44.2, 44.2, 44.2, 44.2]
+#   - [44.2, 44.2, 44.2, 44.2, 44.2]
+#   - [44.2]
+
+max_lower_body_torque: 550.0
+
+# 步态周期（CHR walking 使用）
+default_dynamic_cycle_time: 0.8
+
+# mimic 稳定性检测（mimic 播放过程中若检测到不稳定则提前切到 damping；与 rl_dance 同逻辑）
+mimic_stability_to_damping_enable: false   # 是否开启：mimic 中不稳定则切 damping
+stability_detection:
+  ang_vel_threshold: 0.4           # 角速度阈值 (rad/s)，超过认为不稳定
+  gravity_dev_threshold: 0.15      # 重力方向偏差阈值，与 (0,0,-1) 的偏差
+  stability_smoothing_threshold: 0.6   # 历史稳定比例超过此值才认为稳定
+  stability_history_length: 10    # 历史帧数
+
+# 测试用：reset 后先走 XZL，等 test_force_fall_delay 秒后强制切到指定方向 mimic（不跑摔倒检测）
+# 若 test_force_fall_direction 留空，则使用下方 fall_detection 进行真实摔倒检测
+test_force_fall_direction: ""   # 可选: forward/forward_left/left/backward_left/backward/backward_right/right/forward_right
+test_force_fall_delay: 3.0      # 仅当 test_force_fall_direction 非空时有效：reset 后先走 XZL 再等该时间(秒)后切到上述方向
+
+# 摔倒检测参数（仅当 test_force_fall_direction 留空时使用：walking 下 tilt/omega 超阈值则切 mimic）
+fall_detection:
+  tilt_threshold: 0.5            # 倾斜角阈值 (rad)，改小易误触、方向仍由重力判定
+  omega_threshold: 1.8           # 角速度阈值 (rad/s)
+  confirm_frames: 8              # 确认帧数
+  fast_fall_omega: 2.5           # 快速摔倒角速度阈值 (rad/s)
+  fast_fall_confirm_frames: 2    # 快速摔倒确认帧数
+  # passive/damping 模式（kp=0）下的 kd，与 default_joint_q 结构一致
+  passive_damping:
+    - [4, 4, 4, 4, 3, 3]   # 左腿 6 个关节
+    - [4, 4, 4, 4, 3, 3]   # 右腿 6 个关节
+    - [2]                  # 腰部 1 个关节
+    - [3, 3, 3, 3, 3]      # 左臂 5 个关节
+    - [3, 3, 3, 3, 3]      # 右臂 5 个关节
+    - [1]                  # 头部 1 个关节
+
