@@ -58,9 +58,10 @@ sudo apt install -y libglib2.0-dev
 sudo apt install -y libgoogle-glog-dev
 conda create -n engineai_ros2 python=3.10
 conda activate engineai_ros2
-# Install glog (required for rl_basic_example_CHR)
-conda install -y -c conda-forge glog
-conda install pandas 
+# glog：rl_basic_example_CHR；其余：scripts/ 分析（fall_risk、plot_contact_grid、merge、mujoco_data_io、violin、ThicknessCalculate 等）
+conda install -y -c conda-forge glog pandas numpy matplotlib seaborn pyyaml scikit-learn scipy
+pip install mujoco==3.3.6 mediapy urdfpy trimesh
+# publish_zero_joint_states.py：需 source ROS；check_mnn_tensor.py：可选 MNN Python 绑定
 
 ```
 
@@ -205,9 +206,7 @@ cd /home/wang22/engineai/engineai_ros2_workspace
 conda activate engineai_ros2
 # plot contact force max
 python3 scripts/analyze_contact_forces.py logs/forward-200.0N-20251005_162754/merged_contact_data_forward-200.0N-20251005_162754_20251005_171533.csv
-# plot contact point with force
-# 先升级mujoco
-pip install mujoco==3.3.6
+# plot contact point with force（mujoco/mediapy 见上文 Software Dependencies 中 pip 一行）
 # 合并多次采样的contact point
 # 合并特定方向的数据（生成1个文件）指定输出文件名
 python3 scripts/merge_contact_data.py logs/4in1 merged_4in1.csv --pattern "all_directions_merged_*.csv"
