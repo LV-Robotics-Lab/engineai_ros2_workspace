@@ -178,7 +178,9 @@ bool RosInterface::Initialize() {
   node_->declare_parameter("csv_file_path", "");
   node_->declare_parameter("csv_save_frequency", 1);  // 每帧都保存
   node_->declare_parameter("csv_format", "csv");  // 格式：csv 或 binary
-  
+  node_->declare_parameter("csv_min_force_n", 0.0);  // 0=不过滤；>0 时压缩 contact；joint 见 csv_joint_forces_min_torque_nm
+  node_->declare_parameter("csv_joint_forces_min_torque_nm", 0.0);
+
   save_contact_csv_ = node_->get_parameter("save_contact_csv").as_bool();
   save_perturbation_csv_ = node_->get_parameter("save_perturbation_csv").as_bool();
   save_joint_forces_csv_ = node_->get_parameter("save_joint_forces_csv").as_bool();
@@ -189,7 +191,27 @@ bool RosInterface::Initialize() {
   csv_file_path_ = node_->get_parameter("csv_file_path").as_string();
   csv_save_frequency_ = node_->get_parameter("csv_save_frequency").as_int();
   csv_format_ = node_->get_parameter("csv_format").as_string();
-  
+  csv_min_force_n_ = node_->get_parameter("csv_min_force_n").as_double();
+  csv_joint_forces_min_torque_nm_ = node_->get_parameter("csv_joint_forces_min_torque_nm").as_double();
+  if (csv_min_force_n_ < 0.0) {
+    RCLCPP_WARN(node_->get_logger(), "csv_min_force_n < 0, clamping to 0");
+    csv_min_force_n_ = 0.0;
+  }
+  if (csv_joint_forces_min_torque_nm_ < 0.0) {
+    RCLCPP_WARN(node_->get_logger(), "csv_joint_forces_min_torque_nm < 0, clamping to 0");
+    csv_joint_forces_min_torque_nm_ = 0.0;
+  }
+  if (csv_min_force_n_ > 0.0) {
+    RCLCPP_INFO(node_->get_logger(),
+                "csv_min_force_n=%.3g N：contact_data 仅记录接触力模长≥该值的行",
+                csv_min_force_n_);
+  }
+  if (csv_joint_forces_min_torque_nm_ > 0.0 || csv_min_force_n_ > 0.0) {
+    RCLCPP_INFO(node_->get_logger(),
+                "joint_forces_data：若设 csv_min_force_n 则保留 ||F||≥该值者；若设 csv_joint_forces_min_torque_nm "
+                "则保留 ||M||≥该值者；二者均设时为 OR（||F||、||M|| 为子 link 反力/反力偶模）");
+  }
+
   // 如果启用CSV保存，自动启用接触力导出（CSV保存需要接触力数据）
   if (save_contact_csv_ && !export_contact_) {
     export_contact_ = true;
@@ -2172,6 +2194,10 @@ void RosInterface::PublishContactForces(const mjModel* m, mjData* d) {
       
       // 为每个接触点准备数据并加入队列（如果两个geom都不是world，写入两行；否则写入一行）
       for (int i = 0; i < ncon; ++i) {
+        if (csv_min_force_n_ > 0.0 && csv_contact_force_magnitudes &&
+            (*csv_contact_force_magnitudes)[i] < csv_min_force_n_) {
+          continue;
+        }
         // 获取body1_id和body2_id
         int body1_id = 0;
         int body2_id = 0;
@@ -2505,7 +2531,23 @@ void RosInterface::SaveJointForcesToCSV(const mjModel* m, mjData* d) {
     // 获取子body坐标系下的反力
     const auto& child_wrench = joint_wrenches_child[j];
     const auto& parent_wrench = joint_wrenches_parent[j];
-    
+    {
+      const double fmag = child_wrench.F.norm();
+      const double mmag = child_wrench.M.norm();
+      if (csv_min_force_n_ > 0.0 || csv_joint_forces_min_torque_nm_ > 0.0) {
+        bool keep = false;
+        if (csv_min_force_n_ > 0.0 && fmag >= csv_min_force_n_) {
+          keep = true;
+        }
+        if (csv_joint_forces_min_torque_nm_ > 0.0 && mmag >= csv_joint_forces_min_torque_nm_) {
+          keep = true;
+        }
+        if (!keep) {
+          continue;
+        }
+      }
+    }
+
     // 计算载荷分解
     DecomposedWrenchEigen decomposed;
     try {

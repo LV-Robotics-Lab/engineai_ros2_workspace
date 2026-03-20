@@ -79,6 +79,17 @@ def generate_launch_description():
         default_value='csv',
         description='日志格式：csv 或 binary（.bin，含 contact/joint/perturbation/policy_switch 等）'
     )
+
+    declare_csv_min_force_n_arg = DeclareLaunchArgument(
+        'csv_min_force_n',
+        default_value='0.0',
+        description='contact：接触力模长≥此值才写入（N）。joint：与 csv_joint_forces_min_torque_nm 为 OR；0=该侧不作用'
+    )
+    declare_csv_joint_forces_min_torque_nm_arg = DeclareLaunchArgument(
+        'csv_joint_forces_min_torque_nm',
+        default_value='0.0',
+        description='joint_forces：子link反力 ||M||≥此值(N·m)或与 csv_min_force_n 满足力条件则写入；0=不按力矩过滤'
+    )
     
     declare_csv_path_arg = DeclareLaunchArgument(
         'csv_file_path',
@@ -145,6 +156,8 @@ def generate_launch_description():
         save_policy_switch_csv_str = LaunchConfiguration('save_policy_switch_csv').perform(context)
         csv_format = LaunchConfiguration('csv_format').perform(context)
         csv_file_path = LaunchConfiguration('csv_file_path').perform(context)
+        csv_min_force_n_str = LaunchConfiguration('csv_min_force_n').perform(context)
+        csv_joint_torque_str = LaunchConfiguration('csv_joint_forces_min_torque_nm').perform(context)
         urdf_file = LaunchConfiguration('urdf_file').perform(context)
         perturb_force = LaunchConfiguration('perturb_force_magnitude').perform(context)
         perturb_torque = LaunchConfiguration('perturb_torque_magnitude').perform(context)
@@ -168,6 +181,17 @@ def generate_launch_description():
         except FileNotFoundError:
             print(f"URDF文件未找到: {urdf_file}")
             robot_description = ""
+
+        try:
+            csv_min_force_n = float(csv_min_force_n_str)
+        except ValueError:
+            print(f"无效的 csv_min_force_n: {csv_min_force_n_str!r}，使用 0.0")
+            csv_min_force_n = 0.0
+        try:
+            csv_joint_forces_min_torque_nm = float(csv_joint_torque_str)
+        except ValueError:
+            print(f"无效的 csv_joint_forces_min_torque_nm: {csv_joint_torque_str!r}，使用 0.0")
+            csv_joint_forces_min_torque_nm = 0.0
 
         # 节点启动参数列表
         args = []
@@ -208,6 +232,8 @@ def generate_launch_description():
                 {'save_policy_switch_csv': save_policy_switch_csv},  # 是否保存RL policy切换CSV
                 {'csv_format': csv_format},  # CSV格式：csv 或 binary
                 {'csv_file_path': csv_file_path},    # CSV文件路径
+                {'csv_min_force_n': csv_min_force_n},
+                {'csv_joint_forces_min_torque_nm': csv_joint_forces_min_torque_nm},
                 {'perturb_force_magnitude': float(perturb_force)},      # 干扰力大小
                 {'perturb_torque_magnitude': float(perturb_torque)},    # 干扰力矩大小
                 {'perturb_duration': float(perturb_duration)},          # 干扰力持续时间
@@ -263,6 +289,8 @@ def generate_launch_description():
         declare_save_link_kinetic_energy_csv_arg,
         declare_save_policy_switch_csv_arg,
         declare_csv_format_arg,
+        declare_csv_min_force_n_arg,
+        declare_csv_joint_forces_min_torque_nm_arg,
         declare_csv_path_arg,
         declare_urdf_file_arg,
         declare_perturb_force_arg,

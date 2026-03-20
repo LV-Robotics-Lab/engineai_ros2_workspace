@@ -124,6 +124,10 @@ class RosInterface {
   std::mutex csv_mutex_;
   int csv_save_frequency_ = 1;  // 保存频率，1表示每帧都保存
   std::string csv_format_ = "csv";  // 格式：csv 或 binary
+  /// >0 时：contact_data 仅写入接触力模长≥该值的行（单位 N）。0=不过滤。
+  double csv_min_force_n_ = 0.0;
+  /// 与 csv_min_force_n 配合：joint_forces_data 保留条件为 (未设力阈值或 ||F||≥) OR (未设力矩阈值或 ||M||≥)。单位 N·m，0=仅按力阈值过滤（若力阈值亦为 0 则不过滤）。
+  double csv_joint_forces_min_torque_nm_ = 0.0;
 
   // Perturbation CSV logging parameters
   std::string perturbation_csv_file_path_;

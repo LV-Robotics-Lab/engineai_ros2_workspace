@@ -121,7 +121,8 @@ cd /home/wang22/engineai/engineai_ros2_workspace && conda activate engineai_ros2
 source install/setup.bash 
 # ros2 launch mujoco_simulator mujoco_simulator.launch.py csv_format:=csv or binary
 # 修改 pm_v2.yaml protection: enabled:true 启用护具功能（thickness:设置厚度）
-ros2 launch mujoco_simulator mujoco_simulator.launch.py save_contact_csv:=true save_perturbation_csv:=true save_joint_state_csv:=true save_sensor_vibration_csv:=true save_joint_forces_csv:=true save_link_kinetic_energy_csv:=true save_policy_switch_csv:=true csv_format:=csv
+ros2 launch mujoco_simulator mujoco_simulator.launch.py save_contact_csv:=true save_perturbation_csv:=true save_joint_state_csv:=true save_sensor_vibration_csv:=true save_joint_forces_csv:=true save_link_kinetic_energy_csv:=true save_policy_switch_csv:=true csv_format:=csv csv_min_force_n:=400 csv_joint_forces_min_torque_nm:=10
+# contact：接触力模长≥ csv_min_force_n 才写入。joint_forces：满足「||F||≥csv_min_force_n」或「||M||≥csv_joint_forces_min_torque_nm」则写入（OR）；后者可与 calculate_fall_risk 中 M_torsion_thr 同量级，||M|| 为子link偶矢模（非单列 M_torsion_mag）。任一侧 0 表示该条件不参与过滤。
 # csv_format:=binary 时写 *.bin；policy_switch 同为 policy_switch.bin（魔数 MJPSW01）。脚本见 scripts/mujoco_data_io.py（load_data_file）
 # binary 完整性：接触/扰动队列满时阻塞不丢条；物理线程结束前 Drain 并 flush 全部日志流。**Linux 上物理线程使用 64MB 栈（pthread）**，缓解退出时 stack smashing。
 # link_kinetic_energy_data.bin 新格式含文件头 MJLKEN02 + 各 body 名（与 CSV 列名一致）；旧 bin 无头，分析脚本只能得到 body_0…（需重新采集）。

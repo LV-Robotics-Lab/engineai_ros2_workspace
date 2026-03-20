@@ -44,6 +44,17 @@ def generate_launch_description():
         description='CSV文件保存路径（留空则使用默认路径）'
     )
 
+    declare_csv_min_force_n_arg = DeclareLaunchArgument(
+        'csv_min_force_n',
+        default_value='0.0',
+        description='contact_data 最小记录力（N）。0=不过滤'
+    )
+    declare_csv_joint_forces_min_torque_nm_arg = DeclareLaunchArgument(
+        'csv_joint_forces_min_torque_nm',
+        default_value='0.0',
+        description='joint_forces：||M||≥此值(N·m) 或与 csv_min_force_n 满足力条件则写入'
+    )
+
     # 添加URDF文件路径参数
     declare_urdf_file_arg = DeclareLaunchArgument(
         'urdf_file',
@@ -96,6 +107,8 @@ def generate_launch_description():
         contact_topic = LaunchConfiguration('contact_topic').perform(context)
         save_csv_str = LaunchConfiguration('save_contact_csv').perform(context)
         csv_file_path = LaunchConfiguration('csv_file_path').perform(context)
+        csv_min_force_n_str = LaunchConfiguration('csv_min_force_n').perform(context)
+        csv_joint_torque_str = LaunchConfiguration('csv_joint_forces_min_torque_nm').perform(context)
         urdf_file = LaunchConfiguration('urdf_file').perform(context)
         perturb_force = LaunchConfiguration('perturb_force_magnitude').perform(context)
         perturb_torque = LaunchConfiguration('perturb_torque_magnitude').perform(context)
@@ -113,6 +126,17 @@ def generate_launch_description():
         except FileNotFoundError:
             print(f"URDF文件未找到: {urdf_file}")
             robot_description = ""
+
+        try:
+            csv_min_force_n = float(csv_min_force_n_str)
+        except ValueError:
+            print(f"无效的 csv_min_force_n: {csv_min_force_n_str!r}，使用 0.0")
+            csv_min_force_n = 0.0
+        try:
+            csv_joint_forces_min_torque_nm = float(csv_joint_torque_str)
+        except ValueError:
+            print(f"无效的 csv_joint_forces_min_torque_nm: {csv_joint_torque_str!r}，使用 0.0")
+            csv_joint_forces_min_torque_nm = 0.0
 
         # 节点启动参数列表
         args = []
@@ -146,6 +170,8 @@ def generate_launch_description():
                 {'contact_topic': contact_topic},    # 接触力话题名称
                 {'save_contact_csv': save_csv},      # 是否保存CSV
                 {'csv_file_path': csv_file_path},    # CSV文件路径
+                {'csv_min_force_n': csv_min_force_n},
+                {'csv_joint_forces_min_torque_nm': csv_joint_forces_min_torque_nm},
                 {'perturb_force_magnitude': float(perturb_force)},      # 干扰力大小
                 {'perturb_torque_magnitude': float(perturb_torque)},    # 干扰力矩大小
                 {'perturb_duration': float(perturb_duration)},          # 干扰力持续时间
@@ -195,6 +221,8 @@ def generate_launch_description():
         declare_contact_topic_arg,
         declare_save_csv_arg,
         declare_csv_path_arg,
+        declare_csv_min_force_n_arg,
+        declare_csv_joint_forces_min_torque_nm_arg,
         declare_urdf_file_arg,
         declare_perturb_force_arg,
         declare_perturb_torque_arg,
