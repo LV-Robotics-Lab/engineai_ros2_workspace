@@ -313,7 +313,8 @@ python3 scripts/fig4_violin.py /path/to/all_directions_merged.csv -o 输出目�
 #   - `--compare-yz-hex-tsv`：终端打印 PNG hexbin（混合前后点）与 `yz_map_front/back.tsv`（单侧）非零位置对照（可配 `--compare-yz-max-print`）。
 # - 指定输出前缀 `-o` 时：
 #   - 文件名后缀会变为 `${prefixStem}_force_${method}.png`、`${prefixStem}_thickness_${method}.png`、`${prefixStem}_surface_${method}.png`、`${prefixStem}_pressure_${method}.png`
-# ```bash
+
+```bash
 # 下面用 MERGED_CSV 表示你的合并接触 CSV（需含 robot_frame_*、force_normal 等）
 MERGED_CSV=/home/wang22/data/mujoco_logs/only_passive_push_1600/8dir-200.0N-0.4s-20260317_122531/all_directions_merged.csv
 
