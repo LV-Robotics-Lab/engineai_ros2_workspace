@@ -142,6 +142,8 @@ source install/setup.bash
 # 修改 rl_basic_param_XZL.yaml 的 enable_pdstand_switch 可以选择是 走路policy or PDstand
 ros2 launch interface_example rl_basic_example_XZL.launch.py
 ros2 launch interface_example rl_basic_example_CHR.launch.py
+ros2 launch interface_example rl_basic_example_AMP.launch.py
+ros2 launch interface_example rl_basic_example_DAC.launch.py
 ## 通过修改 pm_v2.yaml 里 perturbation 组参数来改变推力大小 和 护具map； src/simulation/mujoco/assets/config/pm_v2.yaml
 ## 通过修改 rl_basic_param_XZL.yaml 里 initial_velocity 组参数来改变初始速度
 

@@ -125,7 +125,7 @@ joint_kd:
   - [1.7, 1.7, 1.7, 1.7, 1.7]
   - [1.7]
 
-# 进入 mimic 时从轨迹第 0 帧开始，不按俯仰匹配；可减轻 left 等动作因起跳帧不匹配导致的不稳定
+# DAC 已删除俯仰匹配逻辑；轨迹从 trajectory_index=0（或 MuJoCo reset）起播。本项保留 YAML 兼容，当前代码未使用。
 mimic_start_from_zero: false
 # 1.0
 action_scale:
@@ -175,6 +175,7 @@ qd_mask:
 
 action_clip: 1000.0
 observation_clip: 20000.0
+# transition 内 q_des 从 initial_joint_q_ 过渡到策略输出；MuJoCo reset / 重进 joint_bridge 时节点会按当前 q_real_ 重采 initial_joint_q_
 transition_time: 0.01
 
 # IMU 和线速度偏置参数
@@ -217,8 +218,12 @@ max_lower_body_torque: 550.0
 # 步态周期（CHR walking 使用）
 default_dynamic_cycle_time: 0.8
 
+# 与 rl_basic_example_XZL 一致：falling_detect_after_sec 内不跑摔倒检测、也不跑「失稳->damping」；MuJoCo reset 会清零 time_
+enable_falling_switch: true
+falling_detect_after_sec: 1.0   # joint_bridge 下控制运行超过此秒数后才启用摔倒/失稳判定，避免落地与起步瞬态误触
+
 # mimic 稳定性检测（mimic 播放过程中若检测到不稳定则提前切到 damping；与 rl_dance 同逻辑）
-mimic_stability_to_damping_enable: true   # 开启：mimic 中失稳就切 damping
+mimic_stability_to_damping_enable: true   # 开启：mimic 中失稳就切 damping（门控时间与 falling_detect_after_sec 相同）
 stability_detection:
   ang_vel_threshold: 0.4           # 角速度阈值 (rad/s)，超过认为不稳定
   gravity_dev_threshold: 0.15      # 重力方向偏差阈值，与 (0,0,-1) 的偏差
@@ -232,6 +237,7 @@ test_force_fall_delay: 3.0      # 仅当 test_force_fall_direction 非空时有�
 
 # 摔倒检测参数（仅当 test_force_fall_direction 留空时使用：walking 下 tilt/omega 超阈值则切 mimic）
 fall_detection:
+  # 若未写顶层 falling_detect_after_sec，可用 detection_delay 作为兼容别名（秒）
   tilt_threshold: 0.5            # 倾斜角阈值 (rad)，改小易误触、方向仍由重力判定
   omega_threshold: 1.8           # 角速度阈值 (rad/s)
   confirm_frames: 8              # 确认帧数

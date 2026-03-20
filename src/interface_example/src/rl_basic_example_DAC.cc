@@ -1,4 +1,3 @@
-#include <array>
 #include <chrono>
 #include <deque>
 #include <memory>
@@ -25,40 +24,9 @@ using namespace std::chrono_literals;
 
 namespace example {
 
-// 8个方向的枚举定义
-enum class MimicDirection {
-  FORWARD = 0,       // 前 (+X)
-  FORWARD_LEFT,      // 前左 (+X, +Y)
-  LEFT,              // 左 (+Y)
-  BACKWARD_LEFT,     // 后左 (-X, +Y)
-  BACKWARD,          // 后 (-X)
-  BACKWARD_RIGHT,    // 后右 (-X, -Y)
-  RIGHT,             // 右 (-Y)
-  FORWARD_RIGHT,     // 前右 (+X, -Y)
-  COUNT = 8
-};
-
-// 方向名称（用于日志和配置）
-const std::array<std::string, 8> kMimicDirectionNames = {
-  "forward", "forward_left", "left", "backward_left",
-  "backward", "backward_right", "right", "forward_right"
-};
-
-// 8 方向角度边界（度），便于调试；theta=atan2(gy,gx)，0°=前(+X)，90°=左(+Y)
-// 顺序：[0]前起 [1]前左 [2]左 [3]后左 [4]后 [5]后右 [6]右 [7]前右 [8]前(下一圈)
-// 前=[337.5,22.5)，前左=[22.5,67.5)，左=[67.5,112.5)，…，前右=[292.5,337.5)
-const double kFallDirectionBoundariesDeg[9] = {
-  337.5, 22.5, 77.5, 102.5, 157.5, 202.5, 257.5, 282.5, 337.5
-};
-
-// 根据角度(度，[0,360))返回 8 方向 bin [0,7]，与 kFallDirectionBoundariesDeg 一致
-static int AngleDegToFallBin8(double angle_deg) {
-  if (angle_deg >= kFallDirectionBoundariesDeg[0] || angle_deg < kFallDirectionBoundariesDeg[1]) return 0;
-  for (int i = 1; i <= 7; ++i) {
-    if (angle_deg >= kFallDirectionBoundariesDeg[i] && angle_deg < kFallDirectionBoundariesDeg[i + 1]) return i;
-  }
-  return 0;
-}
+// DAC：基座策略仅为舞蹈（motion_states 中的 mimic policy + 单条轨迹），无 XZL 行走、无摔倒方向 mimic。
+// 检测到摔倒时直接进入 damping（被动阻尼），不切换任何“摔倒策略”网络。
+// 与 rl_basic_example_XZL 一致：MuJoCo reset 时 time_=0；falling_detect_after_sec 内不做摔倒/失稳->damping，避免起步瞬态误触。
 
 class RlBasicRunnerDAC : public rclcpp::Node {
  public:
@@ -141,36 +109,9 @@ class RlBasicRunnerDAC : public rclcpp::Node {
       }
 
       std::string workspace_root = GetWorkspaceRoot(config_file_dir_);
-      
-      LoadWalkingParameters();
-      
-      std::string walking_policy_path;
-      if (!walking_policy_file_.empty()) {
-        if (walking_policy_file_[0] == '/') {
-          walking_policy_path = walking_policy_file_;
-        } else {
-          std::string config_based = config_file_dir_ + "/" + walking_policy_file_;
-          std::ifstream test(config_based);
-          if (test.good()) {
-            walking_policy_path = config_based;
-            test.close();
-          } else {
-            walking_policy_path = workspace_root + "/" + walking_policy_file_;
-          }
-        }
-      } else {
-        return false;
-      }
-      
-      // 加载8个方向的 mimic Policy
-      LoadMimicDirectionalPolicies(workspace_root);
-      
-      mlp_net_walking_ = std::make_unique<math::MnnModel>(walking_policy_path);
-      mlp_net_ = mlp_net_walking_.get();
-      mlp_net_action_walking_.setZero(walking_num_actions_);
+
+      LoadDancePolicy(workspace_root);
       mlp_net_action_.setZero(num_actions_);
-      
-      mlp_net_observation_walking_.setZero(walking_num_observations_, walking_num_include_obs_steps_);
       
       const int num_joints = static_cast<int>(active_joint_names_.size());
       q_diff_history_ = Eigen::MatrixXd::Zero(num_joints, num_include_obs_steps_);
@@ -189,15 +130,11 @@ class RlBasicRunnerDAC : public rclcpp::Node {
       }
       
       LoadCsvTrajectory(workspace_root);
-      LoadMimicDirectionalTrajectories();  // 加载8个方向的 mimic 轨迹
       trajectory_index_ = 0;
       time_ = 0.0;
       global_phase_ = 0.0;
       is_first_time_ = true;
-      is_walking_mode_ = true;
-      walking_duration_ = 2.6;
-      walking_start_time_ = -1.0;
-      mujoco_reset_received_ = false;
+      is_dance_mode_ = true;
 
       mujoco_reset_sub_ = create_subscription<std_msgs::msg::Empty>(
           "/mujoco/reset_complete", 10,
@@ -313,6 +250,10 @@ class RlBasicRunnerDAC : public rclcpp::Node {
       action_scale85_ = math::ConcatenateVectors(LoadVectorArrayFromYaml(config_["action_scale85"]));
     }
     
+    // 与 XZL 一致：enable_falling_switch / falling_detect_after_sec
+    enable_falling_switch_ = config_["enable_falling_switch"] ? config_["enable_falling_switch"].as<bool>() : true;
+    falling_detect_after_sec_ = config_["falling_detect_after_sec"] ? config_["falling_detect_after_sec"].as<double>() : 5.0;
+
     // 加载摔倒检测参数
     if (config_["fall_detection"]) {
       const YAML::Node& fall_config = config_["fall_detection"];
@@ -331,8 +272,9 @@ class RlBasicRunnerDAC : public rclcpp::Node {
       if (fall_config["fast_fall_confirm_frames"]) {
         fast_fall_confirm_frames_ = fall_config["fast_fall_confirm_frames"].as<int>();
       }
-      if (fall_config["detection_delay"]) {
-        fall_detection_delay_ = fall_config["detection_delay"].as<double>();
+      // 未写顶层 falling_detect_after_sec 时，可用 fall_detection.detection_delay（与旧 DAC 配置兼容）
+      if (fall_config["detection_delay"] && !config_["falling_detect_after_sec"]) {
+        falling_detect_after_sec_ = fall_config["detection_delay"].as<double>();
       }
       if (fall_config["passive_damping"]) {
         passive_damping_kd_ = math::ConcatenateVectors(LoadVectorArrayFromYaml(fall_config["passive_damping"]));
@@ -343,19 +285,11 @@ class RlBasicRunnerDAC : public rclcpp::Node {
       }
     }
 
-    // 测试用：reset 后先走 XZL，等 test_force_fall_delay 秒后强制切到指定方向 mimic（如 "left"）
-    if (config_["test_force_fall_direction"]) {
-      test_force_fall_direction_ = config_["test_force_fall_direction"].as<std::string>();
-      if (config_["test_force_fall_delay"]) {
-        test_force_fall_delay_ = config_["test_force_fall_delay"].as<double>();
-      }
-      if (!test_force_fall_direction_.empty()) {
-        RCLCPP_INFO(get_logger(), "test_force_fall_direction: %s, delay %.1fs (walk XZL then switch)",
-                    test_force_fall_direction_.c_str(), test_force_fall_delay_);
-      }
-    }
+    RCLCPP_INFO(get_logger(),
+                "Fall switch: %s, detect after %.2f s (XZL-style; MuJoCo reset clears time_)",
+                enable_falling_switch_ ? "enabled" : "disabled", falling_detect_after_sec_);
 
-    // 稳定性检测（mimic 中不稳定则提前切 damping，可选）
+    // 稳定性检测（舞蹈播放中不稳定则提前切 damping，可选；启用门控与摔倒相同：time_ >= falling_detect_after_sec_）
     mimic_stability_to_damping_enable_ = config_["mimic_stability_to_damping_enable"] ?
         config_["mimic_stability_to_damping_enable"].as<bool>() : false;
     if (config_["stability_detection"]) {
@@ -367,7 +301,8 @@ class RlBasicRunnerDAC : public rclcpp::Node {
     }
     stability_history_.clear();
     stability_history_.resize(std::max(1, stability_history_length_), true);
-    RCLCPP_INFO(get_logger(), "mimic_stability_to_damping_enable: %s", mimic_stability_to_damping_enable_ ? "true" : "false");
+    RCLCPP_INFO(get_logger(), "mimic_stability_to_damping_enable: %s (gated by falling_detect_after_sec)",
+                mimic_stability_to_damping_enable_ ? "true" : "false");
     
     // 读取扭矩限制参数
     torque_limit_enabled_ = config_["torque_limit"] ? config_["torque_limit"].as<bool>() : false;
@@ -402,97 +337,6 @@ class RlBasicRunnerDAC : public rclcpp::Node {
       current = current.substr(0, config_pos);
     }
     return current;
-  }
-  
-  void LoadWalkingParameters() {
-    std::string walking_config_file = config_file_dir_ + "/rl_basic_param_XZL.yaml";
-    config_walking_ = YAML::LoadFile(walking_config_file);
-    
-    walking_policy_file_ = config_walking_["policy_file"] ? config_walking_["policy_file"].as<std::string>() : "";
-    walking_num_observations_ = config_walking_["num_observations"] ? config_walking_["num_observations"].as<int>() : 72;
-    walking_num_include_obs_steps_ = config_walking_["num_include_obs_steps"] ? config_walking_["num_include_obs_steps"].as<int>() : 15;
-    
-    walking_num_actions_ = 0;
-    if (config_walking_["active_joint_names"]) {
-      walking_num_actions_ = config_walking_["active_joint_names"].size();
-    } else {
-      walking_num_actions_ = (walking_num_observations_ - 6) / 3;
-    }
-    
-    if (config_walking_["active_joint_idx"]) {
-      walking_active_joint_idx_ = LoadIntVectorFromYaml(config_walking_["active_joint_idx"]);
-    } else {
-      walking_active_joint_idx_ = Eigen::VectorXi::LinSpaced(walking_num_actions_, 0, walking_num_actions_ - 1);
-    }
-    
-    double obs_scale_linear_vel = config_walking_["observation_scale_linear_vel"] ? config_walking_["observation_scale_linear_vel"].as<double>() : 2.0;
-    double obs_scale_angular_vel = config_walking_["observation_scale_angular_vel"] ? config_walking_["observation_scale_angular_vel"].as<double>() : 1.0;
-    double obs_scale_dof_pos = config_walking_["observation_scale_dof_pos"] ? config_walking_["observation_scale_dof_pos"].as<double>() : 1.0;
-    double obs_scale_dof_vel = config_walking_["observation_scale_dof_vel"] ? config_walking_["observation_scale_dof_vel"].as<double>() : 0.05;
-    double obs_scale_quat = config_walking_["observation_scale_quat"] ? config_walking_["observation_scale_quat"].as<double>() : 1.0;
-    
-    walking_observation_scale_ = Eigen::VectorXd::Zero(walking_num_observations_);
-    walking_observation_scale_ <<
-        Eigen::VectorXd::Constant(walking_num_actions_, obs_scale_dof_pos),
-        Eigen::VectorXd::Constant(walking_num_actions_, obs_scale_dof_vel),
-        Eigen::VectorXd::Ones(walking_num_actions_),
-        Eigen::Vector3d::Constant(obs_scale_angular_vel),
-        Eigen::Vector3d::Constant(obs_scale_quat);
-    
-    if (config_walking_["command_scale"]) {
-      auto cmd_scale = config_walking_["command_scale"];
-      walking_command_scale_ = Eigen::Vector3d(cmd_scale[0].as<double>(), cmd_scale[1].as<double>(), cmd_scale[2].as<double>());
-    } else {
-      walking_command_scale_ = Eigen::Vector3d(obs_scale_linear_vel, obs_scale_linear_vel, obs_scale_angular_vel);
-    }
-    
-    if (config_walking_["cycle_time"]) {
-      cycle_time_ = config_walking_["cycle_time"].as<double>();
-    }
-    
-    if (config_walking_["control_dt"]) {
-      control_dt_ = config_walking_["control_dt"].as<double>();
-    }
-    
-    if (config_walking_["action_scale"]) {
-      walking_action_scale_ = math::ConcatenateVectors(LoadVectorArrayFromYaml(config_walking_["action_scale"]));
-    } else {
-      walking_action_scale_ = Eigen::VectorXd::Ones(walking_num_actions_);
-    }
-    
-    if (config_walking_["default_joint_q"]) {
-      walking_default_joint_q_ = math::ConcatenateVectors(LoadVectorArrayFromYaml(config_walking_["default_joint_q"]));
-    }
-    
-    walking_action_clip_ = config_walking_["action_clip"] ? config_walking_["action_clip"].as<double>() : 100.0;
-    walking_observation_clip_ = config_walking_["observation_clip"] ? config_walking_["observation_clip"].as<double>() : 100.0;
-    walking_transition_time_ = config_walking_["transition_time"] ? config_walking_["transition_time"].as<double>() : 0.5;
-    
-    // 加载 walking 模式的 joint_kp 和 joint_kd（从 XZL 配置）
-    if (config_walking_["joint_kp"]) {
-      walking_joint_kp_ = math::ConcatenateVectors(LoadVectorArrayFromYaml(config_walking_["joint_kp"]));
-    } else {
-      walking_joint_kp_ = joint_kp_;  // 回退到 CHR 配置
-    }
-    
-    if (config_walking_["joint_kd"]) {
-      walking_joint_kd_ = math::ConcatenateVectors(LoadVectorArrayFromYaml(config_walking_["joint_kd"]));
-    } else {
-      walking_joint_kd_ = joint_kd_;  // 回退到 CHR 配置
-    }
-    
-    if (config_walking_["imu_install_delta_bias"]) {
-      if (config_walking_["imu_install_delta_bias"].IsScalar()) {
-        double bias_val = config_walking_["imu_install_delta_bias"].as<double>();
-        walking_imu_install_bias_ = Eigen::Vector3d(bias_val, bias_val, bias_val);
-      } else {
-        walking_imu_install_bias_ = LoadVectorFromYaml(config_walking_["imu_install_delta_bias"]);
-      }
-    } else if (config_walking_["imu_install_bias"]) {
-      walking_imu_install_bias_ = LoadVectorFromYaml(config_walking_["imu_install_bias"]);
-    } else {
-      walking_imu_install_bias_ = Eigen::Vector3d::Zero();
-    }
   }
   
   void InitializeDanceParam() {
@@ -537,93 +381,24 @@ class RlBasicRunnerDAC : public rclcpp::Node {
     return observation_type_ == "mimic_flat" || observation_type_ == "tracking_flat";
   }
   
-  // 加载8个方向的 mimic Policy
-  void LoadMimicDirectionalPolicies(const std::string& workspace_root) {
-    // 首先从 motion_states 下的启用 profile 中查找 mimic_policies
-    YAML::Node mimic_policies;
-    bool found_mimic_policies = false;
-    
-    if (config_["motion_states"]) {
-      const YAML::Node& motion_states = config_["motion_states"];
-      for (const auto& state : motion_states) {
-        const YAML::Node& profile_node = state.second;
-        if (profile_node["enable"] && profile_node["enable"].as<bool>()) {
-          if (profile_node["mimic_policies"]) {
-            mimic_policies = profile_node["mimic_policies"];
-            found_mimic_policies = true;
-            RCLCPP_INFO(get_logger(), "Found mimic_policies in motion_states profile");
-          }
-          break;
-        }
-      }
+  void LoadDancePolicy(const std::string& workspace_root) {
+    std::string path;
+    if (!current_profile_.policy_path.empty()) {
+      path = ResolvePolicyPath(current_profile_.policy_path, workspace_root);
     }
-    
-    // 回退：检查根节点是否有 mimic_policies
-    if (!found_mimic_policies && config_["mimic_policies"]) {
-      mimic_policies = config_["mimic_policies"];
-      found_mimic_policies = true;
+    if (path.empty() && config_["policy_file"]) {
+      path = ResolvePolicyPath(config_["policy_file"].as<std::string>(), workspace_root);
     }
-    
-    if (found_mimic_policies) {
-      for (size_t i = 0; i < static_cast<size_t>(MimicDirection::COUNT); ++i) {
-        const std::string& dir_name = kMimicDirectionNames[i];
-        if (mimic_policies[dir_name]) {
-          std::string policy_file = mimic_policies[dir_name].as<std::string>();
-          std::string policy_path = ResolvePolicyPath(policy_file, workspace_root);
-          
-          if (!policy_path.empty()) {
-            try {
-              mlp_net_mimic_directions_[i] = std::make_unique<math::MnnModel>(policy_path);
-              RCLCPP_INFO(get_logger(), "Loaded mimic policy for direction %s: %s", 
-                          dir_name.c_str(), policy_path.c_str());
-            } catch (const std::exception& e) {
-              RCLCPP_ERROR(get_logger(), "Failed to load mimic policy for direction %s: %s", 
-                           dir_name.c_str(), e.what());
-            }
-          }
-        }
-      }
-    } else {
-      // 回退：尝试从 motion_states 中的 policy_path 加载单个 Policy（用于所有方向）
-      std::string mimic_policy_path;
-      if (!current_profile_.policy_path.empty()) {
-        mimic_policy_path = ResolvePolicyPath(current_profile_.policy_path, workspace_root);
-      } else if (config_["policy_file"]) {
-        mimic_policy_path = config_file_dir_ + "/" + config_["policy_file"].as<std::string>();
-      }
-      
-      if (!mimic_policy_path.empty()) {
-        RCLCPP_INFO(get_logger(), "No mimic_policies config found, loading single policy for all directions: %s", 
-                    mimic_policy_path.c_str());
-        try {
-          // 加载一个 Policy，并将其复制到所有方向
-          auto single_policy = std::make_unique<math::MnnModel>(mimic_policy_path);
-          // 第一个方向使用原始 Policy
-          mlp_net_mimic_directions_[0] = std::move(single_policy);
-          // 其他方向也加载相同的 Policy（因为 MLP 结构相同）
-          for (size_t i = 1; i < static_cast<size_t>(MimicDirection::COUNT); ++i) {
-            mlp_net_mimic_directions_[i] = std::make_unique<math::MnnModel>(mimic_policy_path);
-          }
-        } catch (const std::exception& e) {
-          RCLCPP_ERROR(get_logger(), "Failed to load single mimic policy: %s", e.what());
-        }
-      }
+    if (path.empty()) {
+      RCLCPP_ERROR(get_logger(),
+                   "Dance policy missing: set motion_states.<name>.policy_path or top-level policy_file in YAML");
+      throw std::runtime_error("DAC: no dance policy path");
     }
-    
-    // 确保至少有一个 Policy 被加载
-    bool any_loaded = false;
-    for (size_t i = 0; i < static_cast<size_t>(MimicDirection::COUNT); ++i) {
-      if (mlp_net_mimic_directions_[i]) {
-        any_loaded = true;
-        break;
-      }
-    }
-    
-    if (!any_loaded) {
-      RCLCPP_WARN(get_logger(), "No mimic policies loaded! Mimic mode may not work correctly.");
-    }
+    mlp_net_dance_ = std::make_unique<math::MnnModel>(path);
+    mlp_net_ = mlp_net_dance_.get();
+    RCLCPP_INFO(get_logger(), "Loaded dance (base) MNN: %s", path.c_str());
   }
-  
+
   // 解析 Policy 文件路径（支持相对路径和绝对路径）
   std::string ResolvePolicyPath(const std::string& policy_file, const std::string& workspace_root) {
     if (policy_file.empty()) {
@@ -684,310 +459,29 @@ class RlBasicRunnerDAC : public rclcpp::Node {
     
     current_traj_ = &interpolated_trajs_["default_profile"];
   }
-  
-  // 加载8个方向的 mimic 轨迹
-  void LoadMimicDirectionalTrajectories() {
-    // 从 motion_states 下的启用 profile 中查找 mimic_trajectories
-    YAML::Node mimic_trajectories;
-    bool found = false;
-    
-    if (config_["motion_states"]) {
-      const YAML::Node& motion_states = config_["motion_states"];
-      for (const auto& state : motion_states) {
-        const YAML::Node& profile_node = state.second;
-        if (profile_node["enable"] && profile_node["enable"].as<bool>()) {
-          if (profile_node["mimic_trajectories"]) {
-            mimic_trajectories = profile_node["mimic_trajectories"];
-            found = true;
-            RCLCPP_INFO(get_logger(), "Found mimic_trajectories in motion_states profile");
-          }
-          break;
-        }
-      }
-    }
-    
-    if (!found) {
-      RCLCPP_INFO(get_logger(), "No mimic_trajectories config found, using default trajectory for all directions");
-      return;
-    }
-    
-    for (size_t i = 0; i < static_cast<size_t>(MimicDirection::COUNT); ++i) {
-      const std::string& dir_name = kMimicDirectionNames[i];
-      if (mimic_trajectories[dir_name]) {
-        std::string traj_file = mimic_trajectories[dir_name].as<std::string>();
-        std::string full_path;
-        
-        if (traj_file[0] == '/') {
-          full_path = traj_file;
-        } else {
-          full_path = config_file_dir_ + "/" + traj_file;
-        }
-        
-        std::ifstream test(full_path);
-        if (!test.good()) {
-          RCLCPP_WARN(get_logger(), "Trajectory file not found for direction %s: %s", 
-                      dir_name.c_str(), full_path.c_str());
-          continue;
-        }
-        test.close();
-        
-        try {
-          Eigen::MatrixXd traj = rl_dance::CsvLoader::LoadAndInterpolateJointTrajectoryWithVelAndQuat(
-              full_path, active_joint_names_, csv_dt_, control_dt_,
-              traj_frame_.empty() ? 0 : traj_frame_[0],
-              traj_frame_.size() > 1 ? traj_frame_[1] : -1);
-          mimic_trajs_directions_[i] = traj;
-          mimic_trajs_loaded_[i] = true;
-          RCLCPP_INFO(get_logger(), "Loaded mimic trajectory for direction %s: %s (%ld frames)", 
-                      dir_name.c_str(), full_path.c_str(), traj.rows());
-        } catch (const std::exception& e) {
-          RCLCPP_ERROR(get_logger(), "Failed to load trajectory for direction %s: %s", 
-                       dir_name.c_str(), e.what());
-        }
-      }
-    }
-    
-    // 默认使用 forward 方向的轨迹作为 current_traj_
-    if (mimic_trajs_loaded_[static_cast<int>(MimicDirection::FORWARD)]) {
-      current_traj_ = &mimic_trajs_directions_[static_cast<int>(MimicDirection::FORWARD)];
-      RCLCPP_INFO(get_logger(), "Set default trajectory to forward direction");
-    }
-  }
-  
-  // 切换到指定方向的轨迹
-  void SwitchToDirectionalTrajectory(MimicDirection direction) {
-    int dir_idx = static_cast<int>(direction);
-    if (mimic_trajs_loaded_[dir_idx]) {
-      current_traj_ = &mimic_trajs_directions_[dir_idx];
-      RCLCPP_INFO(get_logger(), "Switched to trajectory for direction %s (%ld frames)", 
-                  kMimicDirectionNames[dir_idx].c_str(), current_traj_->rows());
-    } else {
-      RCLCPP_WARN(get_logger(), "Trajectory for direction %s not loaded, keeping current trajectory", 
-                  kMimicDirectionNames[dir_idx].c_str());
-    }
-  }
-  
-  // 从 CSV 文件中读取四元数并计算俯仰角度（考虑 traj_frame_ 范围）
-  std::vector<double> LoadPitchFromCsv(const std::string& csv_path) {
-    std::vector<double> pitch_values;
-    std::ifstream file(csv_path);
-    if (!file.is_open()) {
-      RCLCPP_WARN(get_logger(), "Failed to open CSV file for pitch reading: %s", csv_path.c_str());
-      return pitch_values;
-    }
-    
-    std::string line;
-    std::vector<std::string> headers;
-    // 读取表头
-    if (std::getline(file, line)) {
-      std::stringstream ss(line);
-      std::string col;
-      while (std::getline(ss, col, ',')) {
-        headers.push_back(col);
-      }
-    }
-    
-    // 查找四元数列的索引（优先查找 base_quat_x/y/z/w，如果没有则查找 base_qx/y/z/w）
-    std::vector<std::string> quat_names = {"base_quat_x", "base_quat_y", "base_quat_z", "base_quat_w"};
-    std::vector<std::string> quat_names_alt = {"base_qx", "base_qy", "base_qz", "base_qw"};
-    std::vector<int> quat_col_idx;
-    
-    bool use_alt_names = false;
-    auto first_quat_it = std::find(headers.begin(), headers.end(), quat_names[0]);
-    if (first_quat_it == headers.end()) {
-      auto alt_quat_it = std::find(headers.begin(), headers.end(), quat_names_alt[0]);
-      if (alt_quat_it == headers.end()) {
-        RCLCPP_WARN(get_logger(), "Quaternion columns not found in CSV file: %s", csv_path.c_str());
-        return pitch_values;
-      }
-      use_alt_names = true;
-    }
-    
-    const auto& selected_quat_names = use_alt_names ? quat_names_alt : quat_names;
-    for (const auto& quat_name : selected_quat_names) {
-      auto quat_it = std::find(headers.begin(), headers.end(), quat_name);
-      if (quat_it == headers.end()) {
-        RCLCPP_WARN(get_logger(), "Quaternion column not found: %s", quat_name.c_str());
-        return pitch_values;
-      }
-      quat_col_idx.push_back(std::distance(headers.begin(), quat_it));
-    }
-    
-    // 读取所有行的四元数并计算俯仰角度
-    std::vector<double> all_pitch;
-    while (std::getline(file, line)) {
-      std::stringstream ss(line);
-      std::string val;
-      std::vector<std::string> all_vals;
-      
-      while (std::getline(ss, val, ',')) {
-        all_vals.push_back(val);
-      }
-      
-      if (quat_col_idx[0] < static_cast<int>(all_vals.size()) &&
-          quat_col_idx[1] < static_cast<int>(all_vals.size()) &&
-          quat_col_idx[2] < static_cast<int>(all_vals.size()) &&
-          quat_col_idx[3] < static_cast<int>(all_vals.size())) {
-        try {
-          // 读取四元数 (x, y, z, w)
-          double qx = std::stod(all_vals[quat_col_idx[0]]);
-          double qy = std::stod(all_vals[quat_col_idx[1]]);
-          double qz = std::stod(all_vals[quat_col_idx[2]]);
-          double qw = std::stod(all_vals[quat_col_idx[3]]);
-          
-          // 转换为旋转矩阵并计算俯仰角度
-          Eigen::Quaterniond quat(qw, qx, qy, qz);
-          Eigen::Matrix3d R = quat.toRotationMatrix();
-          Eigen::Vector3d rpy = math::CalcRollPitchYawFromRotationMatrix(R);
-          double pitch = rpy[1];  // pitch 是第二个元素
-          
-          all_pitch.push_back(pitch);
-        } catch (const std::exception& e) {
-          RCLCPP_WARN(get_logger(), "Failed to parse quaternion or calculate pitch: %s", e.what());
-        }
-      }
-    }
-    
-    // 应用 traj_frame_ 范围（与 LoadCsvTrajectory 一致）
-    int start_frame = traj_frame_.empty() ? 0 : traj_frame_[0];
-    int end_frame = traj_frame_.size() > 1 ? traj_frame_[1] : -1;
-    
-    int start_idx = std::max(0, start_frame);
-    int end_idx;
-    if (end_frame == -1) {
-      end_idx = static_cast<int>(all_pitch.size()) - 1;
-    } else {
-      end_idx = std::min(static_cast<int>(all_pitch.size()) - 1, end_frame);
-    }
-    
-    if (start_idx > end_idx) {
-      RCLCPP_WARN(get_logger(), "Invalid traj_frame range for pitch: start=%d, end=%d", start_idx, end_idx);
-      return pitch_values;
-    }
-    
-    // 提取范围内的 pitch 值
-    pitch_values.assign(all_pitch.begin() + start_idx, all_pitch.begin() + end_idx + 1);
-    
-    return pitch_values;
-  }
-  
-  // 获取当前 IMU 俯仰角度（使用 mimic 模式的 IMU bias）
-  double GetCurrentPitchAngle() {
-    auto imu = message_handler_->GetLatestImu();
-    if (!imu) {
-      RCLCPP_WARN(get_logger(), "IMU data not available, using default pitch angle 0.0");
-      return 0.0;
-    }
-    
-    // 应用 IMU 安装偏差校正
-    Eigen::AngleAxisd rollAngle(imu_install_bias_.x(), Eigen::Vector3d::UnitX());
-    Eigen::AngleAxisd pitchAngle(imu_install_bias_.y(), Eigen::Vector3d::UnitY());
-    Eigen::AngleAxisd yawAngle(imu_install_bias_.z(), Eigen::Vector3d::UnitZ());
-    Eigen::Quaterniond q_install = yawAngle * pitchAngle * rollAngle;
-    Eigen::Matrix3d R_install = q_install.toRotationMatrix();
-    
-    // 从 IMU 四元数获取旋转矩阵
-    Eigen::Matrix3d R_local = Eigen::Quaterniond(imu->quaternion.w, imu->quaternion.x, 
-                                                 imu->quaternion.y, imu->quaternion.z).toRotationMatrix();
-    
-    // 计算校正后的旋转矩阵
-    Eigen::Matrix3d R_real = R_local * R_install.transpose();
-    
-    // 计算 RPY 角度
-    Eigen::Vector3d rpy = math::CalcRollPitchYawFromRotationMatrix(R_real);
-    double pitch = rpy[1];  // pitch 是第二个元素
-    
-    return pitch;
-  }
-  
-  // 在插值后的轨迹中查找最匹配的俯仰角度 timestep
-  size_t FindMatchingTrajectoryIndex(double current_pitch) {
-    if (current_traj_ == nullptr) {
-      RCLCPP_WARN(get_logger(), "Cannot find matching trajectory index: current_traj_ is null");
-      return 0;
-    }
-    
-    size_t traj_size = current_traj_->rows();
-    const int num_joints = static_cast<int>(active_joint_names_.size());
-    
-    // 检查轨迹矩阵的列数是否正确（应该包含四元数）
-    if (current_traj_->cols() != 2 * num_joints + 4) {
-      RCLCPP_WARN(get_logger(), "Trajectory matrix has incorrect columns: expected %d, got %ld", 
-                  2 * num_joints + 4, current_traj_->cols());
-      return 0;
-    }
-    
-    // 直接从插值后的轨迹矩阵中提取四元数并计算 pitch
-    std::vector<double> traj_pitch;
-    traj_pitch.reserve(traj_size);
-    
-    for (size_t i = 0; i < traj_size; ++i) {
-      // 从轨迹矩阵中提取四元数 [qx, qy, qz, qw]
-      // 四元数在最后4列：索引为 2*num_joints + 0, 1, 2, 3
-      double qx = (*current_traj_)(i, 2 * num_joints + 0);
-      double qy = (*current_traj_)(i, 2 * num_joints + 1);
-      double qz = (*current_traj_)(i, 2 * num_joints + 2);
-      double qw = (*current_traj_)(i, 2 * num_joints + 3);
-      
-      // 转换为旋转矩阵并计算俯仰角度
-      Eigen::Quaterniond quat(qw, qx, qy, qz);
-      Eigen::Matrix3d R = quat.toRotationMatrix();
-      Eigen::Vector3d rpy = math::CalcRollPitchYawFromRotationMatrix(R);
-      double pitch = rpy[1];  // pitch 是第二个元素
-      
-      traj_pitch.push_back(pitch);
-    }
-    
-    // 从前往后查找最匹配的 timestep
-    double min_diff = std::numeric_limits<double>::max();
-    size_t best_idx = 0;
-    
-    for (size_t i = 0; i < traj_pitch.size(); ++i) {
-      // 计算角度差（考虑角度环绕）
-      double diff = traj_pitch[i] - current_pitch;
-      if (diff > M_PI) diff -= 2 * M_PI;
-      if (diff < -M_PI) diff += 2 * M_PI;
-      double abs_diff = std::abs(diff);
-      
-      if (abs_diff < min_diff) {
-        min_diff = abs_diff;
-        best_idx = i;
-      }
-    }
-    
-    RCLCPP_INFO(get_logger(), "Found matching trajectory index: %zu (pitch: %.4f rad, current: %.4f rad, diff: %.4f rad)",
-                best_idx, traj_pitch[best_idx], current_pitch, min_diff);
-    
-    return best_idx;
-  }
-  
+
   void MujocoResetCallback(const std_msgs::msg::Empty::SharedPtr msg) {
     (void)msg;
-    // 若从 mimic/damping 切回 walking，发布 policy switch
-    if (!is_walking_mode_) {
-      std::string from = is_damping_mode_ ? "damping" : "mimic";
-      PublishPolicySwitch(from, "walking", kMimicDirectionNames[static_cast<int>(current_mimic_direction_)]);
+    if (is_damping_mode_) {
+      PublishPolicySwitch("damping", "dance", "");
     }
-    // 每次收到 reset 信号都重新初始化状态
-    mujoco_reset_received_ = true;
-    walking_start_time_ = time_;
-    reset_time_ = time_;  // 记录 reset 时间，用于摔倒检测延迟
-    test_force_fall_triggered_ = false;  // 允许本次 reset 后再次强制触发（若配置了 test_force_fall_direction）
-    is_walking_mode_ = true;
+    // 与 XZL 一致：重置计时，使 falling_detect_after_sec 在每次 reset 后重新生效
+    time_ = 0.0;
+    is_first_time_ = true;
+    is_dance_mode_ = true;
     is_damping_mode_ = false;
     global_phase_ = 0.0;
     fall_stable_count_ = 0;
     trajectory_index_ = 0;
-    
-    // 重置 mlp_net_ 指向 walking policy
-    mlp_net_ = mlp_net_walking_.get();
-    
-    // 重置 current_traj_ 到默认（forward）轨迹
-    if (mimic_trajs_loaded_[static_cast<int>(MimicDirection::FORWARD)]) {
-      current_traj_ = &mimic_trajs_directions_[static_cast<int>(MimicDirection::FORWARD)];
+    if (mimic_stability_to_damping_enable_) {
+      stability_history_.clear();
+      stability_history_.resize(std::max(1, stability_history_length_), true);
     }
-    
-    // 清空 obs history，避免新 episode 开始时带入上一 episode 的旧数据
+    mlp_net_ = mlp_net_dance_.get();
+    if (interpolated_trajs_.count("default_profile") > 0) {
+      current_traj_ = &interpolated_trajs_["default_profile"];
+    }
+
     q_diff_history_.setZero();
     qd_history_.setZero();
     action_history_.setZero();
@@ -996,82 +490,21 @@ class RlBasicRunnerDAC : public rclcpp::Node {
     if (quat_error_history_.size() > 0) quat_error_history_.setZero();
     initial_quat_offset_computed_ = false;
     initial_quat_offset_ = std::nullopt;
-    
-    RCLCPP_INFO(get_logger(), "Received MuJoCo reset signal, restarting walking from time: %.2f", time_);
-  }
-  
-  // 根据重力投影方向选择 mimic Policy
-  // projected_gravity 是在机体坐标系下的重力向量（归一化后约为 [gx, gy, gz]）
-  // gx > 0 表示机器人前倾（重力向前投影），gx < 0 表示后倾
-  // gy > 0 表示机器人左倾（重力向左投影），gy < 0 表示右倾
-  MimicDirection SelectMimicDirectionFromGravity(const Eigen::Vector3d& projected_gravity) {
-    double gx = projected_gravity.x();  // 前后方向
-    double gy = projected_gravity.y();  // 左右方向
-    
-    // 计算在XY平面的角度（以+X轴为0度，逆时针为正），转 [0,360) 度
-    double angle = std::atan2(gy, gx);  // 范围 [-π, π]
-    double angle_deg = angle * 180.0 / M_PI;
-    if (angle_deg < 0) angle_deg += 360.0;
-    int bin8 = AngleDegToFallBin8(angle_deg);
-    return static_cast<MimicDirection>(bin8);
-  }
-  
-  // 获取当前 IMU 重力投影（使用 mimic 模式的 IMU bias）
-  Eigen::Vector3d GetCurrentProjectedGravity() {
-    auto imu = message_handler_->GetLatestImu();
-    if (!imu) {
-      RCLCPP_WARN(get_logger(), "IMU data not available, using default gravity [0, 0, -1]");
-      return Eigen::Vector3d(0, 0, -1);
+    if (mlp_net_action_.size() > 0) {
+      mlp_net_action_.setZero();
     }
-    
-    // 应用 IMU 安装偏差校正
-    Eigen::AngleAxisd rollAngle(imu_install_bias_.x(), Eigen::Vector3d::UnitX());
-    Eigen::AngleAxisd pitchAngle(imu_install_bias_.y(), Eigen::Vector3d::UnitY());
-    Eigen::AngleAxisd yawAngle(imu_install_bias_.z(), Eigen::Vector3d::UnitZ());
-    Eigen::Quaterniond q_install = yawAngle * pitchAngle * rollAngle;
-    Eigen::Matrix3d R_install = q_install.toRotationMatrix();
-    
-    // 从 IMU 四元数获取旋转矩阵
-    Eigen::Matrix3d R_local = Eigen::Quaterniond(imu->quaternion.w, imu->quaternion.x, 
-                                                 imu->quaternion.y, imu->quaternion.z).toRotationMatrix();
-    
-    // 计算校正后的旋转矩阵
-    Eigen::Matrix3d R_real = R_local * R_install.transpose();
-    
-    // 计算重力投影（机体坐标系下的重力向量）
-    Eigen::Vector3d projected_gravity = -R_real.transpose() * Eigen::Vector3d::UnitZ();
-    
-    return projected_gravity;
-  }
-  
-  // 更新 mimic Policy 选择（基于当前重力投影方向）；当前逻辑下进入 mimic 后不再调用，仅保留供将来可选使用
-  void UpdateMimicPolicySelection() {
-    Eigen::Vector3d projected_gravity = GetCurrentProjectedGravity();
-    MimicDirection new_direction = SelectMimicDirectionFromGravity(projected_gravity);
-    
-    if (new_direction != current_mimic_direction_) {
-      int dir_idx = static_cast<int>(new_direction);
-      if (mlp_net_mimic_directions_[dir_idx]) {
-        current_mimic_direction_ = new_direction;
-        mlp_net_ = mlp_net_mimic_directions_[dir_idx].get();
-        RCLCPP_INFO(get_logger(), "Switched mimic policy to direction: %s (gravity: [%.3f, %.3f, %.3f])",
-                    kMimicDirectionNames[dir_idx].c_str(),
-                    projected_gravity.x(), projected_gravity.y(), projected_gravity.z());
-      } else {
-        RCLCPP_WARN(get_logger(), "Mimic policy for direction %s not loaded, keeping current policy",
-                    kMimicDirectionNames[dir_idx].c_str());
-      }
-    }
+
+    RCLCPP_INFO(get_logger(), "MuJoCo reset: restart dance (base policy) at time: %.2f", time_);
   }
 
-  // 稳定性检测（mimic 播放中）：与 rl_dance 同逻辑，角速度+重力偏差+历史平滑
+  // 稳定性检测（舞蹈播放中）：与 rl_dance 同逻辑，角速度+重力偏差+历史平滑
   // 返回 true 表示当前稳定，false 表示不稳定（可提前切 damping）
   bool CheckMimicStability() {
     auto imu = message_handler_->GetLatestImu();
     if (!imu || stability_history_.empty()) return true;
-    Eigen::AngleAxisd rollAngle(walking_imu_install_bias_.x(), Eigen::Vector3d::UnitX());
-    Eigen::AngleAxisd pitchAngle(walking_imu_install_bias_.y(), Eigen::Vector3d::UnitY());
-    Eigen::AngleAxisd yawAngle(walking_imu_install_bias_.z(), Eigen::Vector3d::UnitZ());
+    Eigen::AngleAxisd rollAngle(imu_install_bias_.x(), Eigen::Vector3d::UnitX());
+    Eigen::AngleAxisd pitchAngle(imu_install_bias_.y(), Eigen::Vector3d::UnitY());
+    Eigen::AngleAxisd yawAngle(imu_install_bias_.z(), Eigen::Vector3d::UnitZ());
     Eigen::Quaterniond q_install = yawAngle * pitchAngle * rollAngle;
     Eigen::Matrix3d R_install = q_install.toRotationMatrix();
     Eigen::Matrix3d R_local = Eigen::Quaterniond(imu->quaternion.w, imu->quaternion.x,
@@ -1094,88 +527,48 @@ class RlBasicRunnerDAC : public rclcpp::Node {
     return stable_ratio > stability_smoothing_threshold_;
   }
   
-  // 摔倒检测：基于倾斜角度和角速度，带防抖机制
-  // 返回 true 表示检测到摔倒，同时设置 detected_direction
-  bool DetectFall(MimicDirection& detected_direction) {
-    // 使用 walking 模式的 IMU bias 计算重力投影和角速度
+  // 摔倒检测：倾斜角 / 角速度 + 连续帧确认；不区分方向，触发后由上层直接进入 damping
+  bool DetectFall() {
     auto imu = message_handler_->GetLatestImu();
     if (!imu) {
       fall_stable_count_ = 0;
       return false;
     }
-    
-    // 应用 walking 模式的 IMU 安装偏差校正
-    Eigen::AngleAxisd rollAngle(walking_imu_install_bias_.x(), Eigen::Vector3d::UnitX());
-    Eigen::AngleAxisd pitchAngle(walking_imu_install_bias_.y(), Eigen::Vector3d::UnitY());
-    Eigen::AngleAxisd yawAngle(walking_imu_install_bias_.z(), Eigen::Vector3d::UnitZ());
+
+    Eigen::AngleAxisd rollAngle(imu_install_bias_.x(), Eigen::Vector3d::UnitX());
+    Eigen::AngleAxisd pitchAngle(imu_install_bias_.y(), Eigen::Vector3d::UnitY());
+    Eigen::AngleAxisd yawAngle(imu_install_bias_.z(), Eigen::Vector3d::UnitZ());
     Eigen::Quaterniond q_install = yawAngle * pitchAngle * rollAngle;
     Eigen::Matrix3d R_install = q_install.toRotationMatrix();
-    
-    Eigen::Matrix3d R_local = Eigen::Quaterniond(imu->quaternion.w, imu->quaternion.x, 
+
+    Eigen::Matrix3d R_local = Eigen::Quaterniond(imu->quaternion.w, imu->quaternion.x,
                                                  imu->quaternion.y, imu->quaternion.z).toRotationMatrix();
     Eigen::Matrix3d R_real = R_local * R_install.transpose();
-    
-    // 计算角速度（机体坐标系）
-    Eigen::Vector3d w_real = R_real.transpose() * R_local * 
+
+    Eigen::Vector3d w_real = R_real.transpose() * R_local *
         Eigen::Vector3d(imu->angular_velocity.x, imu->angular_velocity.y, imu->angular_velocity.z);
-    
-    // 计算重力投影
     Eigen::Vector3d projected_gravity = -R_real.transpose() * Eigen::Vector3d::UnitZ();
-    
-    // 缓存值供后续使用
-    w_real_cached_ = w_real;
-    projected_gravity_cached_ = projected_gravity;
-    
-    double gx = projected_gravity.x();
-    double gy = projected_gravity.y();
     const double gz = projected_gravity.z();
-    const double gxy = std::hypot(gx, gy);
-    
-    // 如果重力投影在 XY 平面的分量太小，说明机器人接近直立，方向不可靠
-    if (gxy < 1e-3) {
-      fall_stable_count_ = 0;
-      return false;
-    }
-    
-    // 8 方向分类，与 kFallDirectionBoundariesDeg 一致
-    double theta = std::atan2(gy, gx);  // [-π, π]
-    double angle_deg = theta * 180.0 / M_PI;
-    if (angle_deg < 0) angle_deg += 360.0;
-    int bin8 = AngleDegToFallBin8(angle_deg);
-    
-    // 计算倾斜角和 XY 平面角速度
+
     double tilt = std::acos(std::clamp(-gz, -1.0, 1.0));
     double omega_xy = std::hypot(w_real.x(), w_real.y());
-    
-    // 摔倒候选条件：倾斜角超阈值 或 角速度超阈值
+
     bool candidate = (tilt > fall_tilt_threshold_) || (omega_xy > fall_omega_threshold_);
-    
-    // 自适应确认帧数：快速摔倒时减少确认帧数
     int N_confirm = (omega_xy > fast_fall_omega_) ? fast_fall_confirm_frames_ : fall_confirm_frames_;
-    
-    // 防抖机制：需要连续 N 帧检测到相同方向
+
     if (candidate) {
-      if (bin8 == fall_last_bin_) {
-        fall_stable_count_++;
-      } else {
-        fall_last_bin_ = bin8;
-        fall_stable_count_ = 1;
-      }
+      fall_stable_count_++;
     } else {
       fall_stable_count_ = 0;
     }
-    
-    // 检测到摔倒
+
     if (fall_stable_count_ >= N_confirm) {
-      detected_direction = static_cast<MimicDirection>(bin8);
-      
-      RCLCPP_INFO(get_logger(), "Fall detected! Direction: %s (bin=%d, tilt=%.3f rad, omega_xy=%.3f rad/s)",
-                  kMimicDirectionNames[bin8].c_str(), bin8, tilt, omega_xy);
-      
-      fall_stable_count_ = 0;  // 避免重复触发
+      fall_stable_count_ = 0;
+      RCLCPP_INFO(get_logger(),
+                  "Fall detected -> damping (tilt=%.3f rad, omega_xy=%.3f rad/s)",
+                  tilt, omega_xy);
       return true;
     }
-    
     return false;
   }
 
@@ -1183,130 +576,55 @@ class RlBasicRunnerDAC : public rclcpp::Node {
     if (message_handler_->GetLatestMotionState()->current_motion_task != "joint_bridge") {
       time_ = 0.0;
       is_first_time_ = true;
-      is_walking_mode_ = true;
+      is_dance_mode_ = true;
       is_damping_mode_ = false;
-      walking_start_time_ = -1.0;
-      mujoco_reset_received_ = false;
       return;
     }
-    
+
     auto joint_state = message_handler_->GetLatestJointState();
     if (!joint_state) return;
 
-    // 仅当处于 damping 模式（mimic 轨迹已播完）且收到 reset 时，在本周期内恢复走路；
-    // mimic 播放期间不强制恢复，否则会每帧被拉回 walking 再触发摔倒，轨迹永远播不完、进不了 damping
-    if (mujoco_reset_received_ && !is_walking_mode_ && is_damping_mode_) {
-      is_walking_mode_ = true;
-      is_damping_mode_ = false;
-      global_phase_ = 0.0;
-      fall_stable_count_ = 0;
-      trajectory_index_ = 0;
-      mlp_net_ = mlp_net_walking_.get();
-      if (mimic_trajs_loaded_[static_cast<int>(MimicDirection::FORWARD)]) {
-        current_traj_ = &mimic_trajs_directions_[static_cast<int>(MimicDirection::FORWARD)];
+    // 舞蹈（基座）模式下：与 XZL 相同门控 time_ >= falling_detect_after_sec_ 后再检测摔倒 -> damping
+    if (enable_falling_switch_ && is_dance_mode_ && !is_damping_mode_ &&
+        time_ >= falling_detect_after_sec_ && DetectFall()) {
+      is_damping_mode_ = true;
+      if (mimic_stability_to_damping_enable_) {
+        stability_history_.clear();
+        stability_history_.resize(std::max(1, stability_history_length_), true);
       }
+      PublishPolicySwitch("dance", "damping", "");
     }
 
-    // 摔倒检测：在 walking 模式下，使用倾斜角+角速度+防抖机制检测摔倒
-    // 若配置了 test_force_fall_direction，则 reset 后先走 XZL，等 test_force_fall_delay 秒后强制切到该方向 mimic
-    // 否则等 fall_detection_delay_ 秒后才开始 DetectFall
-    double delay_for_switch = test_force_fall_direction_.empty() ? fall_detection_delay_ : test_force_fall_delay_;
-    if (is_walking_mode_ && mujoco_reset_received_ && (time_ - reset_time_) > delay_for_switch) {
-      bool do_switch_to_mimic = false;
-      MimicDirection fall_direction = MimicDirection::FORWARD;
-
-      if (!test_force_fall_direction_.empty() && !test_force_fall_triggered_) {
-        for (size_t i = 0; i < static_cast<size_t>(MimicDirection::COUNT); ++i) {
-          if (test_force_fall_direction_ == kMimicDirectionNames[i]) {
-            test_force_fall_triggered_ = true;
-            fall_direction = static_cast<MimicDirection>(i);
-            do_switch_to_mimic = true;
-            RCLCPP_INFO(get_logger(), "[test_force_fall] Forcing mimic direction: %s (no push, time=%.2f)",
-                        kMimicDirectionNames[i].c_str(), time_);
-            break;
-          }
-        }
-        if (!do_switch_to_mimic) {
-          RCLCPP_WARN(get_logger(), "test_force_fall_direction invalid: '%s', use e.g. left/forward/right",
-                      test_force_fall_direction_.c_str());
-        }
-      }
-      if (!do_switch_to_mimic && DetectFall(fall_direction)) {
-        do_switch_to_mimic = true;
-      }
-
-      if (do_switch_to_mimic) {
-        is_walking_mode_ = false;
-
-        // 根据检测到的摔倒方向选择 mimic Policy（进入 mimic 后不再切换方向）
-        current_mimic_direction_ = fall_direction;
-        int dir_idx = static_cast<int>(fall_direction);
-
-        if (mlp_net_mimic_directions_[dir_idx]) {
-          mlp_net_ = mlp_net_mimic_directions_[dir_idx].get();
-          RCLCPP_INFO(get_logger(), "Switching from walking to mimic mode at time: %.2f", time_);
-          RCLCPP_INFO(get_logger(), "Selected mimic direction: %s (gravity: [%.3f, %.3f, %.3f])",
-                      kMimicDirectionNames[dir_idx].c_str(),
-                      projected_gravity_cached_.x(), projected_gravity_cached_.y(), projected_gravity_cached_.z());
-        } else {
-          // 如果对应方向的 Policy 未加载，尝试找到任何可用的 Policy
-          for (size_t i = 0; i < static_cast<size_t>(MimicDirection::COUNT); ++i) {
-            if (mlp_net_mimic_directions_[i]) {
-              mlp_net_ = mlp_net_mimic_directions_[i].get();
-              current_mimic_direction_ = static_cast<MimicDirection>(i);
-              RCLCPP_WARN(get_logger(), "Policy for direction %s not available, using %s instead",
-                          kMimicDirectionNames[dir_idx].c_str(), kMimicDirectionNames[i].c_str());
-              break;
-            }
-          }
-        }
-
-        // 切换到对应方向的轨迹
-        SwitchToDirectionalTrajectory(current_mimic_direction_);
-
-        // 匹配 IMU 俯仰角度并设置 trajectory_index_（或 mimic_start_from_zero 时固定从第 0 帧开始）
-        if ((observation_type_ == "mimic_future" || IsMimicFlatObservation()) && current_traj_ != nullptr) {
-          if (mimic_start_from_zero_) {
-            trajectory_index_ = 0;
-            RCLCPP_INFO(get_logger(), "[mimic] 从第 0 帧开始 (mimic_start_from_zero=true, 轨迹总帧数=%ld)",
-                        static_cast<long>(current_traj_->rows()));
-          } else {
-            double mimic_pitch = GetCurrentPitchAngle();
-            size_t matched_idx = FindMatchingTrajectoryIndex(mimic_pitch);
-            trajectory_index_ = matched_idx;
-            RCLCPP_INFO(get_logger(), "[摔倒检测] mimic 选取第 %zu 帧 (pitch=%.4f rad, 轨迹总帧数=%ld)",
-                        trajectory_index_, mimic_pitch, static_cast<long>(current_traj_->rows()));
-          }
-        } else {
-          RCLCPP_WARN(get_logger(), "Cannot match pitch: observation_type=%s, current_traj_=%s",
-                      observation_type_.c_str(), current_traj_ ? "valid" : "null");
-          trajectory_index_ = 0;
-        }
-        // 若开启了 mimic 中不稳定切 damping，进入 mimic 时重置稳定性历史，避免刚切就触发
-        if (mimic_stability_to_damping_enable_) {
-          stability_history_.clear();
-          stability_history_.resize(std::max(1, stability_history_length_), true);
-        }
-        PublishPolicySwitch("walking", "mimic", kMimicDirectionNames[static_cast<int>(current_mimic_direction_)]);
-      }
-    }
-
-    // mimic 播放过程中：若开启稳定性检测且检测到不稳定，提前切到 damping
-    if (!is_walking_mode_ && !is_damping_mode_ && mimic_stability_to_damping_enable_) {
+    // 舞蹈播放中：可选稳定性检测 -> 提前 damping（同一延迟，避免 reset/起步瞬态）
+    if (is_dance_mode_ && !is_damping_mode_ && mimic_stability_to_damping_enable_ &&
+        time_ >= falling_detect_after_sec_) {
       if (!CheckMimicStability()) {
         is_damping_mode_ = true;
-        mujoco_reset_received_ = false;
-        RCLCPP_INFO(get_logger(), "[mimic] 检测到不稳定，提前进入 damping mode (time=%.2f)", time_);
-        PublishPolicySwitch("mimic", "damping", kMimicDirectionNames[static_cast<int>(current_mimic_direction_)]);
+        RCLCPP_INFO(get_logger(), "[dance] 不稳定，提前进入 damping (time=%.2f)", time_);
+        PublishPolicySwitch("dance", "damping", "");
       }
     }
-    
-    // 进入 mimic 后不根据重力再切换方向，保持摔倒检测/测试选定的方向直至播完或 damping
 
     UpdateState(joint_state);
-    if (is_walking_mode_) {
-      CalculateObservationWalking();
-    } else {
+
+    // 每次 MuJoCo reset / 离开再进 joint_bridge 后首帧：用当前真机关节位姿作为 transition 起点，
+    // 避免仍用启动时 initial_joint_q_ 做插值，导致 reset 后策略被拉向错误姿态、跟踪崩坏。
+    if (is_first_time_) {
+      if (q_real_.size() == initial_joint_q_.size()) {
+        initial_joint_q_ = q_real_;
+        RCLCPP_DEBUG(get_logger(), "DAC: resampled initial_joint_q_ from current state (size=%zu)", q_real_.size());
+      } else {
+        RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 2000,
+                             "DAC: skip initial_joint_q_ resample, DOF mismatch q_real=%zu vs initial=%zu",
+                             q_real_.size(), initial_joint_q_.size());
+      }
+      if (mlp_net_action_.size() > 0) {
+        mlp_net_action_.setZero();
+      }
+      is_first_time_ = false;
+    }
+
+    if (!is_damping_mode_) {
       CalculateObservation();
     }
     CalculateMotorCommand();
@@ -1328,7 +646,7 @@ class RlBasicRunnerDAC : public rclcpp::Node {
       qd_real_ = qd_real_.cwiseProduct(qd_mask_);
     }
 
-    if (!is_walking_mode_ && observation_type_ != "mimic_future") {
+    if (is_dance_mode_ && !is_damping_mode_ && observation_type_ != "mimic_future") {
       auto gamepad = message_handler_->GetLatestGamepad();
       if (gamepad) {
         command_.x() = gamepad->analog_states[interface_protocol::msg::GamepadKeys::LEFT_STICK_X] * command_scale_vec_.x();
@@ -1349,48 +667,6 @@ class RlBasicRunnerDAC : public rclcpp::Node {
     }
   }
   
-  void CalculateObservationWalking() {
-    global_phase_ += control_dt_ / cycle_time_;
-    global_phase_ -= static_cast<int>(global_phase_);
-
-    auto imu = message_handler_->GetLatestImu();
-    if (!imu) return;
-    
-    Eigen::AngleAxisd rollAngle(walking_imu_install_bias_.x(), Eigen::Vector3d::UnitX());
-    Eigen::AngleAxisd pitchAngle(walking_imu_install_bias_.y(), Eigen::Vector3d::UnitY());
-    Eigen::AngleAxisd yawAngle(walking_imu_install_bias_.z(), Eigen::Vector3d::UnitZ());
-    Eigen::Quaterniond q_install = yawAngle * pitchAngle * rollAngle;
-    Eigen::Matrix3d R_install = q_install.toRotationMatrix();
-    Eigen::Matrix3d R_local = Eigen::Quaterniond(imu->quaternion.w, imu->quaternion.x, 
-                                                 imu->quaternion.y, imu->quaternion.z).toRotationMatrix();
-    Eigen::Matrix3d R_real = R_local * R_install.transpose();
-    Eigen::Vector3d w_real = R_real.transpose() * R_local * 
-        Eigen::Vector3d(imu->angular_velocity.x, imu->angular_velocity.y, imu->angular_velocity.z);
-    Eigen::Vector3d projected_gravity_real = -R_real.transpose() * Eigen::Vector3d::UnitZ();
-
-    Eigen::VectorXd mlp_net_observation_single = Eigen::VectorXd::Zero(walking_num_observations_);
-    mlp_net_observation_single <<
-        (q_real_ - walking_default_joint_q_)(walking_active_joint_idx_),
-        qd_real_(walking_active_joint_idx_),
-        mlp_net_action_walking_,
-        w_real,
-        projected_gravity_real;
-
-    mlp_net_observation_single.array() *= walking_observation_scale_.array();
-    mlp_net_observation_single = mlp_net_observation_single.cwiseMax(-walking_observation_clip_).cwiseMin(walking_observation_clip_);
-
-    if (is_first_time_) {
-      is_first_time_ = false;
-      mlp_net_observation_walking_.setZero(walking_num_observations_, walking_num_include_obs_steps_);
-      mlp_net_action_walking_.setZero(walking_num_actions_);
-      mlp_net_observation_walking_.colwise() = mlp_net_observation_single;
-    } else {
-      mlp_net_observation_walking_.leftCols(walking_num_include_obs_steps_ - 1) =
-          mlp_net_observation_walking_.rightCols(walking_num_include_obs_steps_ - 1);
-      mlp_net_observation_walking_.rightCols(1) = mlp_net_observation_single;
-    }
-  }
-
   Eigen::VectorXd ComputeMotionAnchorOriObservation(const Eigen::Matrix3d& R_real) {
     const int num_joints = static_cast<int>(active_joint_names_.size());
     Eigen::VectorXd motion_anchor_ori = Eigen::VectorXd::Zero(6);
@@ -1491,12 +767,11 @@ class RlBasicRunnerDAC : public rclcpp::Node {
       if (trajectory_index_ < end) {
         trajectory_index_++;
       } else if (!is_damping_mode_ && trajectory_index_ >= end) {
-        // 轨迹播放完成，进入 damping mode；清除 reset 标志，避免本周期内误判为“刚收到 reset”而恢复走路
+        // 轨迹播放完成，进入 damping mode
         is_damping_mode_ = true;
-        mujoco_reset_received_ = false;
         RCLCPP_INFO(get_logger(), "[mimic] 轨迹播放完成（第 %zu 帧），进入 damping mode (time=%.2f)",
                     trajectory_index_, time_);
-        PublishPolicySwitch("mimic", "damping", kMimicDirectionNames[static_cast<int>(current_mimic_direction_)]);
+        PublishPolicySwitch("dance", "damping", "");
       }
     }
   }
@@ -1511,46 +786,7 @@ class RlBasicRunnerDAC : public rclcpp::Node {
     }
     
     Eigen::VectorXd obs;
-    
-    if (is_walking_mode_) {
-      obs = Eigen::VectorXd::Zero(walking_num_observations_ * walking_num_include_obs_steps_ + 3);
-      obs.head(walking_num_observations_ * walking_num_include_obs_steps_) =
-          Eigen::Map<Eigen::VectorXd>(mlp_net_observation_walking_.transpose().data(), mlp_net_observation_walking_.size());
-      
-      if (config_walking_["initial_velocity"]) {
-        auto init_vel = config_walking_["initial_velocity"];
-        if (init_vel["linear"]) {
-          auto linear = init_vel["linear"];
-          command_.x() = linear[0].as<double>();
-          command_.y() = linear[1].as<double>();
-          command_.z() = linear[2].as<double>();
-        }
-      }
-      obs.tail(3) = command_.cwiseProduct(walking_command_scale_);
-      
-      if (!mlp_net_) {
-        RCLCPP_ERROR(get_logger(), "MNN model not initialized");
-        return;
-      }
-      
-      try {
-        mlp_net_action_walking_ = (mlp_net_->Inference(obs.cast<float>())).cast<double>();
-      } catch (const std::exception& e) {
-        RCLCPP_ERROR(get_logger(), "MNN inference failed: %s", e.what());
-        return;
-      }
-      mlp_net_action_walking_ = mlp_net_action_walking_.cwiseMax(-walking_action_clip_).cwiseMin(walking_action_clip_);
 
-      q_des_ = walking_default_joint_q_;
-      q_des_(walking_active_joint_idx_) += mlp_net_action_walking_.cwiseProduct(walking_action_scale_);
-      
-      if (time_ < walking_transition_time_) {
-        double ratio = time_ / walking_transition_time_;
-        q_des_ = ratio * q_des_ + (1.0 - ratio) * initial_joint_q_;
-      }
-      return;
-    }
-    
     if (IsMimicFlatObservation()) {
       const int num_joints = static_cast<int>(active_joint_names_.size());
       const int command_dim = 2 * num_joints;
@@ -1823,10 +1059,12 @@ class RlBasicRunnerDAC : public rclcpp::Node {
     // 与 rl_dance 一致：q_des = default_joint_q + mlp_net_action * action_scale
     q_des_ = default_joint_q_ + mlp_net_action_.cwiseProduct(action_scale_);
     
-    // Transition interpolation (与 rl_dance 一致)
-    if (time_ < transition_time_) {
+    // Transition interpolation（与 rl_dance 一致）；transition_time<=0 时跳过，避免除零
+    if (transition_time_ > 1e-9 && time_ < transition_time_) {
       double ratio = std::min(1.0, time_ / transition_time_);
-      q_des_ = ratio * q_des_ + (1.0 - ratio) * initial_joint_q_;
+      if (initial_joint_q_.size() == q_des_.size()) {
+        q_des_ = ratio * q_des_ + (1.0 - ratio) * initial_joint_q_;
+      }
     }
   }
 
@@ -1837,9 +1075,6 @@ class RlBasicRunnerDAC : public rclcpp::Node {
       // Damping mode: kp=0, kd=0.5
       joint_kp = Eigen::VectorXd::Zero(joint_kd_.size());
       joint_kd = Eigen::VectorXd::Constant(joint_kd_.size(), 0.5);
-    } else if (is_walking_mode_) {
-      joint_kp = walking_joint_kp_;
-      joint_kd = walking_joint_kd_;
     } else {
       joint_kp = joint_kp_;
       joint_kd = joint_kd_;
@@ -1958,9 +1193,6 @@ class RlBasicRunnerDAC : public rclcpp::Node {
       } else {
         joint_command_->damping = std::vector<double>(n, 0.5);
       }
-    } else if (is_walking_mode_) {
-      joint_command_->stiffness = std::vector<double>(walking_joint_kp_.data(), walking_joint_kp_.data() + walking_joint_kp_.size());
-      joint_command_->damping = std::vector<double>(walking_joint_kd_.data(), walking_joint_kd_.data() + walking_joint_kd_.size());
     } else {
       joint_command_->stiffness = std::vector<double>(joint_kp_.data(), joint_kp_.data() + joint_kp_.size());
       joint_command_->damping = std::vector<double>(joint_kd_.data(), joint_kd_.data() + joint_kd_.size());
@@ -1996,13 +1228,10 @@ class RlBasicRunnerDAC : public rclcpp::Node {
   // Message handling
   std::shared_ptr<MessageHandler> message_handler_;
 
-  // MNN model
-  std::unique_ptr<math::MnnModel> mlp_net_walking_;
-  std::array<std::unique_ptr<math::MnnModel>, 8> mlp_net_mimic_directions_;  // 8个方向的 mimic Policy
+  // MNN：单一舞蹈（基座）策略
+  std::unique_ptr<math::MnnModel> mlp_net_dance_;
   math::MnnModel* mlp_net_;
-  MimicDirection current_mimic_direction_ = MimicDirection::FORWARD;  // 当前选择的 mimic 方向
   Eigen::MatrixXd mlp_net_observation_;
-  Eigen::MatrixXd mlp_net_observation_walking_;
   Eigen::VectorXd mlp_net_action_;
 
   // ObservationManager 暂时不使用（需要 RlDanceParam）
@@ -2012,8 +1241,6 @@ class RlBasicRunnerDAC : public rclcpp::Node {
   Eigen::MatrixXd* current_traj_base_vel_ = nullptr;  // 基座速度轨迹 (N × 3: vx, vy, wz)
   std::map<std::string, Eigen::MatrixXd> interpolated_trajs_;
   std::map<std::string, Eigen::MatrixXd> interpolated_base_vel_trajs_;  // 基座速度轨迹
-  std::array<Eigen::MatrixXd, 8> mimic_trajs_directions_;  // 8个方向的轨迹
-  std::array<bool, 8> mimic_trajs_loaded_ = {false};  // 轨迹是否已加载
   size_t trajectory_index_ = 0;  // 当前轨迹索引
   double last_command_frame_print_time_ = -1.0;  // 上次打印 command 帧的时间（节流用）
   
@@ -2036,18 +1263,11 @@ class RlBasicRunnerDAC : public rclcpp::Node {
   double time_;
   double global_phase_;
   bool is_first_time_;
-  bool is_walking_mode_;
-  bool is_damping_mode_ = false;  // damping 模式：mimic 播放完后进入
-  double walking_duration_;
-  double walking_start_time_;
-  bool mujoco_reset_received_;
+  bool is_dance_mode_ = true;   // 基座：舞蹈策略运行中
+  bool is_damping_mode_ = false;  // damping：被动阻尼（摔倒或轨迹结束）
   Eigen::Vector3d command_;
-  
-  // Fall detection state (cached from CalculateObservation for reuse)
-  Eigen::Vector3d w_real_cached_;           // 缓存的角速度（机体坐标系）
-  Eigen::Vector3d projected_gravity_cached_; // 缓存的重力投影
-  int fall_last_bin_ = 0;                   // 上一帧的方向 bin
-  int fall_stable_count_ = 0;               // 连续稳定帧计数
+
+  int fall_stable_count_ = 0;               // 摔倒检测连续帧计数
   
   // Fall detection parameters
   double fall_tilt_threshold_ = 0.5;        // 倾斜角阈值 (rad)
@@ -2056,15 +1276,11 @@ class RlBasicRunnerDAC : public rclcpp::Node {
   int fall_confirm_frames_ = 8;             // 确认帧数
   double fast_fall_omega_ = 2.5;            // 快速摔倒角速度阈值 (rad/s)
   int fast_fall_confirm_frames_ = 2;        // 快速摔倒确认帧数
-  double fall_detection_delay_ = 1.0;       // Reset 后摔倒检测延迟时间 (秒)
-  double reset_time_ = -100.0;              // 上次 reset 时间
+  // 与 XZL：enable_falling_switch / falling_detect_after_sec
+  bool enable_falling_switch_ = true;
+  double falling_detect_after_sec_ = 5.0;
 
-  // 测试用：reset 后先走 XZL，等 test_force_fall_delay 秒后强制切到该方向 mimic（如 "left"）
-  std::string test_force_fall_direction_;
-  double test_force_fall_delay_ = 3.0;      // 秒，仅当 test_force_fall_direction_ 非空时有效
-  bool test_force_fall_triggered_ = false;  // 每次 reset 后只强制触发一次
-
-  // 稳定性检测（mimic 中不稳定则提前切 damping，可选）
+  // 稳定性检测（舞蹈播放中不稳定则提前切 damping，可选）
   bool mimic_stability_to_damping_enable_ = false;
   double ang_vel_threshold_ = 0.4;
   double gravity_dev_threshold_ = 0.15;
@@ -2083,24 +1299,6 @@ class RlBasicRunnerDAC : public rclcpp::Node {
     policy_switch_pub_->publish(msg);
   }
   
-  // Walking mode parameters
-  YAML::Node config_walking_;
-  std::string walking_policy_file_;
-  int walking_num_observations_;
-  int walking_num_include_obs_steps_;
-  int walking_num_actions_;
-  Eigen::VectorXi walking_active_joint_idx_;
-  Eigen::VectorXd walking_observation_scale_;
-  Eigen::Vector3d walking_command_scale_;
-  Eigen::VectorXd walking_action_scale_;
-  Eigen::VectorXd walking_default_joint_q_;
-  double walking_action_clip_;
-  double walking_observation_clip_;
-  double walking_transition_time_;
-  Eigen::Vector3d walking_imu_install_bias_;
-  Eigen::VectorXd walking_joint_kp_;   // walking 模式的 kp（从 XZL 配置加载）
-  Eigen::VectorXd walking_joint_kd_;   // walking 模式的 kd（从 XZL 配置加载）
-  Eigen::VectorXd mlp_net_action_walking_;
   Eigen::VectorXd q_real_;
   Eigen::VectorXd qd_real_;
   Eigen::VectorXd q_des_;
@@ -2109,7 +1307,7 @@ class RlBasicRunnerDAC : public rclcpp::Node {
   Eigen::VectorXd default_joint_q_;
   Eigen::VectorXd joint_kp_;
   Eigen::VectorXd joint_kd_;
-  bool mimic_start_from_zero_ = false;  // true 时进入 mimic 从第 0 帧开始，不按俯仰匹配
+  bool mimic_start_from_zero_ = false;  // 已从 YAML 加载；俯仰匹配已移除，此项暂无效果（保留兼容）
   Eigen::VectorXd action_scale_;
   Eigen::VectorXd action_scale85_;  // 用于特定 profile（如 dance_2）
   Eigen::VectorXd qd_mask_;  // 速度掩码（与 rl_dance 一致）

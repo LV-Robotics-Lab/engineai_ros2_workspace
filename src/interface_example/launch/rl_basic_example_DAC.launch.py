@@ -10,7 +10,7 @@ def generate_launch_description():
 
     # Get product from environment variable or use default 'pm01'
     product = os.environ.get('PRODUCT', 'pm01')
-    
+
     # Build config file path using os.path.join - use DAC config
     config_dir = os.path.join(package_dir, 'config',
                               product, 'rl_basic', 'basic')
@@ -18,7 +18,7 @@ def generate_launch_description():
     # Ensure config directory exists
     if not os.path.exists(config_dir):
         raise FileNotFoundError(f"Config directory not found: {config_dir}")
-    
+
     # Check if DAC config file exists
     dac_config_file = os.path.join(config_dir, 'rl_basic_param_DAC.yaml')
     if not os.path.exists(dac_config_file):
