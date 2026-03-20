@@ -568,7 +568,7 @@ ros2 launch launch_urdf_only.launch.py urdf_file:=/home/wang22/engineai/engineai
 ```bash
 # 只需指定一个文件夹，自动查找 contact_data.csv、sensor_vibration_data.csv 等
 python3 scripts/calculate_fall_risk.py \
-  --log-dir /home/wang22/data/mujoco_logs/20260317_154910 \
+  --log-dir /home/wang22/data/mujoco_logs/only_active_push_1600/8dir-200.0N-0.4s-20260317_235134/backward-200.0N-53/20260318_000129 \
   --plot \
   --t-start 3.0 --t-end 5.0
 # 输出默认保存到同目录 risk_results_summary.csv 等

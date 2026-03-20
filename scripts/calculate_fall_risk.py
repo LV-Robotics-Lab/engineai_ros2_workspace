@@ -1880,8 +1880,10 @@ def plot_link_energy_curves(energy_df: pd.DataFrame, output_path: Optional[str] 
                 df_b = contact_df.loc[mask].groupby('timestamp')['force_magnitude'].max().reset_index()
                 per_body_contact[body_name] = df_b
     
-    # 预计算每个 body 的速度平方和（用于速度二范数）
-    body_speed_sq = {}  # body_name -> array(vx^2 + vy^2 + vz^2)
+    # 预计算每个 body 的速度范数（只使用平动速度 vx/vy/vz）
+    # 注：speed_norm = sqrt(vx^2 + vy^2 + vz^2)
+    body_speed_sq = {}      # body_name -> array(vx^2 + vy^2 + vz^2)
+    body_speed_norm = {}    # body_name -> array(||v||)
     for body_name in body_names:
         vel_x_col = f'{body_name}_vel_x'
         vel_y_col = f'{body_name}_vel_y'
@@ -1891,13 +1893,13 @@ def plot_link_energy_curves(energy_df: pd.DataFrame, output_path: Optional[str] 
             vel_y = energy_df[vel_y_col].values
             vel_z = energy_df[vel_z_col].values
             body_speed_sq[body_name] = vel_x**2 + vel_y**2 + vel_z**2
+            body_speed_norm[body_name] = np.sqrt(body_speed_sq[body_name])
 
     # 计算每组的能量（KE 和 PE）
     # 优先使用 linear_KE、angular_KE、PE 列，如果不存在则用 v^2 近似
     group_linear_ke = {}   # group_name -> array of linear KE for each timestamp
     group_angular_ke = {}  # group_name -> array of angular KE for each timestamp
     group_pe = {}          # group_name -> array of PE for each timestamp
-    group_speed_norm = {}  # group_name -> array of ||v||_2 for each timestamp
     use_real_energy = False    # 是否使用真正的能量列
     
     # 检查是否有能量列
@@ -1914,10 +1916,7 @@ def plot_link_energy_curves(energy_df: pd.DataFrame, output_path: Optional[str] 
         linear_ke_sum = np.zeros(len(energy_df))
         angular_ke_sum = np.zeros(len(energy_df))
         pe_sum = np.zeros(len(energy_df))
-        speed_sq_sum = np.zeros(len(energy_df))
         for body_name in group_bodies[group]:
-            if body_name in body_speed_sq:
-                speed_sq_sum += body_speed_sq[body_name]
             if use_real_energy:
                 # 使用真正的能量列
                 linear_ke_col = f'{body_name}_linear_KE'
@@ -1942,12 +1941,6 @@ def plot_link_energy_curves(energy_df: pd.DataFrame, output_path: Optional[str] 
         group_linear_ke[group] = linear_ke_sum
         group_angular_ke[group] = angular_ke_sum
         group_pe[group] = pe_sum
-        group_speed_norm[group] = np.sqrt(speed_sq_sum)
-
-    total_speed_sq = np.zeros(len(energy_df))
-    for speed_sq in body_speed_sq.values():
-        total_speed_sq += speed_sq
-    total_speed_norm = np.sqrt(total_speed_sq)
     
     # 创建子图：len(groups) 个分组图 + 1个总能量图（总图放最后以便显示 Time 坐标轴）
     n_groups = len(groups)
@@ -1967,9 +1960,18 @@ def plot_link_energy_curves(energy_df: pd.DataFrame, output_path: Optional[str] 
         'Other': '#95A5A6',     # 灰色
     }
     
-    # 相对时间（从 0 开始），供所有子图统一 x 轴
-    t_rel = timestamps - t0
-    x_max_rel = (max_t - t0) + x_margin
+    # x 轴：
+    # - 未指定截取区间时：使用相对时间（从 0 开始）
+    # - 指定了 t_start/t_end 时：使用原始时间戳，保证横坐标从截取的 start 开始
+    use_absolute_time = (t_start is not None) and (t_end is not None)
+    if use_absolute_time:
+        t_disp = timestamps
+        x_min_disp = min_t
+        x_max_disp = max_t + x_margin
+    else:
+        t_disp = timestamps - t0
+        x_min_disp = 0.0
+        x_max_disp = (max_t - t0) + x_margin
 
     # ===== 子图 1~N：各分组 PE（求和）+ contact force（各 body 各自一条曲线）=====
     _tab10 = matplotlib.colormaps['tab10']
@@ -1979,29 +1981,44 @@ def plot_link_energy_curves(energy_df: pd.DataFrame, output_path: Optional[str] 
         color = colors.get(group, '#333333')
         pe = group_pe[group]
         # 左 Y：该组 PE 求和
-        ax.plot(t_rel, pe, color='#1ABC9C', linewidth=1.5, label=f'PE (sum)', linestyle='-')
+        ax.plot(t_disp, pe, color='#1ABC9C', linewidth=1.5, label=f'PE (sum)', linestyle='-')
         ax.set_ylabel('PE (J)', fontsize=11, color='#1ABC9C')
         ax.tick_params(axis='y', labelcolor='#1ABC9C')
-        ax.set_xlim(0, x_max_rel)
+        ax.set_xlim(x_min_disp, x_max_disp)
         ax.grid(True, alpha=0.3)
-        # 左 Y（外侧）：该组速度二范数
+        # 左 Y（外侧）：该组内每个 body 的速度范数 ||v||
         ax_speed = ax.twinx()
         ax_speed.spines['left'].set_position(('outward', 55))
         ax_speed.spines['left'].set_visible(True)
         ax_speed.spines['right'].set_visible(False)
         ax_speed.yaxis.set_label_position('left')
         ax_speed.yaxis.tick_left()
-        ax_speed.plot(t_rel, group_speed_norm[group], color='#8E44AD', linewidth=1.3, linestyle='--', label='||v||_2')
         ax_speed.set_ylabel('Speed norm (m/s)', fontsize=10, color='#8E44AD')
         ax_speed.tick_params(axis='y', labelcolor='#8E44AD')
         # 右 Y：该组内每个 body 的 contact force 各自一条曲线（不求和）
         ax2 = ax.twinx()
         bodies_in_group = group_bodies[group]
         for j, body_name in enumerate(bodies_in_group):
+            if body_name not in body_speed_norm:
+                continue
+            if _tab10_rgba is not None:
+                line_color = _tab10_rgba[j % len(_tab10_rgba)]
+            else:
+                line_color = _tab10(j % 10 / 9.0)
+            ax_speed.plot(
+                t_disp,
+                body_speed_norm[body_name],
+                color=line_color,
+                linewidth=1.1,
+                linestyle='--',
+                label=f'{body_name} ||v||',
+                alpha=0.85,
+            )
+        for j, body_name in enumerate(bodies_in_group):
             if body_name not in per_body_contact:
                 continue
             df_b = per_body_contact[body_name]
-            t_rel_b = df_b['timestamp'].values - t0
+            t_rel_b = df_b['timestamp'].values if use_absolute_time else (df_b['timestamp'].values - t0)
             if _tab10_rgba is not None:
                 line_color = _tab10_rgba[j % len(_tab10_rgba)]
             else:
@@ -2018,9 +2035,9 @@ def plot_link_energy_curves(energy_df: pd.DataFrame, output_path: Optional[str] 
     
     # ===== 最后一个子图：Total PE + Contact force，从 0 时刻开始，带 Time 坐标轴 =====
     ax_total = axes[n_groups]
-    t_rel_energy = timestamps - t0
+    t_rel_energy = timestamps if use_absolute_time else (timestamps - t0)
     ax_total.plot(t_rel_energy, energy_df['total_PE'], 'b-', label='Total PE', linewidth=1.5)
-    ax_total.set_xlim(0, x_max_rel)
+    ax_total.set_xlim(x_min_disp, x_max_disp)
     ax_total.set_ylabel('Total PE (J)', fontsize=11, color='b')
     ax_total.tick_params(axis='y', labelcolor='b')
     ax_total_speed = ax_total.twinx()
@@ -2029,11 +2046,30 @@ def plot_link_energy_curves(energy_df: pd.DataFrame, output_path: Optional[str] 
     ax_total_speed.spines['right'].set_visible(False)
     ax_total_speed.yaxis.set_label_position('left')
     ax_total_speed.yaxis.tick_left()
-    ax_total_speed.plot(t_rel_energy, total_speed_norm, color='#8E44AD', linewidth=1.3, linestyle='--', label='Total ||v||_2')
     ax_total_speed.set_ylabel('Speed norm (m/s)', fontsize=10, color='#8E44AD')
     ax_total_speed.tick_params(axis='y', labelcolor='#8E44AD')
+    # 方法1：在 Total 子图里画每个 body 的速度范数曲线（避免再出现组/总聚合的 ||v||_2）
+    shown_speed_label = False
+    for j, body_name in enumerate(body_names):
+        if body_name not in body_speed_norm:
+            continue
+        if _tab10_rgba is not None:
+            line_color = _tab10_rgba[j % len(_tab10_rgba)]
+        else:
+            line_color = _tab10(j % 10 / 9.0)
+        lbl = 'Speed norm ||v|| (per body)' if not shown_speed_label else '_nolegend_'
+        shown_speed_label = True
+        ax_total_speed.plot(
+            t_rel_energy,
+            body_speed_norm[body_name],
+            color=line_color,
+            linewidth=1.0,
+            linestyle='--',
+            label=lbl,
+            alpha=0.75,
+        )
     if contact_by_time is not None:
-        t_rel_contact = contact_by_time['timestamp'].values - t0
+        t_rel_contact = contact_by_time['timestamp'].values if use_absolute_time else (contact_by_time['timestamp'].values - t0)
         ax_force = ax_total.twinx()
         ax_force.plot(t_rel_contact, contact_by_time['max_contact_force'].values, 'r-', label='Contact force (max per frame)', linewidth=1.5)
         ax_force.set_ylabel('Contact force (N)', fontsize=11, color='r')

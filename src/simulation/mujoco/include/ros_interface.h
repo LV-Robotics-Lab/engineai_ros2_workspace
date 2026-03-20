@@ -166,6 +166,8 @@ class RosInterface {
   std::string policy_switch_csv_file_path_;
   std::ofstream policy_switch_csv_file_;
   std::mutex policy_switch_csv_mutex_;
+  // CSV 模式下：由于需要用到 m->nbody 生成展开列表头，这个表头会在第一次写入时延迟生成
+  bool policy_switch_csv_header_written_ = false;
   struct PendingPolicySwitch {
     std::string from_mode;
     std::string to_mode;

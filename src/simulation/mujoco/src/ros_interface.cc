@@ -390,8 +390,8 @@ bool RosInterface::Initialize() {
     } else {
       policy_switch_csv_file_.open(policy_switch_csv_file_path_, std::ios::out);
       if (policy_switch_csv_file_.is_open()) {
-        policy_switch_csv_file_ << "timestamp,from_mode,to_mode,mimic_direction\n";
-        policy_switch_csv_file_.flush();
+        // 表头延迟生成：需要 m->nbody 才能展开成每个 body 的独立列
+        policy_switch_csv_header_written_ = false;
       }
     }
     if (policy_switch_csv_file_.is_open()) {
@@ -644,6 +644,12 @@ void RosInterface::PrepareNewExperiment(const std::string& csv_dir) {
                  save_policy_switch_csv_;
   if (!any_csv) return;
 
+  // 切换实验目录时，清空尚未写入的 policy switch 事件，避免串到下一段记录里
+  {
+    std::lock_guard<std::mutex> lock(policy_switch_csv_mutex_);
+    pending_policy_switch_ = PendingPolicySwitch{};
+  }
+
   // 更新推力方向（若脚本已发布）
   if (next_direction_angle_.has_value()) {
     config_loader_->SetAutoDirectionAngle(*next_direction_angle_);
@@ -875,8 +881,8 @@ void RosInterface::OpenCsvFilesAtDir(const std::string& csv_dir) {
     } else {
       policy_switch_csv_file_.open(policy_switch_csv_file_path_, std::ios::out);
       if (policy_switch_csv_file_.is_open()) {
-        policy_switch_csv_file_ << "timestamp,from_mode,to_mode,mimic_direction\n";
-        policy_switch_csv_file_.flush();
+        // 表头延迟生成：需要 m->nbody 才能展开成每个 body 的独立列
+        policy_switch_csv_header_written_ = false;
       }
     }
   }
@@ -944,7 +950,8 @@ void RosInterface::UpdateSimState(const mjModel* m, mjData* d) {
   last_sim_time_ = d->time;
 
   // 写入待处理的 policy 切换事件（使用当前 sim time 作为 timestamp）
-  if (save_policy_switch_csv_ && pending_policy_switch_.has_data && policy_switch_csv_file_.is_open()) {
+  // 与 contact/joint_forces 的对齐要求：只有当 all_csv_enabled 时才写入，避免记录窗口未开启时写入导致时间戳错位。
+  if (save_policy_switch_csv_ && pending_policy_switch_.has_data && policy_switch_csv_file_.is_open() && all_csv_enabled) {
     std::lock_guard<std::mutex> lock(policy_switch_csv_mutex_);
     if (pending_policy_switch_.has_data) {
       if (csv_format_ == "binary") {
@@ -961,10 +968,89 @@ void RosInterface::UpdateSimState(const mjModel* m, mjData* d) {
         write_str(pending_policy_switch_.to_mode);
         write_str(pending_policy_switch_.mimic_direction);
       } else {
+        // CSV 展开列写入：每个标量占用一个独立列，避免后续从“数组字符串”解析成数字。
+        bool floating_base = (m->nv != m->nu);
+
+        auto to_finite = [&](double x) -> double { return std::isfinite(x) ? x : 0.0; };
+
+        // 第一次写入时，根据当前 model 的 num_total_joints_ / m->nbody 生成完整表头
+        if (!policy_switch_csv_header_written_) {
+          policy_switch_csv_file_ << "timestamp,from_mode,to_mode,mimic_direction";
+
+          for (int j = 0; j < num_total_joints_; ++j) {
+            policy_switch_csv_file_ << ",joint_pos_" << j;
+            policy_switch_csv_file_ << ",joint_vel_" << j;
+          }
+
+          for (int bi = 0; bi < m->nbody; ++bi) {
+            policy_switch_csv_file_ << ",body_pos_w_" << bi << "_x";
+            policy_switch_csv_file_ << ",body_pos_w_" << bi << "_y";
+            policy_switch_csv_file_ << ",body_pos_w_" << bi << "_z";
+
+            // wxyz
+            policy_switch_csv_file_ << ",body_quat_w_" << bi << "_w";
+            policy_switch_csv_file_ << ",body_quat_w_" << bi << "_x";
+            policy_switch_csv_file_ << ",body_quat_w_" << bi << "_y";
+            policy_switch_csv_file_ << ",body_quat_w_" << bi << "_z";
+
+            policy_switch_csv_file_ << ",body_lin_vel_w_" << bi << "_x";
+            policy_switch_csv_file_ << ",body_lin_vel_w_" << bi << "_y";
+            policy_switch_csv_file_ << ",body_lin_vel_w_" << bi << "_z";
+
+            policy_switch_csv_file_ << ",body_ang_vel_w_" << bi << "_x";
+            policy_switch_csv_file_ << ",body_ang_vel_w_" << bi << "_y";
+            policy_switch_csv_file_ << ",body_ang_vel_w_" << bi << "_z";
+          }
+
+          policy_switch_csv_file_ << "\n";
+          policy_switch_csv_file_.flush();
+          policy_switch_csv_header_written_ = true;
+        }
+
+        // 写入一行：字符串列用引号包裹，其余为数值列
         policy_switch_csv_file_ << std::fixed << std::setprecision(6) << d->time << ","
                                 << "\"" << pending_policy_switch_.from_mode << "\","
                                 << "\"" << pending_policy_switch_.to_mode << "\","
-                                << "\"" << pending_policy_switch_.mimic_direction << "\"\n";
+                                << "\"" << pending_policy_switch_.mimic_direction << "\"";
+
+        // joints: qpos/qvel
+        for (int j = 0; j < num_total_joints_; ++j) {
+          const double q = floating_base ? d->qpos[j + kNumFloatingBaseJoints] : d->qpos[j];
+          const double qd = floating_base ? d->qvel[j + kDofFloatingBase] : d->qvel[j];
+          policy_switch_csv_file_ << "," << to_finite(q) << "," << to_finite(qd);
+        }
+
+        // bodies: x/y/z, quat(wxyz), world lin/ang vel from d->cvel = [angvel_x,y,z, vel_x,y,z]
+        for (int bi = 0; bi < m->nbody; ++bi) {
+          const int p = bi * 3;
+          const int q = bi * 4;
+          const int v = bi * 6;
+
+          policy_switch_csv_file_ << ","
+                                    << to_finite(d->xpos[p + 0]) << ","
+                                    << to_finite(d->xpos[p + 1]) << ","
+                                    << to_finite(d->xpos[p + 2]);
+
+          policy_switch_csv_file_ << ","
+                                    << to_finite(d->xquat[q + 0]) << ","
+                                    << to_finite(d->xquat[q + 1]) << ","
+                                    << to_finite(d->xquat[q + 2]) << ","
+                                    << to_finite(d->xquat[q + 3]);
+
+          // lin vel
+          policy_switch_csv_file_ << ","
+                                    << to_finite(d->cvel[v + 3]) << ","
+                                    << to_finite(d->cvel[v + 4]) << ","
+                                    << to_finite(d->cvel[v + 5]);
+
+          // ang vel
+          policy_switch_csv_file_ << ","
+                                    << to_finite(d->cvel[v + 0]) << ","
+                                    << to_finite(d->cvel[v + 1]) << ","
+                                    << to_finite(d->cvel[v + 2]);
+        }
+
+        policy_switch_csv_file_ << "\n";
       }
       policy_switch_csv_file_.flush();
       pending_policy_switch_.has_data = false;
