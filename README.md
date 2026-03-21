@@ -715,4 +715,4 @@ python3 scripts/batch_calculate_fall_risk.py \
 - **长时子任务进度**：每个目录跑 `calculate_fall_risk.py` 时，**stderr** 会每隔约 **10 秒**用同一行刷新（`\r`），显示当前子任务已用时，以及有历史平均耗时后的**本批剩余时间（不含当前子任务）**。关闭：`--no-progress-ticker` 或 `--progress-ticker-interval 0`；改间隔：`--progress-ticker-interval 5`。
 
 同一命令还会在 `--root`（或 `--output-dir`）下生成 **`policy_switch_walking_combined.csv`**：遍历各实验子目录中的 `policy_switch.csv`（或 `.bin`），只保留 **`from_mode` 为 `walking`** 的行（例如摔倒切 damping、定时 pdstand），并附加列 `run_folder`、`direction`、`log_path`。若不需要可传 `--no-combine-policy-switch`。
-
+打印body编号 `python3 scripts/print_pm_v2_body_ids.py`
