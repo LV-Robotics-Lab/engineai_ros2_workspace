@@ -27,14 +27,18 @@
     stats_by_direction.csv
     stats_overall.txt
     policy_switch_walking_combined.csv  # 各子目录 policy_switch 中仅 from_mode=walking 的行（可加 --no-combine-policy-switch 跳过）
+
+长时 calculate_fall_risk 子进程运行期间，stderr 会周期性刷新一行，显示**当前子任务已用时**与**本批预计剩余**（不含当前子任务，有历史平均耗时后才有）。
 """
 
 from __future__ import annotations
 
 import argparse
+import os
 import re
 import subprocess
 import sys
+import threading
 import time
 from pathlib import Path
 from typing import List, Optional, Tuple
@@ -201,15 +205,52 @@ def _format_eta(sec: Optional[float]) -> str:
     return f"{sec:.0f}s"
 
 
-def run_single_calculate(log_dir: Path) -> int:
+def run_single_calculate(
+    log_dir: Path,
+    *,
+    ticker_interval_sec: float = 0.0,
+    batch_eta_after_current_sec: Optional[float] = None,
+) -> int:
+    """
+    调用 calculate_fall_risk.py。ticker_interval_sec>0 时，在子进程运行期间每隔该秒数向 stderr 用 \\r 刷新一行，
+    输出当前子任务已用时与 batch_eta_after_current_sec（本批剩余、不含当前子任务，可为 None）。
+    """
     cmd = [sys.executable, str(CALCULATE_FALL_RISK), "--log-dir", str(log_dir)]
-    env = {**__import__("os").environ}
-    r = subprocess.run(
-        cmd,
-        cwd=str(SCRIPTS_DIR),
-        env=env,
-    )
-    return r.returncode
+    env = {**os.environ}
+    if ticker_interval_sec <= 0:
+        r = subprocess.run(cmd, cwd=str(SCRIPTS_DIR), env=env)
+        return r.returncode
+
+    stop = threading.Event()
+    t0 = time.perf_counter()
+
+    def ticker() -> None:
+        while not stop.wait(ticker_interval_sec):
+            cur = time.perf_counter() - t0
+            eta_part = ""
+            if batch_eta_after_current_sec is not None and batch_eta_after_current_sec >= 0:
+                eta_part = (
+                    f" | 本批剩余(不含当前) 约 {_format_eta(batch_eta_after_current_sec)} "
+                    f"({batch_eta_after_current_sec:.0f}s)"
+                )
+            pad = " " * 4
+            print(
+                f"\r  [batch] calculate_fall_risk 运行中… 当前子任务已用时 {_format_eta(cur)} ({cur:.0f}s)"
+                f"{eta_part}{pad}",
+                end="",
+                flush=True,
+                file=sys.stderr,
+            )
+
+    th = threading.Thread(target=ticker, daemon=True)
+    th.start()
+    try:
+        r = subprocess.run(cmd, cwd=str(SCRIPTS_DIR), env=env)
+        return r.returncode
+    finally:
+        stop.set()
+        th.join(timeout=2.0)
+        print(file=sys.stderr)
 
 
 def main() -> int:
@@ -256,7 +297,21 @@ def main() -> int:
         action="store_true",
         help="不合并各子目录 policy_switch 中 from_mode=walking 的行到 policy_switch_walking_combined.csv",
     )
+    parser.add_argument(
+        "--progress-ticker-interval",
+        type=float,
+        default=10.0,
+        metavar="SEC",
+        help="子进程 calculate_fall_risk 运行期间，每隔 SEC 秒在 stderr 刷新一行（已用时/本批剩余）；0 关闭",
+    )
+    parser.add_argument(
+        "--no-progress-ticker",
+        action="store_true",
+        help="等价于 --progress-ticker-interval 0，不显示周期性剩余时间行",
+    )
     args = parser.parse_args()
+    if args.no_progress_ticker:
+        args.progress_ticker_interval = 0.0
     continue_on_error = not args.no_continue_on_error
 
     root = Path(args.root).expanduser().resolve()
@@ -326,8 +381,10 @@ def main() -> int:
             # 完成当前项后还剩多少次 subprocess
             after_this = pending_calc - (1 if needs_subprocess(log_dir) else 0)
             eta_sec = max(0.0, avg_s * after_this)
+            eta_after_current_sec = max(0.0, avg_s * max(0, pending_calc - 1))
         else:
             eta_sec = None
+            eta_after_current_sec = None
 
         elapsed_batch = time.perf_counter() - t_batch0
         print(
@@ -345,7 +402,11 @@ def main() -> int:
 
         print(f"[{i}/{n_total}] 计算: {label}")
         t0 = time.perf_counter()
-        code = run_single_calculate(log_dir)
+        code = run_single_calculate(
+            log_dir,
+            ticker_interval_sec=float(args.progress_ticker_interval),
+            batch_eta_after_current_sec=eta_after_current_sec,
+        )
         dt = time.perf_counter() - t0
         calc_durations.append(dt)
         print(f"  本次耗时 {dt:.1f}s | 最近平均 {sum(calc_durations)/len(calc_durations):.1f}s/次", flush=True)

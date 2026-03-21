@@ -705,11 +705,14 @@ python3 scripts/calculate_fall_risk.py \
 - 每个**实际日志目录**内的 `risk_results_*.csv` 仍由 `calculate_fall_risk.py` 写在该目录（与原始 csv/bin 同文件夹）。
 - **`--root` 下**：`all_runs_summary.csv`（全批次各 risk **平均值**，1 行）、`per_run_risk.csv`（每次实验一行明细）、`stats_by_direction.csv`、`stats_overall.txt`。
 - 另 **`policy_switch_walking_combined.csv`**：合并各子目录 `policy_switch.csv` / `.bin` 中仅 **`from_mode == walking`** 的行；`--no-combine-policy-switch` 可关闭。
+- 子进程 `calculate_fall_risk` 较慢时，stderr 会**周期性刷新剩余/已用时**（见下「长时子任务进度」）。
 
 ```bash
 python3 scripts/batch_calculate_fall_risk.py \
-  --root /home/linslab/data/mujoco_logs/8dir-200.0N-0.4s-20260321_095833
+  --root /home/linslab/data/mujoco_logs/only_passive_push_1600/8dir-200.0N-0.4s-20260321_154532
 ```
+
+- **长时子任务进度**：每个目录跑 `calculate_fall_risk.py` 时，**stderr** 会每隔约 **10 秒**用同一行刷新（`\r`），显示当前子任务已用时，以及有历史平均耗时后的**本批剩余时间（不含当前子任务）**。关闭：`--no-progress-ticker` 或 `--progress-ticker-interval 0`；改间隔：`--progress-ticker-interval 5`。
 
 同一命令还会在 `--root`（或 `--output-dir`）下生成 **`policy_switch_walking_combined.csv`**：遍历各实验子目录中的 `policy_switch.csv`（或 `.bin`），只保留 **`from_mode` 为 `walking`** 的行（例如摔倒切 damping、定时 pdstand），并附加列 `run_folder`、`direction`、`log_path`。若不需要可传 `--no-combine-policy-switch`。
 
