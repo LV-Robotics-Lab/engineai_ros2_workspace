@@ -71,6 +71,12 @@ MYRIAD_FONT = get_available_font(['Myriad Pro', 'MyriadPro', 'DejaVu Sans'])
 
 print(f"字体设置: Times字体={TIMES_FONT}, Myriad字体={MYRIAD_FONT}")
 
+# 所有 YZ hex 图（力/厚度/表面积/压强）共用显示范围；z 上限需覆盖头部接触 (~1.35m+)
+THICKNESS_GRID_Y_LIM = (-0.35, 0.35)
+THICKNESS_GRID_Z_LIM = (0.1, 1.4)
+YZ_MAP_Y_MIN, YZ_MAP_Y_MAX, YZ_MAP_STEP = -0.4, 0.4, 0.05
+YZ_MAP_Z_MIN, YZ_MAP_Z_MAX = 0.0, 1.4
+
 # 尝试导入进度条库
 try:
     from tqdm import tqdm
@@ -1162,7 +1168,7 @@ def find_max_force_per_position(df, force_column='force_normal', enable_force_fi
     
     # 定义要过滤的链接（头部和踝关节）
     excluded_links = [
-        'LINK_HEAD_YAW',  # 头部
+        # 'LINK_HEAD_YAW',  # 头部
         'LINK_ANKLE_ROLL_L', 'LINK_ANKLE_ROLL_R',  # 踝关节横滚
         'LINK_ANKLE_PITCH_L', 'LINK_ANKLE_PITCH_R'  # 踝关节俯仰
     ]
@@ -1358,13 +1364,14 @@ def plot_contact_grid(csv_path=None, df=None, output_path=None, bins=50, cmap=No
         label.set_fontfamily(TIMES_FONT)
         label.set_fontsize(8)
     
-    # 设置坐标轴范围
+    # 设置坐标轴范围（与 THICKNESS_GRID_* 一致，含头部）
+    z_lo, z_hi = THICKNESS_GRID_Z_LIM
     ax.set_xlim(-0.35, 0.35)
-    ax.set_ylim(0.1, 1.2)
+    ax.set_ylim(z_lo, z_hi)
     
     # 设置x轴和y轴刻度
     ax.set_xticks([-0.35, 0, 0.35])
-    ax.set_yticks([0.1, 0.5, 0.9, 1.2])
+    ax.set_yticks([0.1, 0.5, 0.9, 1.2, z_hi])
     
     # 设置坐标轴刻度数字字体为 Times New Roman, 8pt
     for label in ax.get_xticklabels():
@@ -1745,13 +1752,14 @@ def plot_thickness_grid(csv_path=None, df=None, output_path=None, bins=50, cmap=
     # 隐藏颜色条分隔线
     cb.dividers.set_visible(False)
     
-    # 设置坐标轴范围
+    # 设置坐标轴范围（与力图/表面积/压强一致，含头部）
+    z_lo, z_hi = THICKNESS_GRID_Z_LIM
     ax.set_xlim(-0.35, 0.35)
-    ax.set_ylim(0.1, 1.2)
+    ax.set_ylim(z_lo, z_hi)
     
     # 设置x轴和y轴刻度
     ax.set_xticks([-0.35, 0, 0.35])
-    ax.set_yticks([0.1, 0.5, 0.9, 1.2])
+    ax.set_yticks([0.1, 0.5, 0.9, 1.2, z_hi])
     
     # 设置坐标轴刻度数字字体为 Times New Roman, 8pt
     for label in ax.get_xticklabels():
@@ -1978,13 +1986,14 @@ def plot_surface_area_grid(csv_path=None, df=None, stl_path=None, output_path=No
         label.set_fontfamily(TIMES_FONT)
         label.set_fontsize(8)
     
-    # 设置坐标轴范围
+    # 设置坐标轴范围（与力图/厚度一致，含头部）
+    z_lo, z_hi = THICKNESS_GRID_Z_LIM
     ax.set_xlim(-0.35, 0.35)
-    ax.set_ylim(0.1, 1.2)
+    ax.set_ylim(z_lo, z_hi)
     
     # 设置x轴和y轴刻度
     ax.set_xticks([-0.35, 0, 0.35])
-    ax.set_yticks([0.1, 0.5, 0.9, 1.2])
+    ax.set_yticks([0.1, 0.5, 0.9, 1.2, z_hi])
     
     # 设置坐标轴刻度数字字体为 Times New Roman, 8pt
     for label in ax.get_xticklabels():
@@ -2226,13 +2235,14 @@ def plot_pressure_grid(csv_path=None, df=None, stl_path=None, output_path=None, 
         label.set_fontfamily(TIMES_FONT)
         label.set_fontsize(8)
     
-    # 设置坐标轴范围
+    # 设置坐标轴范围（与力图/厚度/表面积一致，含头部）
+    z_lo, z_hi = THICKNESS_GRID_Z_LIM
     ax.set_xlim(-0.35, 0.35)
-    ax.set_ylim(0.1, 1.2)
+    ax.set_ylim(z_lo, z_hi)
     
     # 设置x轴和y轴刻度
     ax.set_xticks([-0.35, 0, 0.35])
-    ax.set_yticks([0.1, 0.5, 0.9, 1.2])
+    ax.set_yticks([0.1, 0.5, 0.9, 1.2, z_hi])
     
     # 设置坐标轴刻度数字字体为 Times New Roman, 8pt
     for label in ax.get_xticklabels():
@@ -2264,14 +2274,7 @@ def plot_pressure_grid(csv_path=None, df=None, stl_path=None, output_path=None, 
     plt.close()
 
 
-# YZ 护具 map 网格：与 protector_map/yz_map_front.tsv、yz_map_back.tsv 一致
-YZ_MAP_Y_MIN, YZ_MAP_Y_MAX, YZ_MAP_STEP = -0.4, 0.4, 0.05
-YZ_MAP_Z_MIN, YZ_MAP_Z_MAX = 0.0, 1.4
-
-# 厚度/力图坐标轴显示范围（与 plot_thickness_grid 中 set_xlim/set_ylim 一致；轴外为白边）
-THICKNESS_GRID_Y_LIM = (-0.35, 0.35)  # 横轴 robot_frame_y (m)
-THICKNESS_GRID_Z_LIM = (0.1, 1.2)  # 纵轴 robot_frame_z (m)
-
+# YZ 护具 map：YZ_MAP_* / THICKNESS_GRID_* 在文件顶部定义，与 PNG 轴一致。
 
 def write_thickness_hexbin_aggregate_csv(hb, csv_path, gridsize, method="chr"):
     """
@@ -2606,7 +2609,7 @@ def export_yz_protector_map_tsv(
     **与 PNG 一致的聚合**：对 ``robot_frame_x >= 0`` / ``< 0`` 分别做与厚度图相同的
     ``hexbin(y,z,C=厚度, gridsize=hex_bins, reduce_C_function=np.max, extent=全数据 y/z)``，
     然后把每个 hex 的 **中心点** 映射到护具固定的 0.05m 矩形格索引上，矩形格内取 ``max``。
-    最后将 **厚度图坐标轴外**（y∉[-0.35,0.35] 或 z∉[0.1,1.2]）的格置 0，与 PNG 白边一致。
+    最后将 **厚度图坐标轴外**（y∉[-0.35,0.35] 或 z∉[0.1,1.4]）的格置 0，与 PNG 白边一致（与 ``THICKNESS_GRID_Z_LIM`` 一致）。
 
     即 front/back 分别对应「只对前侧 / 后侧点画一张同 ``-b`` 的厚度 hexbin」在格中心的读数。
     默认「前后混画」的 PNG 在同一 (y,z) 上可能更大（前后取 max），属预期差异。

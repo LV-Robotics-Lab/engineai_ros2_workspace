@@ -221,7 +221,7 @@ python3 scripts/merge_contact_data.py logs/4in1 merged_4in1.csv --pattern "all_d
 
 ```bash
 python3 scripts/merge_contact_data.py \
-  /home/linslab/data/mujoco_logs/protector_passive_push_1034/8dir-200.0N-0.4s-20260320_025850 \
+  /home/linslab/data/mujoco_logs/only_passive_push_1600/8dir-200.0N-0.4s-20260321_154532 \
   --add-fall-type \
   --group-by-direction \
   --min-force-n 400
@@ -237,7 +237,7 @@ python3 scripts/merge_contact_data.py \
 
 ```bash
 python3 scripts/merge_contact_data.py \
-  /home/linslab/data/mujoco_logs/protector_passive_push_1034/8dir-200.0N-0.4s-20260320_025850 \
+  /home/linslab/data/mujoco_logs/only_passive_push_1600/8dir-200.0N-0.4s-20260321_154532 \
   all_directions_merged.csv \
   --pattern "merged_contact_data_*.csv" \
   --fast-append
