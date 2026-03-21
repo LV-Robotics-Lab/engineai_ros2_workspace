@@ -4,6 +4,7 @@
 #include <rclcpp/logging.hpp>
 #include <rclcpp/rclcpp.hpp>
 #include <std_msgs/msg/empty.hpp>
+#include <std_msgs/msg/string.hpp>
 #include <thread>
 #include <limits>
 #include <yaml-cpp/yaml.h>
@@ -28,9 +29,21 @@ class RlBasicRunnerXZL : public rclcpp::Node {
     config_file_ = config_file;
     joint_command_ = std::make_shared<interface_protocol::msg::JointCommand>();
 
+    policy_switch_pub_ = create_publisher<std_msgs::msg::String>("/rl/policy_switch", 10);
+
     // 订阅 mujoco reset，reset 后下次摔倒时重新打印，并清空 obs history
     mujoco_reset_sub_ = create_subscription<std_msgs::msg::Empty>(
         "/mujoco/reset_complete", 10, [this](const std_msgs::msg::Empty::SharedPtr) {
+          const bool was_damping = in_damping_fall_;
+          const bool was_pd_fall = in_pd_stand_fall_;
+          const bool was_pd_timed = in_pdstand_timed_;
+          if (was_damping) {
+            PublishPolicySwitch("damping", "walking", "");
+          } else if (was_pd_timed) {
+            PublishPolicySwitch("pdstand", "walking", "timed");
+          } else if (was_pd_fall) {
+            PublishPolicySwitch("pdstand", "walking", "");
+          }
           fall_switch_entered_logged_ = false;
           in_pd_stand_fall_ = false;
           in_pdstand_timed_ = false;
@@ -42,6 +55,17 @@ class RlBasicRunnerXZL : public rclcpp::Node {
 
     // 加载扭矩限制参数
     LoadTorqueLimitParameters();
+  }
+
+  /** 与 CHR 一致：MuJoCo 订阅写入 policy_switch.csv，格式 from_mode,to_mode,mimic_direction */
+  void PublishPolicySwitch(const std::string& from_mode, const std::string& to_mode,
+                           const std::string& mimic_direction = "") {
+    if (!policy_switch_pub_) {
+      return;
+    }
+    std_msgs::msg::String msg;
+    msg.data = from_mode + "," + to_mode + "," + mimic_direction;
+    policy_switch_pub_->publish(msg);
   }
   
   void LoadTorqueLimitParameters() {
@@ -507,6 +531,7 @@ class RlBasicRunnerXZL : public rclcpp::Node {
       use_fall_command = true;
       if (!fall_switch_entered_logged_) {
         RCLCPP_INFO(get_logger(), "Fall detected, switching to damping mode");
+        PublishPolicySwitch("walking", "damping", "");
         fall_switch_entered_logged_ = true;
       }
       joint_command_->stiffness = std::vector<double>(n, 0.0);
@@ -529,6 +554,7 @@ class RlBasicRunnerXZL : public rclcpp::Node {
       if (in_pd_stand_fall_ && q_pd_fall_init_.size() == q_pd_des_.size()) {
         if (!fall_switch_entered_logged_) {
           RCLCPP_INFO(get_logger(), "Fall detected, switching to pdstand mode");
+          PublishPolicySwitch("walking", "pdstand", "");
           fall_switch_entered_logged_ = true;
         }
         use_fall_command = true;
@@ -561,6 +587,7 @@ class RlBasicRunnerXZL : public rclcpp::Node {
           in_pdstand_timed_ = false;
         } else {
           RCLCPP_INFO(get_logger(), "Switching to pdstand (timed) at %.1fs", time_);
+          PublishPolicySwitch("walking", "pdstand", "timed");
         }
       }
       if (in_pdstand_timed_ && q_pd_timed_init_.size() == q_pd_des_.size()) {
@@ -667,6 +694,7 @@ class RlBasicRunnerXZL : public rclcpp::Node {
   double pd_stand_timed_phase_ = 0.0;
 
   rclcpp::Subscription<std_msgs::msg::Empty>::SharedPtr mujoco_reset_sub_;
+  rclcpp::Publisher<std_msgs::msg::String>::SharedPtr policy_switch_pub_;
 };
 
 }  // namespace example

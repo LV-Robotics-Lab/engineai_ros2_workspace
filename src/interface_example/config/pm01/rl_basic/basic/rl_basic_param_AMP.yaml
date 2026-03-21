@@ -1,6 +1,6 @@
 # mlp net parameters
 # 替换为 mjlab fall AMP 导出的实际 MNN 文件路径
-policy_file: "policies/amp_2.mnn"
+policy_file: "policies/amp_3.mnn"
 num_observations: 78
 num_commands: 3
 num_clock_signal: 2

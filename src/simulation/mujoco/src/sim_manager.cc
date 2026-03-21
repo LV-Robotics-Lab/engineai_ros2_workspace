@@ -12,6 +12,7 @@
 
 #include "sim_manager.h"
 #include <chrono>
+#include <cinttypes>
 #include <cmath>
 #include <cstring>
 #include <iostream>
@@ -50,6 +51,79 @@ constexpr double kHoldDampingWhenNoCmd = 15.0;
 constexpr double kSyncMisalign = 0.1;  // 重新同步前的最大偏差
 constexpr double kSimRefreshFraction = 0.7;  // 可用于仿真的刷新率分数
 const std::chrono::milliseconds kBusyWaitTime(1);  // 忙等待时间
+
+namespace {
+
+// 与 ros_interface.cc 相同：xmat 行主序，o = R^T v / o = R v
+inline void RotT3(const double* M, const double* v, double* o) {
+  o[0] = M[0] * v[0] + M[3] * v[1] + M[6] * v[2];
+  o[1] = M[1] * v[0] + M[4] * v[1] + M[7] * v[2];
+  o[2] = M[2] * v[0] + M[5] * v[1] + M[8] * v[2];
+}
+inline void Rot3(const double* M, const double* v, double* o) {
+  o[0] = M[0] * v[0] + M[1] * v[1] + M[2] * v[2];
+  o[1] = M[3] * v[0] + M[4] * v[1] + M[5] * v[2];
+  o[2] = M[6] * v[0] + M[7] * v[1] + M[8] * v[2];
+}
+
+/** 绿球：当前接触点 → link 局部 → 标准姿态下世界坐标（与 ros_interface 一致） */
+void GreenBallWorldPos(const mjModel* m, const mjData* d,
+                       const std::vector<mjtNum>& std_xpos, const std::vector<mjtNum>& std_xmat,
+                       int body1_id, int body2_id, const mjtNum* contact_pos_w, double out[3]) {
+  const int link1 = body1_id != 0 ? body1_id : body2_id;
+  if (link1 <= 0 || link1 >= m->nbody ||
+      std_xpos.size() < static_cast<size_t>(3 * m->nbody) ||
+      std_xmat.size() < static_cast<size_t>(9 * m->nbody)) {
+    out[0] = contact_pos_w[0];
+    out[1] = contact_pos_w[1];
+    out[2] = contact_pos_w[2];
+    return;
+  }
+  const mjtNum* x_LW = d->xpos + 3 * link1;
+  const mjtNum* R_LW = d->xmat + 9 * link1;
+  double pW_minus_x[3] = {contact_pos_w[0] - x_LW[0], contact_pos_w[1] - x_LW[1],
+                          contact_pos_w[2] - x_LW[2]};
+  double p_L[3];
+  RotT3(R_LW, pW_minus_x, p_L);
+  const mjtNum* x_LW_std = std_xpos.data() + 3 * link1;
+  const mjtNum* R_LW_std = std_xmat.data() + 9 * link1;
+  Rot3(R_LW_std, p_L, out);
+  out[0] += x_LW_std[0];
+  out[1] += x_LW_std[1];
+  out[2] += x_LW_std[2];
+}
+
+/**
+ * @brief 最大法向力对应接触点：keyframe（绿球）坐标 + 世界坐标 + map 厚度，供 NO-protect WARN
+ */
+void FillMaxContactWarnPose(const mjModel* m, mjData* d,
+                            const std::vector<mjtNum>& std_xpos, const std::vector<mjtNum>& std_xmat,
+                            int ncon, int idx_max_normal, const ProtectorMap* protector_map, bool use_protector_map,
+                            double std_pose_out[3], double world_out[3], double* map_th_mm_out,
+                            const char** name_a_out, const char** name_b_out) {
+  std_pose_out[0] = std_pose_out[1] = std_pose_out[2] = 0.0;
+  world_out[0] = world_out[1] = world_out[2] = 0.0;
+  *map_th_mm_out = -1.0;
+  *name_a_out = "?";
+  *name_b_out = "?";
+  if (idx_max_normal < 0 || idx_max_normal >= ncon || !m || !d) {
+    return;
+  }
+  const mjContact& cmax = d->contact[idx_max_normal];
+  int b1m = m->geom_bodyid[cmax.geom[0]];
+  int b2m = m->geom_bodyid[cmax.geom[1]];
+  *name_a_out = mj_id2name(m, mjOBJ_BODY, b1m);
+  *name_b_out = mj_id2name(m, mjOBJ_BODY, b2m);
+  world_out[0] = cmax.pos[0];
+  world_out[1] = cmax.pos[1];
+  world_out[2] = cmax.pos[2];
+  GreenBallWorldPos(m, d, std_xpos, std_xmat, b1m, b2m, cmax.pos, std_pose_out);
+  if (protector_map && protector_map->IsLoaded() && use_protector_map) {
+    *map_th_mm_out = protector_map->LookupThickness(std_pose_out[0], std_pose_out[1], std_pose_out[2]);
+  }
+}
+
+}  // namespace
 
 #if defined(__linux__)
 namespace {
@@ -416,6 +490,10 @@ SimManager::~SimManager() {
       mj_deleteModel(m_);
       m_ = nullptr;
     }
+
+    if (node_) {
+      LogProtectionSessionSummary();
+    }
     
     // 清理ROS接口
     ros_interface_.reset();
@@ -425,6 +503,19 @@ SimManager::~SimManager() {
   } catch (...) {
     std::cerr << "Unknown exception during SimManager destruction" << std::endl;
   }
+}
+
+void SimManager::LogProtectionSessionSummary() {
+  if (!node_) {
+    return;
+  }
+  RCLCPP_INFO(
+      node_->get_logger(),
+      "护具会话汇总: 有接触且走护具逻辑的帧数=%" PRIu64 ", 至少成功缩放1处接触的帧数=%" PRIu64
+      ", 累计接触点缩放次数=%" PRIu64 ", 最大法向力>1kN的帧数=%" PRIu64 ", >10kN的帧数=%" PRIu64
+      ", 高力(>1kN)但未产生任何缩放的帧数=%" PRIu64,
+      prot_sess_frames_with_contact_, prot_sess_frames_with_protection_, prot_sess_total_contact_scalings_,
+      prot_sess_frames_max_gt_1kn_, prot_sess_frames_max_gt_10kn_, prot_sess_warn_no_protect_frames_);
 }
 
 /**
@@ -1289,6 +1380,8 @@ void SimManager::HandleDropLoad() {
     
     // 计算关节反力
     ComputeJointForces();
+
+    RefreshStandardPoseCache();
   } else {
     sim_->LoadMessageClear();
   }
@@ -1325,6 +1418,8 @@ void SimManager::HandleUILoad() {
     
     // 计算关节反力
     ComputeJointForces();
+
+    RefreshStandardPoseCache();
   } else {
     sim_->LoadMessageClear();
   }
@@ -1646,6 +1741,9 @@ void SimManager::PhysicsThread(std::string_view filename) {
       
       // 计算初始关节反力
       ComputeJointForces();
+
+      // 护具 map 绿球坐标与 ros_interface 共用同一套标准姿态缓存（物理线程内，非 TF）
+      RefreshStandardPoseCache();
     } else {
       sim_->LoadMessageClear();
     }
@@ -1680,6 +1778,40 @@ void SimManager::PhysicsThread(std::string_view filename) {
   } catch (...) {
     RCLCPP_ERROR(logger, "Unknown exception during physics thread cleanup");
   }
+}
+
+void SimManager::RefreshStandardPoseCache() {
+  if (!m_) {
+    return;
+  }
+  mjData* dstd = mj_makeData(m_);
+  if (!dstd) {
+    if (node_) {
+      RCLCPP_WARN(node_->get_logger(), "RefreshStandardPoseCache: mj_makeData failed");
+    }
+    return;
+  }
+  const int key_id = mj_name2id(m_, mjOBJ_KEY, "floating_base_homing");
+  if (key_id >= 0) {
+    mj_resetDataKeyframe(m_, dstd, key_id);
+  } else {
+    mju_zero(dstd->qpos, m_->nq);
+    if (m_->nq > 0 && m_->jnt_type[0] == mjJNT_FREE) {
+      dstd->qpos[0] = 1;
+      dstd->qpos[1] = dstd->qpos[2] = dstd->qpos[3] = 0;
+      dstd->qpos[4] = dstd->qpos[5] = dstd->qpos[6] = 0;
+    }
+  }
+  mj_forward(m_, dstd);
+  if (m_->nbody > 0) {
+    std_xpos_cache_.assign(dstd->xpos, dstd->xpos + 3 * m_->nbody);
+    std_xmat_cache_.assign(dstd->xmat, dstd->xmat + 9 * m_->nbody);
+  } else {
+    std_xpos_cache_.clear();
+    std_xmat_cache_.clear();
+  }
+  std_pose_model_ptr_ = m_;
+  mj_deleteData(dstd);
 }
 
 /**
@@ -1719,6 +1851,14 @@ void SimManager::ApplyProtectionToContactForces() {
   if (ncon == 0) {
     return;
   }
+  prot_sess_frames_with_contact_++;
+
+  // 护具 map 与 ros_interface 绿球一致：每帧按需保证标准姿态缓存与当前 m_ 一致（物理线程内，与 TF 无关）
+  if (use_protector_map_ && protector_map_ && protector_map_->IsLoaded()) {
+    if (std_pose_model_ptr_ != m_ || std_xpos_cache_.size() != static_cast<size_t>(3 * m_->nbody)) {
+      RefreshStandardPoseCache();
+    }
+  }
   
   // 每1000帧打印一次，确认防护功能被调用
   static int call_count = 0;
@@ -1740,9 +1880,14 @@ void SimManager::ApplyProtectionToContactForces() {
   int skipped_small_force = 0;
   int skipped_out_of_range = 0;
   int skipped_no_effect = 0;
+  int skipped_thickness_below_min = 0;
+  /** 已通过厚度与 CHR，但 efc_address 无效或 pyramid 写入越界，未改 efc */
+  int skipped_efc_unavailable = 0;
   double total_force_reduction = 0.0;
   double max_force_before = 0.0;
   double max_force_after = 0.0;
+  /** 非排除接触中、法向力最大的接触索引，供 WARN 打印 keyframe 坐标 */
+  int idx_max_normal = -1;
   static int frame_count = 0;  // 用于调试输出频率控制
 
   // 遍历所有接触点
@@ -1782,9 +1927,10 @@ void SimManager::ApplyProtectionToContactForces() {
     // 计算接触坐标系下的法向力大小（接触系x方向，正值，即正压力）
     double contact_force_normal = std::max(0.0, static_cast<double>(contact_force[0]));
     
-    // 记录最大力（用于调试）
+    // 记录最大力（用于调试）及对应接触，便于与 protector map（keyframe 坐标）对照
     if (contact_force_normal > max_force_before) {
       max_force_before = contact_force_normal;
+      idx_max_normal = i;
     }
     
     // 如果法向力太小，跳过（避免对微小接触力进行插值）
@@ -1794,17 +1940,17 @@ void SimManager::ApplyProtectionToContactForces() {
       continue;
     }
     
-    // 根据碰撞点位置确定护具厚度：护具地图查表 或 全局厚度
+    // 根据碰撞点位置确定护具厚度：护具地图查表（绿球坐标 = 标准姿态下世界系，与 ros_interface 一致）或全局厚度
     double thickness_mm = protection_thickness_;
-    if (protector_map_ && protector_map_->IsLoaded()) {
-      // 接触点世界坐标 = 默认站立系坐标（README：世界系即默认站立系）
-      double pos_x = contact.pos[0];
-      double pos_y = contact.pos[1];
-      double pos_z = contact.pos[2];
-      thickness_mm = protector_map_->LookupThickness(pos_x, pos_y, pos_z);
+    double map_lookup_pos[3] = {contact.pos[0], contact.pos[1], contact.pos[2]};
+    if (protector_map_ && protector_map_->IsLoaded() && use_protector_map_) {
+      GreenBallWorldPos(m_, d_, std_xpos_cache_, std_xmat_cache_, body1_id, body2_id, contact.pos,
+                        map_lookup_pos);
+      thickness_mm = protector_map_->LookupThickness(map_lookup_pos[0], map_lookup_pos[1], map_lookup_pos[2]);
     }
     // 厚度 < 6mm 时，不进行衰减计算（chr 与 zzq 均要求厚度 >= 6）
     if (thickness_mm < 6.0) {
+      skipped_thickness_below_min++;
       continue;
     }
 
@@ -1824,14 +1970,18 @@ void SimManager::ApplyProtectionToContactForces() {
         // 如果超出范围，跳过该接触点
         skipped_out_of_range++;
         // 对于超出范围的力，立即记录调试信息（不依赖frame_count）
-        // 对于超过15kN的力，总是打印（不限制次数）
-        if (contact_force_normal > 15000) {
+        // 对于超过1kN的力，总是打印（不限制次数）
+        if (contact_force_normal > 1000) {
+          double std_pose_log[3];
+          GreenBallWorldPos(m_, d_, std_xpos_cache_, std_xmat_cache_, body1_id, body2_id, contact.pos, std_pose_log);
           auto force_range = force_interpolator_ ? force_interpolator_->GetForceRange()
                                                 : chr_zzq_force_->GetForceRange();
           RCLCPP_WARN(node_->get_logger(),
-                      "Force %.2f kN (%.2f N) out of range for thickness %.1f mm (pos %.3f,%.3f,%.3f). "
+                      "Force %.2f kN (%.2f N) out of range for thickness %.1f mm. "
+                      "std_pose_xyz=%.4f,%.4f,%.4f (keyframe/green, m), world_pos=%.4f,%.4f,%.4f. "
                       "Valid range: [%.2f, %.2f] kN",
                       force_unprotected_kN, contact_force_normal, thickness_mm,
+                      std_pose_log[0], std_pose_log[1], std_pose_log[2],
                       contact.pos[0], contact.pos[1], contact.pos[2],
                       force_range.first, force_range.second);
         } else if (contact_force_normal > 20000) {
@@ -1882,6 +2032,9 @@ void SimManager::ApplyProtectionToContactForces() {
         scale_factor = kChrMinScale;
       }
     }
+
+    // 实际施加到 efc_force 的是 scale_factor，CHR 原始 force_protected_kN 可能极小；日志与统计用有效力
+    const double effective_force_kN = force_unprotected_kN * scale_factor;
     
     // 如果缩放因子接近1，说明防护效果不明显，跳过
     // 但是，即使缩放因子不是1.0，如果防护效果很小（比如只减少1%），也可能被跳过
@@ -1893,9 +2046,12 @@ void SimManager::ApplyProtectionToContactForces() {
         static int no_effect_count = 0;
         no_effect_count++;
         if (no_effect_count <= 5) {
+          double std_pose_log[3];
+          GreenBallWorldPos(m_, d_, std_xpos_cache_, std_xmat_cache_, body1_id, body2_id, contact.pos, std_pose_log);
           RCLCPP_WARN(node_->get_logger(),
-                      "Force %.2f kN: scale_factor=%.6f (too close to 1.0, no effect)",
-                      force_unprotected_kN, scale_factor);
+                      "Force %.2f kN: scale_factor=%.6f (too close to 1.0, no effect), "
+                      "std_pose_xyz=%.4f,%.4f,%.4f (keyframe / green ball, m)",
+                      force_unprotected_kN, scale_factor, std_pose_log[0], std_pose_log[1], std_pose_log[2]);
         }
       }
       continue;
@@ -1905,24 +2061,29 @@ void SimManager::ApplyProtectionToContactForces() {
     // 这样可以确保防护功能总是生效
     
     // 对于高力，立即记录防护应用信息（不依赖frame_count）
-    // 对于超过15kN的力，总是打印（不限制次数）
-    if (contact_force_normal > 15000) {
+    // 对于超过1kN的力，总是打印（不限制次数）
+    if (contact_force_normal > 1000) {
+      double std_pose_log[3];
+      GreenBallWorldPos(m_, d_, std_xpos_cache_, std_xmat_cache_, body1_id, body2_id, contact.pos, std_pose_log);
       RCLCPP_INFO(node_->get_logger(),
-                  "Applying protection: force=%.2f kN (%.2f N) -> %.2f kN (%.2f N) (scale=%.4f)",
-                  force_unprotected_kN, contact_force_normal, force_protected_kN, 
-                  force_protected_kN * 1000.0, scale_factor);
+                  "Applying protection: force=%.2f kN (%.2f N) -> %.2f kN (%.2f N) effective (scale=%.4f, chr_raw=%.4f kN), "
+                  "std_pose_xyz=%.4f,%.4f,%.4f (keyframe/green, m), world_pos=%.4f,%.4f,%.4f",
+                  force_unprotected_kN, contact_force_normal, effective_force_kN,
+                  effective_force_kN * 1000.0, scale_factor, force_protected_kN,
+                  std_pose_log[0], std_pose_log[1], std_pose_log[2],
+                  contact.pos[0], contact.pos[1], contact.pos[2]);
     } else if (contact_force_normal > 400) {
       static int protection_applied_count = 0;
       protection_applied_count++;
       if (protection_applied_count <= 10) {
         RCLCPP_INFO(node_->get_logger(),
-                    "Applying protection: force=%.2f kN -> %.2f kN (scale=%.4f)",
-                    force_unprotected_kN, force_protected_kN, scale_factor);
+                    "Applying protection: force=%.2f kN -> %.2f kN effective (scale=%.4f, chr_raw=%.4f kN)",
+                    force_unprotected_kN, effective_force_kN, scale_factor, force_protected_kN);
       }
     }
     
-    // 记录最大防护后的力（用于调试）
-    double force_after = force_protected_kN * 1000.0;  // 转换回N
+    // 记录最大防护后的力（用于调试）：与 efc 缩放一致
+    double force_after = effective_force_kN * 1000.0;  // N
     if (force_after > max_force_after) {
       max_force_after = force_after;
     }
@@ -1935,6 +2096,7 @@ void SimManager::ApplyProtectionToContactForces() {
     // 接触约束在efc_force中的索引可以通过contact.efc_address获取
     int efc_address = contact.efc_address;
     if (efc_address < 0 || efc_address >= d_->nefc) {
+      skipped_efc_unavailable++;
       continue;
     }
     
@@ -1964,7 +2126,7 @@ void SimManager::ApplyProtectionToContactForces() {
       
       // 安全检查：确保不会越界
       if (efc_address < 0 || efc_address + pyramid_size > d_->nefc) {
-        // 如果越界，跳过该接触点
+        skipped_efc_unavailable++;
         continue;
       }
       
@@ -2066,8 +2228,8 @@ void SimManager::ApplyProtectionToContactForces() {
       double reduction_percent = (max_force_before > 0) ? 
         (1.0 - max_force_after / max_force_before) * 100.0 : 0.0;
       RCLCPP_INFO_THROTTLE(logger, *clock, 5000, 
-                          "Protection stats: contacts=%d, protected=%d, skipped_small=%d, skipped_range=%d, skipped_no_effect=%d, max_force_before=%.2fN (%.2f kN), max_force_after=%.2fN (%.2f kN), reduction=%.1f%%, avg_reduction=%.2fN",
-                          ncon, protected_contacts, skipped_small_force, skipped_out_of_range, skipped_no_effect,
+                          "Protection stats: contacts=%d, protected=%d, skipped_small=%d, skipped_range=%d, skipped_no_effect=%d, skipped_thickness_lt_min=%d, skipped_efc=%d, max_force_before=%.2fN (%.2f kN), max_force_after=%.2fN (%.2f kN), reduction=%.1f%%, avg_reduction=%.2fN",
+                          ncon, protected_contacts, skipped_small_force, skipped_out_of_range, skipped_no_effect, skipped_thickness_below_min, skipped_efc_unavailable,
                           max_force_before, max_force_before/1000.0, max_force_after, max_force_after/1000.0,
                           reduction_percent,
                           protected_contacts > 0 ? total_force_reduction / protected_contacts : 0.0);
@@ -2075,13 +2237,13 @@ void SimManager::ApplyProtectionToContactForces() {
   }
   
   // 对于高力，即使没有达到1000帧，也输出统计信息
-  // 对于超过15kN的力，总是打印（不限制次数）
-  if (max_force_before > 15000 && node_) {
+  // 对于超过1kN的力，总是打印（不限制次数）
+  if (max_force_before > 1000 && node_) {
     double reduction_percent = (max_force_before > 0) ? 
       (1.0 - max_force_after / max_force_before) * 100.0 : 0.0;
     RCLCPP_INFO(node_->get_logger(),
-                "Protection stats (high force): contacts=%d, protected=%d, skipped_small=%d, skipped_range=%d, skipped_no_effect=%d, max_force_before=%.2fN (%.2f kN), max_force_after=%.2fN (%.2f kN), reduction=%.1f%%",
-                ncon, protected_contacts, skipped_small_force, skipped_out_of_range, skipped_no_effect,
+                "Protection stats (high force): contacts=%d, protected=%d, skipped_small=%d, skipped_range=%d, skipped_no_effect=%d, skipped_thickness_lt_min=%d, skipped_efc=%d, max_force_before=%.2fN (%.2f kN), max_force_after=%.2fN (%.2f kN), reduction=%.1f%%",
+                ncon, protected_contacts, skipped_small_force, skipped_out_of_range, skipped_no_effect, skipped_thickness_below_min, skipped_efc_unavailable,
                 max_force_before, max_force_before/1000.0, max_force_after, max_force_after/1000.0,
                 reduction_percent);
   } else if (max_force_before > 20000 && node_) {
@@ -2091,31 +2253,74 @@ void SimManager::ApplyProtectionToContactForces() {
       double reduction_percent = (max_force_before > 0) ? 
         (1.0 - max_force_after / max_force_before) * 100.0 : 0.0;
       RCLCPP_INFO(node_->get_logger(),
-                  "Protection stats (high force): contacts=%d, protected=%d, skipped_small=%d, skipped_range=%d, skipped_no_effect=%d, max_force_before=%.2fN (%.2f kN), max_force_after=%.2fN (%.2f kN), reduction=%.1f%%",
-                  ncon, protected_contacts, skipped_small_force, skipped_out_of_range, skipped_no_effect,
+                  "Protection stats (high force): contacts=%d, protected=%d, skipped_small=%d, skipped_range=%d, skipped_no_effect=%d, skipped_thickness_lt_min=%d, skipped_efc=%d, max_force_before=%.2fN (%.2f kN), max_force_after=%.2fN (%.2f kN), reduction=%.1f%%",
+                  ncon, protected_contacts, skipped_small_force, skipped_out_of_range, skipped_no_effect, skipped_thickness_below_min, skipped_efc_unavailable,
                   max_force_before, max_force_before/1000.0, max_force_after, max_force_after/1000.0,
                   reduction_percent);
     }
   }
   
   // 对于非常大的力，立即记录调试信息
-  // 对于超过15kN的力，总是打印（不限制次数）
-  if (max_force_before > 15000 && protected_contacts == 0 && node_) {
+  // 对于超过1kN的力，总是打印（不限制次数）
+  if (max_force_before > 1000 && protected_contacts == 0 && node_) {
+    double std_pose_warn[3] = {0.0, 0.0, 0.0};
+    double world_warn[3] = {0.0, 0.0, 0.0};
+    double map_th_warn = -1.0;
+    const char* max_pair_a = "?";
+    const char* max_pair_b = "?";
+    FillMaxContactWarnPose(m_, d_, std_xpos_cache_, std_xmat_cache_, ncon, idx_max_normal,
+                           protector_map_.get(), use_protector_map_, std_pose_warn, world_warn, &map_th_warn,
+                           &max_pair_a, &max_pair_b);
     RCLCPP_WARN(node_->get_logger(), 
                 "High force detected (%.2f N, %.2f kN) but NO contacts were protected! "
-                "skipped_small=%d, skipped_range=%d, skipped_no_effect=%d, protection_enabled=%s, use_map=%s",
+                "skipped_small=%d, skipped_range=%d, skipped_no_effect=%d, skipped_thickness_lt_min=%d, skipped_efc=%d (efc_address/pyramid), protection_enabled=%s, use_map=%s, "
+                "max_contact_pair=%s <-> %s, idx=%d, std_pose_xyz(keyframe/map)=%.4f,%.4f,%.4f (m), world_pos=%.4f,%.4f,%.4f (m), map_thickness_mm=%.3f",
                 max_force_before, max_force_before/1000.0, skipped_small_force, skipped_out_of_range, skipped_no_effect,
-                protection_enabled_ ? "YES" : "NO", use_protector_map_ ? "YES" : "NO");
+                skipped_thickness_below_min, skipped_efc_unavailable,
+                protection_enabled_ ? "YES" : "NO", use_protector_map_ ? "YES" : "NO",
+                max_pair_a ? max_pair_a : "?", max_pair_b ? max_pair_b : "?",
+                idx_max_normal,
+                std_pose_warn[0], std_pose_warn[1], std_pose_warn[2],
+                world_warn[0], world_warn[1], world_warn[2],
+                map_th_warn);
   } else if (max_force_before > 20000 && protected_contacts == 0 && node_) {
     static int high_force_warn_count = 0;
     high_force_warn_count++;
     if (high_force_warn_count <= 10) {  // 只记录前10次
+      double std_pose_warn[3] = {0.0, 0.0, 0.0};
+      double world_warn[3] = {0.0, 0.0, 0.0};
+      double map_th_warn = -1.0;
+      const char* max_pair_a = "?";
+      const char* max_pair_b = "?";
+      FillMaxContactWarnPose(m_, d_, std_xpos_cache_, std_xmat_cache_, ncon, idx_max_normal,
+                             protector_map_.get(), use_protector_map_, std_pose_warn, world_warn, &map_th_warn,
+                             &max_pair_a, &max_pair_b);
       RCLCPP_WARN(node_->get_logger(), 
                   "High force detected (%.2f N) but NO contacts were protected! "
-                  "skipped_small=%d, skipped_range=%d, skipped_no_effect=%d, protection_enabled=%s, use_map=%s",
-                  max_force_before, skipped_small_force, skipped_out_of_range, skipped_no_effect,
-                  protection_enabled_ ? "YES" : "NO", use_protector_map_ ? "YES" : "NO");
+                  "skipped_small=%d, skipped_range=%d, skipped_no_effect=%d, skipped_thickness_lt_min=%d, skipped_efc=%d, protection_enabled=%s, use_map=%s, "
+                  "max_contact_pair=%s <-> %s, idx=%d, std_pose_xyz(keyframe/map)=%.4f,%.4f,%.4f (m), world_pos=%.4f,%.4f,%.4f (m), map_thickness_mm=%.3f",
+                  max_force_before, skipped_small_force, skipped_out_of_range, skipped_no_effect, skipped_thickness_below_min, skipped_efc_unavailable,
+                  protection_enabled_ ? "YES" : "NO", use_protector_map_ ? "YES" : "NO",
+                  max_pair_a ? max_pair_a : "?", max_pair_b ? max_pair_b : "?",
+                  idx_max_normal,
+                  std_pose_warn[0], std_pose_warn[1], std_pose_warn[2],
+                  world_warn[0], world_warn[1], world_warn[2],
+                  map_th_warn);
     }
+  }
+
+  if (protected_contacts > 0) {
+    prot_sess_frames_with_protection_++;
+    prot_sess_total_contact_scalings_ += static_cast<uint64_t>(protected_contacts);
+  }
+  if (max_force_before > 1000.0) {
+    prot_sess_frames_max_gt_1kn_++;
+  }
+  if (max_force_before > 10000.0) {
+    prot_sess_frames_max_gt_10kn_++;
+  }
+  if (max_force_before > 1000.0 && protected_contacts == 0) {
+    prot_sess_warn_no_protect_frames_++;
   }
 }
 

@@ -26,6 +26,7 @@
     per_run_risk.csv       # 每行一次实验的明细（原合并表）
     stats_by_direction.csv
     stats_overall.txt
+    policy_switch_walking_combined.csv  # 各子目录 policy_switch 中仅 from_mode=walking 的行（可加 --no-combine-policy-switch 跳过）
 """
 
 from __future__ import annotations
@@ -45,9 +46,10 @@ SCRIPTS_DIR = Path(__file__).resolve().parent
 CALCULATE_FALL_RISK = SCRIPTS_DIR / "calculate_fall_risk.py"
 
 try:
-    from mujoco_data_io import resolve_paths_from_log_dir
+    from mujoco_data_io import read_binary_policy_switch, resolve_paths_from_log_dir
 except ImportError:
     resolve_paths_from_log_dir = None  # type: ignore
+    read_binary_policy_switch = None  # type: ignore
 
 
 def is_valid_run_dir(d: Path) -> bool:
@@ -101,6 +103,73 @@ def discover_run_dirs(root: Path) -> List[Path]:
         return (idx, str(rel))
 
     return sorted(found, key=sort_key)
+
+
+def _norm_policy_mode_cell(x: object) -> str:
+    try:
+        if pd.isna(x):
+            return ""
+    except (TypeError, ValueError):
+        pass
+    return str(x).strip().strip('"').strip("'")
+
+
+def combine_policy_switch_walking_rows(
+    root: Path,
+    out_dir: Path,
+    run_dirs: List[Path],
+) -> Tuple[int, Optional[Path]]:
+    """
+    合并各实验目录下的 policy_switch.csv（或 .bin）中 **from_mode == walking** 的行到单一 CSV。
+
+    写入 ``out_dir / "policy_switch_walking_combined.csv"``，并增加列 run_folder、direction、log_path。
+    用于分析「从行走/RL 策略切出」的事件（如摔倒切 damping、定时 pdstand）。
+    """
+    parts: List[pd.DataFrame] = []
+    for log_dir in run_dirs:
+        csv_p = log_dir / "policy_switch.csv"
+        bin_p = log_dir / "policy_switch.bin"
+        df: Optional[pd.DataFrame] = None
+        if csv_p.is_file():
+            try:
+                df = pd.read_csv(csv_p)
+            except Exception as e:
+                print(f"警告: 无法读取 {csv_p}: {e}", file=sys.stderr)
+                continue
+        elif bin_p.is_file() and read_binary_policy_switch is not None:
+            try:
+                df = read_binary_policy_switch(str(bin_p))
+            except Exception as e:
+                print(f"警告: 无法读取 {bin_p}: {e}", file=sys.stderr)
+                continue
+        else:
+            continue
+        if df is None or df.empty:
+            continue
+        if "from_mode" not in df.columns:
+            print(f"警告: {log_dir} policy_switch 无 from_mode 列，跳过", file=sys.stderr)
+            continue
+        sub = df[df["from_mode"].map(_norm_policy_mode_cell) == "walking"].copy()
+        if sub.empty:
+            continue
+        run_folder, direction, _, _ = meta_from_log_dir(log_dir, root)
+        sub.insert(0, "run_folder", run_folder)
+        sub.insert(1, "direction", direction)
+        sub.insert(2, "log_path", str(log_dir))
+        parts.append(sub)
+
+    if not parts:
+        print(
+            "policy_switch 合并: 未发现 csv/bin，或各文件中无 from_mode=walking 的行；跳过写出。",
+            file=sys.stderr,
+        )
+        return 0, None
+
+    merged = pd.concat(parts, axis=0, ignore_index=True, sort=False)
+    out_path = out_dir / "policy_switch_walking_combined.csv"
+    merged.to_csv(out_path, index=False)
+    print(f"\n已写入: {out_path}（仅 from_mode=walking，共 {len(merged)} 行）")
+    return len(merged), out_path
 
 
 def meta_from_log_dir(log_dir: Path, root: Path) -> Tuple[str, str, Optional[str], Optional[int]]:
@@ -181,6 +250,11 @@ def main() -> int:
         "--no-continue-on-error",
         action="store_true",
         help="任一次 calculate 失败则立即退出（默认：失败跳过，继续其余目录）",
+    )
+    parser.add_argument(
+        "--no-combine-policy-switch",
+        action="store_true",
+        help="不合并各子目录 policy_switch 中 from_mode=walking 的行到 policy_switch_walking_combined.csv",
     )
     args = parser.parse_args()
     continue_on_error = not args.no_continue_on_error
@@ -286,6 +360,9 @@ def main() -> int:
         else:
             print(f"  警告: 未生成 {summary_file}", file=sys.stderr)
             failed.append(label)
+
+    if not args.no_combine_policy_switch:
+        combine_policy_switch_walking_rows(root, out_dir, run_dirs)
 
     rows = []
     for sp in summary_paths:

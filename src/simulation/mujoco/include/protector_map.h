@@ -25,10 +25,10 @@ class ProtectorMap {
                const std::string& back_tsv = "yz_map_back.tsv");
 
   /**
-   * @brief 根据接触点世界坐标（=默认站立系）查表得到护具厚度
-   * @param x 世界系 x（前正后负）
-   * @param y 世界系 y（左正右负）
-   * @param z 世界系 z（离地高度）
+   * @brief 按护具展开图坐标查表厚度（与 ros_interface 绿球一致：标准姿态 keyframe 下世界系中的位置）
+   * @param x 前正后负（站立人体系）
+   * @param y 左正右负
+   * @param z 竖直方向高度（与 TSV 行/列一致）
    * @return 厚度 (mm)，若超出范围或未加载则返回 0
    */
   double LookupThickness(double x, double y, double z) const;

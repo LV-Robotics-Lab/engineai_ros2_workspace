@@ -12,6 +12,7 @@
 #else
 #include <thread>
 #endif
+#include <cstdint>
 #include <string>
 #include <utility>
 #include <Eigen/Dense>
@@ -154,6 +155,12 @@ bool IsContactVisualizationEnabled();
   // 该函数会修改d->efc_force来减少接触力
   void ApplyProtectionToContactForces();
 
+  /** 进程退出前打印护具累计统计（析构中调用） */
+  void LogProtectionSessionSummary();
+
+  /** 与 ros_interface 一致：keyframe floating_base_homing + mj_forward 缓存各 body 的 xpos/xmat，供绿球坐标用 */
+  void RefreshStandardPoseCache();
+
 #if defined(__linux__)
   static void* PhysicsThreadTrampoline(void* arg);
 #endif
@@ -216,5 +223,18 @@ bool IsContactVisualizationEnabled();
   // 脚/踝与 world 的接触已排除，避免走路时地面打滑（LINK_ANKLE_ROLL_L/R 为脚掌接地 body）
   // 使用 std::pair<std::string, std::string> 存储，顺序无关
   static const std::vector<std::pair<std::string, std::string>> excluded_contact_pairs_;
+
+  /** 标准姿态（与 ros_interface 绿球一致），在物理线程内计算，不依赖 ROS TF */
+  const mjModel* std_pose_model_ptr_ = nullptr;
+  std::vector<mjtNum> std_xpos_cache_;
+  std::vector<mjtNum> std_xmat_cache_;
+
+  /** 本会话护具统计（仅统计实际进入 ApplyProtection 主循环的帧；物理线程写入，析构前已 join） */
+  uint64_t prot_sess_frames_with_contact_{0};
+  uint64_t prot_sess_frames_with_protection_{0};
+  uint64_t prot_sess_total_contact_scalings_{0};
+  uint64_t prot_sess_frames_max_gt_1kn_{0};
+  uint64_t prot_sess_frames_max_gt_10kn_{0};
+  uint64_t prot_sess_warn_no_protect_frames_{0};
 
 };

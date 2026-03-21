@@ -11,6 +11,10 @@ CONTROLLER=XZL
 # 保存格式：csv（文本）或 bin（二进制，体积小、写入快）
 SAVE_FORMAT=csv
 
+# MuJoCo CSV 写入阈值：低于则省略行，减小体积
+CSV_MIN_FORCE_N=400
+CSV_JOINT_FORCES_MIN_TORQUE_NM=10
+
 # 日志/数据根目录（可修改，如 /mnt/ssd/data）
 LOG_BASE_DIR="${HOME}/data/mujoco_logs"
 
@@ -35,6 +39,7 @@ echo "运控: $CONTROLLER ($RL_LAUNCH)"
 echo "实验次数: $TOTAL_EXPERIMENTS"
 echo "实验持续时间: ${EXPERIMENT_DURATION}秒"
 echo "保存格式: $SAVE_FORMAT"
+echo "CSV 最小力(N): $CSV_MIN_FORCE_N, 关节力矩阈值(N·m): $CSV_JOINT_FORCES_MIN_TORQUE_NM"
 echo "=========================================="
 
 # 工作目录：脚本所在目录的上一级
@@ -146,6 +151,8 @@ for ((i=1; i<=TOTAL_EXPERIMENTS; i++)); do
             save_joint_state_csv:=true \
             save_link_kinetic_energy_csv:=true \
             save_policy_switch_csv:=true \
+            csv_format:=csv csv_min_force_n:=$CSV_MIN_FORCE_N \
+            csv_joint_forces_min_torque_nm:=$CSV_JOINT_FORCES_MIN_TORQUE_NM \
             csv_format:=$SAVE_FORMAT \
             csv_file_path:="$RUN_CSV_DIR" &
         MUJOCO_PID=$!
