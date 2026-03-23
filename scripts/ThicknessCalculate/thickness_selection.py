@@ -44,6 +44,18 @@ class ThicknessSelector:
             target_force = self.target_force
         
         all_results = []
+
+        # 0mm 表示不加护具，缓冲后力等于缓冲前力
+        # 若已满足目标，直接返回 0mm
+        all_results.append({
+            'thickness_mm': 0,
+            'Fpk': F_before,
+            'reduction_percent': 0.0,
+            'meets_target': F_before < target_force
+        })
+
+        if F_before < target_force:
+            return 0, F_before, 0.0, all_results
         
         # 遍历所有可选厚度，计算衰减后的力
         for t in self.available_thicknesses:
@@ -215,6 +227,10 @@ def select_thickness_simple(F_before, density=0.4, target_force=3.0):
         finally:
             sys.stdout = old_stdout
     
+    # 0mm 表示不加护具：若已满足目标，直接返回 0mm
+    if F_before < target_force:
+        return 0
+
     # 可选厚度：6, 12, 18, 24mm
     available_thicknesses_mm = [6, 12, 18, 24]
     

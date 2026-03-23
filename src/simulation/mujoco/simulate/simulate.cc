@@ -1703,8 +1703,9 @@ namespace mujoco {
 namespace mju = ::mujoco::sample_util;
 
 Simulate::Simulate(std::unique_ptr<PlatformUIAdapter> platform_ui, mjvCamera* cam, mjvOption* opt, mjvPerturb* pert,
-                   bool is_passive)
+                   bool is_passive, bool renderless)
     : is_passive_(is_passive),
+      renderless_(renderless),
       cam(*cam),
       opt(*opt),
       pert(*pert),
@@ -2559,64 +2560,109 @@ void Simulate::RenderLoop() {
   frames_ = 0;
   last_fps_update_ = mj::Simulate::Clock::now();
 
-  // run event loop
-  while (!this->platform_ui->ShouldCloseWindow() && !this->exitrequest.load()) {
-    {
-      // load model (not on first pass, to show "loading" label)
-      if (this->loadrequest == 1) {
-        const MutexLock lock(this->mtx);
-        this->LoadOnRenderThread();
-      } else if (this->loadrequest == 2) {
-        this->loadrequest = 1;
+  if (renderless_) {
+    while (!this->exitrequest.load()) {
+      {
+        if (this->loadrequest == 1) {
+          const MutexLock lock(this->mtx);
+          this->LoadOnRenderThread();
+        } else if (this->loadrequest == 2) {
+          this->loadrequest = 1;
+        }
+
+        bool upload_notify = false;
+        if (hfield_upload_ != -1) {
+          const MutexLock lock(this->mtx);
+          mjr_uploadHField(m_, &platform_ui->mjr_context(), hfield_upload_);
+          hfield_upload_ = -1;
+          upload_notify = true;
+        }
+        if (mesh_upload_ != -1) {
+          const MutexLock lock(this->mtx);
+          mjr_uploadMesh(m_, &platform_ui->mjr_context(), mesh_upload_);
+          mesh_upload_ = -1;
+          upload_notify = true;
+        }
+        if (texture_upload_ != -1) {
+          const MutexLock lock(this->mtx);
+          mjr_uploadTexture(m_, &platform_ui->mjr_context(), texture_upload_);
+          texture_upload_ = -1;
+          upload_notify = true;
+        }
+        if (upload_notify) {
+          cond_upload_.notify_all();
+        }
+
+        if (!this->is_passive_) {
+          Sync();
+        } else {
+          scnstate_.data.warning[mjWARN_VGEOMFULL].number +=
+              mjv_updateSceneFromState(&scnstate_, &this->opt, &this->pert, &this->cam, mjCAT_ALL, &this->scn);
+        }
       }
 
-      // poll and handle events
-      this->platform_ui->PollEvents();
+      std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    }
+  } else {
+    // run event loop
+    while (!this->platform_ui->ShouldCloseWindow() && !this->exitrequest.load()) {
+      {
+        // load model (not on first pass, to show "loading" label)
+        if (this->loadrequest == 1) {
+          const MutexLock lock(this->mtx);
+          this->LoadOnRenderThread();
+        } else if (this->loadrequest == 2) {
+          this->loadrequest = 1;
+        }
 
-      // upload assets if requested
-      bool upload_notify = false;
-      if (hfield_upload_ != -1) {
-        const MutexLock lock(this->mtx);
-        mjr_uploadHField(m_, &platform_ui->mjr_context(), hfield_upload_);
-        hfield_upload_ = -1;
-        upload_notify = true;
-      }
-      if (mesh_upload_ != -1) {
-        const MutexLock lock(this->mtx);
-        mjr_uploadMesh(m_, &platform_ui->mjr_context(), mesh_upload_);
-        mesh_upload_ = -1;
-        upload_notify = true;
-      }
-      if (texture_upload_ != -1) {
-        const MutexLock lock(this->mtx);
-        mjr_uploadTexture(m_, &platform_ui->mjr_context(), texture_upload_);
-        texture_upload_ = -1;
-        upload_notify = true;
-      }
-      if (upload_notify) {
-        cond_upload_.notify_all();
-      }
+        // poll and handle events
+        this->platform_ui->PollEvents();
 
-      // update scene, doing a full sync if in fully managed mode
-      if (!this->is_passive_) {
-        Sync();
-      } else {
-        scnstate_.data.warning[mjWARN_VGEOMFULL].number +=
-            mjv_updateSceneFromState(&scnstate_, &this->opt, &this->pert, &this->cam, mjCAT_ALL, &this->scn);
+        // upload assets if requested
+        bool upload_notify = false;
+        if (hfield_upload_ != -1) {
+          const MutexLock lock(this->mtx);
+          mjr_uploadHField(m_, &platform_ui->mjr_context(), hfield_upload_);
+          hfield_upload_ = -1;
+          upload_notify = true;
+        }
+        if (mesh_upload_ != -1) {
+          const MutexLock lock(this->mtx);
+          mjr_uploadMesh(m_, &platform_ui->mjr_context(), mesh_upload_);
+          mesh_upload_ = -1;
+          upload_notify = true;
+        }
+        if (texture_upload_ != -1) {
+          const MutexLock lock(this->mtx);
+          mjr_uploadTexture(m_, &platform_ui->mjr_context(), texture_upload_);
+          texture_upload_ = -1;
+          upload_notify = true;
+        }
+        if (upload_notify) {
+          cond_upload_.notify_all();
+        }
+
+        // update scene, doing a full sync if in fully managed mode
+        if (!this->is_passive_) {
+          Sync();
+        } else {
+          scnstate_.data.warning[mjWARN_VGEOMFULL].number +=
+              mjv_updateSceneFromState(&scnstate_, &this->opt, &this->pert, &this->cam, mjCAT_ALL, &this->scn);
+        }
+      }  // MutexLock (unblocks simulation thread)
+
+      // render while simulation is running
+      this->Render();
+
+      // update FPS stat, at most 5 times per second
+      auto now = mj::Simulate::Clock::now();
+      double interval = Seconds(now - last_fps_update_).count();
+      ++frames_;
+      if (interval > 0.2) {
+        last_fps_update_ = now;
+        fps_ = frames_ / interval;
+        frames_ = 0;
       }
-    }  // MutexLock (unblocks simulation thread)
-
-    // render while simulation is running
-    this->Render();
-
-    // update FPS stat, at most 5 times per second
-    auto now = mj::Simulate::Clock::now();
-    double interval = Seconds(now - last_fps_update_).count();
-    ++frames_;
-    if (interval > 0.2) {
-      last_fps_update_ = now;
-      fps_ = frames_ / interval;
-      frames_ = 0;
     }
   }
 

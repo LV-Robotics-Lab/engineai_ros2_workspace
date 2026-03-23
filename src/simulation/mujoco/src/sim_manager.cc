@@ -162,6 +162,9 @@ static void TorqueControllerWrapper(const mjModel* m, mjData* d) {
  * 用户可以通过键盘快捷键实时控制干扰力的施加，用于测试机器人的平衡能力。
  */
 class CustomGlfwAdapter : public mj::GlfwAdapter {
+ public:
+  explicit CustomGlfwAdapter(bool visible = true) : mj::GlfwAdapter(visible) {}
+
  protected:
   /**
    * @brief 键盘事件处理函数
@@ -966,7 +969,10 @@ bool SimManager::Initialize() {
   mjv_defaultPerturb(&pert);
 
   // 创建仿真对象，使用自定义的GLFW适配器以支持推倒采样的键盘交互
-  sim_ = std::make_unique<mj::Simulate>(std::make_unique<CustomGlfwAdapter>(), &cam, &opt, &pert, false);
+  if (headless_) {
+    RCLCPP_INFO(logger, "Headless mode enabled: creating hidden GLFW window and skipping per-frame rendering");
+  }
+  sim_ = std::make_unique<mj::Simulate>(std::make_unique<CustomGlfwAdapter>(!headless_), &cam, &opt, &pert, false, headless_);
 
   return true;
 }
@@ -2027,7 +2033,7 @@ void SimManager::ApplyProtectionToContactForces() {
     // CHR 公式在中小冲击力下衰减过强（scale 可低至 0.07），导致约束力不足、地面穿透
     // 设置最小 scale 下限，与 ZZQ 表的下界（约 0.5）对齐，保证仿真稳定
     if (force_method_ == "chr" && chr_zzq_force_) {
-      constexpr double kChrMinScale = 0.5;
+      constexpr double kChrMinScale = 0.3;
       if (scale_factor < kChrMinScale) {
         scale_factor = kChrMinScale;
       }

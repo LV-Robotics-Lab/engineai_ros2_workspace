@@ -29,7 +29,7 @@
 namespace mujoco {
 class GlfwAdapter : public PlatformUIAdapter {
  public:
-  GlfwAdapter();
+  explicit GlfwAdapter(bool visible = true);
   ~GlfwAdapter() override;
 
   std::pair<double, double> GetCursorPosition() const override;

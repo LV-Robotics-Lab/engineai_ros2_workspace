@@ -43,6 +43,10 @@ class SimManager {
   // Run the simulation
   void Run();
 
+  // Enable hidden-window headless mode.
+  void SetHeadless(bool headless) { headless_ = headless; }
+  bool IsHeadless() const { return headless_; }
+
   /** SIGINT/SIGTERM：请求退出仿真循环；物理线程结束前会 Drain 接触 bin，避免半截记录。 */
   void RequestExitFromSignal();
 
@@ -170,6 +174,7 @@ bool IsContactVisualizationEnabled();
   std::shared_ptr<ConfigLoader> config_loader_;
   std::unique_ptr<mujoco::RosInterface> ros_interface_;
   std::unique_ptr<mujoco::Simulate> sim_;
+  bool headless_ = false;
 #if defined(__linux__)
   pthread_t physics_pthread_{0};
   bool physics_pthread_started_{false};

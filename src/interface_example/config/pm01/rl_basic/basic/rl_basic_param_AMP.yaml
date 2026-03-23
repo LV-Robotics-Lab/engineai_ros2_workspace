@@ -1,6 +1,6 @@
 # mlp net parameters
 # 替换为 mjlab fall AMP 导出的实际 MNN 文件路径
-policy_file: "policies/amp_3.mnn"
+policy_file: "policies/amp_4.mnn"
 num_observations: 78
 num_commands: 3
 num_clock_signal: 2
@@ -113,11 +113,16 @@ falling_switch: damping   # 保留兼容字段，当前主流程不使用
 
 # 摔倒检测参数（与 CHR 一致：tilt/omega 超阈值 + 防抖确认）
 fall_detection:
-  tilt_threshold: 0.3            # 倾斜角阈值 (rad)
-  omega_threshold: 0.3           # 角速度阈值 (rad/s)
+  tilt_threshold: 0.5            # 倾斜角阈值 (rad)，改小易误触、方向仍由重力判定
+  omega_threshold: 1.8           # 角速度阈值 (rad/s)
   confirm_frames: 8              # 确认帧数
-  fast_fall_omega: 1           # 快速摔倒角速度阈值 (rad/s)
+  fast_fall_omega: 2.5           # 快速摔倒角速度阈值 (rad/s)
   fast_fall_confirm_frames: 2    # 快速摔倒确认帧数
+#   tilt_threshold: 0.3            # 倾斜角阈值 (rad)
+#   omega_threshold: 0.3           # 角速度阈值 (rad/s)
+#   confirm_frames: 8              # 确认帧数
+#   fast_fall_omega: 1           # 快速摔倒角速度阈值 (rad/s)
+#   fast_fall_confirm_frames: 2    # 快速摔倒确认帧数
   # passive 模式（kp=0）下的 kd，与 default_joint_q 结构一致
   passive_damping:
     - [4, 4, 4, 4, 3, 3]   # 左腿 6 个关节

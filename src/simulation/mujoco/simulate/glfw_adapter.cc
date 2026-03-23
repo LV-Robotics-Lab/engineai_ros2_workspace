@@ -44,14 +44,14 @@ GlfwAdapter& GlfwAdapterFromWindow(GLFWwindow* window) {
 }
 }  // namespace
 
-GlfwAdapter::GlfwAdapter() {
+GlfwAdapter::GlfwAdapter(bool visible) {
   if (MaybeGlfwInit() != GLFW_TRUE) {
     mju_error("could not initialize GLFW");
   }
 
   // multisampling
   Glfw().glfwWindowHint(GLFW_SAMPLES, 4);
-  Glfw().glfwWindowHint(GLFW_VISIBLE, 1);
+  Glfw().glfwWindowHint(GLFW_VISIBLE, visible ? 1 : 0);
 
   // get video mode and save
   vidmode_ = *Glfw().glfwGetVideoMode(Glfw().glfwGetPrimaryMonitor());

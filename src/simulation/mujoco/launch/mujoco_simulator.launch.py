@@ -97,6 +97,12 @@ def generate_launch_description():
         description='CSV文件保存路径（留空则使用默认路径）'
     )
 
+    declare_headless_arg = DeclareLaunchArgument(
+        'headless',
+        default_value='false',
+        description='是否以隐藏窗口模式运行 MuJoCo（true/false）'
+    )
+
     # 添加URDF文件路径参数
     declare_urdf_file_arg = DeclareLaunchArgument(
         'urdf_file',
@@ -156,6 +162,7 @@ def generate_launch_description():
         save_policy_switch_csv_str = LaunchConfiguration('save_policy_switch_csv').perform(context)
         csv_format = LaunchConfiguration('csv_format').perform(context)
         csv_file_path = LaunchConfiguration('csv_file_path').perform(context)
+        headless_str = LaunchConfiguration('headless').perform(context)
         csv_min_force_n_str = LaunchConfiguration('csv_min_force_n').perform(context)
         csv_joint_torque_str = LaunchConfiguration('csv_joint_forces_min_torque_nm').perform(context)
         urdf_file = LaunchConfiguration('urdf_file').perform(context)
@@ -173,6 +180,7 @@ def generate_launch_description():
         save_joint_state_csv = save_joint_state_csv_str.lower() == 'true'
         save_link_kinetic_energy_csv = save_link_kinetic_energy_csv_str.lower() == 'true'
         save_policy_switch_csv = save_policy_switch_csv_str.lower() == 'true'
+        headless = headless_str.lower() == 'true'
 
         # 读取URDF文件内容
         try:
@@ -210,6 +218,9 @@ def generate_launch_description():
             ])
             if csv_file_path:
                 args.extend(['--csv_file_path', csv_file_path])
+
+        if headless:
+            args.append('--headless')
 
         # 定义MuJoCo仿真器节点
         mujoco_node = Node(
@@ -292,6 +303,7 @@ def generate_launch_description():
         declare_csv_min_force_n_arg,
         declare_csv_joint_forces_min_torque_nm_arg,
         declare_csv_path_arg,
+        declare_headless_arg,
         declare_urdf_file_arg,
         declare_perturb_force_arg,
         declare_perturb_torque_arg,

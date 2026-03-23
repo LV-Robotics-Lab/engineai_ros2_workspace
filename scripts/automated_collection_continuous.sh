@@ -11,6 +11,9 @@ CONTROLLER=XZL
 # 保存格式：csv（文本）或 bin（二进制，体积小、写入快）
 SAVE_FORMAT=csv
 
+# MuJoCo 是否使用隐藏窗口模式运行
+MUJOCO_HEADLESS=true
+
 # MuJoCo CSV 写入阈值：低于则省略行，减小体积
 CSV_MIN_FORCE_N=400
 CSV_JOINT_FORCES_MIN_TORQUE_NM=10
@@ -39,6 +42,7 @@ echo "运控: $CONTROLLER ($RL_LAUNCH)"
 echo "实验次数: $TOTAL_EXPERIMENTS"
 echo "实验持续时间: ${EXPERIMENT_DURATION}秒"
 echo "保存格式: $SAVE_FORMAT"
+echo "MuJoCo Headless: $MUJOCO_HEADLESS"
 echo "CSV 最小力(N): $CSV_MIN_FORCE_N, 关节力矩阈值(N·m): $CSV_JOINT_FORCES_MIN_TORQUE_NM"
 echo "=========================================="
 
@@ -143,6 +147,7 @@ for ((i=1; i<=TOTAL_EXPERIMENTS; i++)); do
         # 第一次：启动 MuJoCo（方向已在上面 sed 写入 YAML）
         echo "启动MuJoCo仿真器..."
         ros2 launch mujoco_simulator mujoco_simulator.launch.py \
+            headless:=$MUJOCO_HEADLESS \
             export_contact:=true \
             save_contact_csv:=true \
             save_perturbation_csv:=true \

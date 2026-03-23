@@ -38,6 +38,7 @@ int main(int argc, char** argv) {
   std::string contact_topic = "/mujoco/contact_forces";
   bool save_contact_csv = false;
   std::string csv_file_path = "";
+  bool headless = false;
   
   for (int i = 1; i < argc; ++i) {
     if (strcmp(argv[i], "--export_contact") == 0) {
@@ -48,11 +49,14 @@ int main(int argc, char** argv) {
       save_contact_csv = true;
     } else if (strcmp(argv[i], "--csv_file_path") == 0 && i + 1 < argc) {
       csv_file_path = argv[++i];
+    } else if (strcmp(argv[i], "--headless") == 0) {
+      headless = true;
     }
   }
 
   rclcpp::init(argc, argv);
   auto& sim_manager = SimManager::GetInstance();
+  sim_manager.SetHeadless(headless);
 
   if (!sim_manager.Initialize()) {
     return 1;
