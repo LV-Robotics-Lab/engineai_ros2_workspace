@@ -1,4 +1,8 @@
+import argparse
 import json
+import os
+
+import matplotlib.pyplot as plt
 import numpy as np
 
 class ForceCalculator:
@@ -24,7 +28,7 @@ class ForceCalculator:
             params_file: 参数文件路径
         """
         try:
-            with open(params_file, "r", encoding="utf-8") as f:
+            with open(self._resolve_params_path(params_file), "r", encoding="utf-8") as f:
                 params = json.load(f)
             
             self.C = params["C"]
@@ -45,6 +49,15 @@ class ForceCalculator:
         except KeyError as e:
             print(f"错误: 参数文件中缺少必要的参数 {e}")
             raise
+
+    @staticmethod
+    def _resolve_params_path(params_file):
+        """
+        优先按传入路径读取；若不存在，则回退到当前脚本目录。
+        """
+        if os.path.isabs(params_file) or os.path.exists(params_file):
+            return params_file
+        return os.path.join(os.path.dirname(os.path.abspath(__file__)), params_file)
     
     def calculate_force_after(self, t, p, F_before):
         """
@@ -131,10 +144,140 @@ class ForceCalculator:
         
         return np.array(forces_after), np.array(reductions)
 
+
+def plot_chr_force_decay_curves(
+    thicknesses_mm=(1.0, 6.0),
+    density=0.4,
+    force_min=0.4,
+    force_max=170.0,
+    num_points=400,
+    output_path=None,
+    params_file="fitted_parameters.json",
+):
+    """
+    绘制 CHR 方法下不同厚度的力衰减曲线。
+
+    横轴为缓冲前冲击力，纵轴为缓冲后冲击力。
+    """
+    calculator = ForceCalculator(params_file=params_file)
+    force_before = np.linspace(force_min, force_max, num_points)
+
+    fig, ax = plt.subplots(figsize=(10, 6))
+    ax.plot(
+        force_before,
+        force_before,
+        linestyle="--",
+        color="0.55",
+        linewidth=1.5,
+        label="No protection",
+    )
+
+    for thickness_mm in thicknesses_mm:
+        force_after = calculator.calculate_force_after(thickness_mm, density, force_before)
+        ratio = np.divide(
+            force_after,
+            force_before,
+            out=np.zeros_like(force_after),
+            where=force_before > 0.0,
+        )
+        reduction_percent = np.where(force_before > 0.0, (1.0 - ratio) * 100.0, 0.0)
+        label = (
+            f"CHR, {thickness_mm:g} mm "
+            f"(max reduction {np.max(reduction_percent):.1f}%)"
+        )
+        ax.plot(force_before, force_after, linewidth=2.2, label=label)
+
+    ax.set_title(f"CHR Force Decay Curves (density={density:g})")
+    ax.set_xlabel("Unprotected force before impact (kN)")
+    ax.set_ylabel("Protected force after impact (kN)")
+    ax.grid(True, linestyle="--", alpha=0.35)
+    ax.legend()
+
+    if output_path is None:
+        thickness_tag = "_".join(f"{t:g}mm" for t in thicknesses_mm)
+        output_path = os.path.join(
+            os.path.dirname(os.path.abspath(__file__)),
+            f"force_decay_curves_{thickness_tag}.png",
+        )
+
+    fig.tight_layout()
+    fig.savefig(output_path, dpi=200, bbox_inches="tight")
+    plt.close(fig)
+    return output_path
+
+
+def build_argparser():
+    parser = argparse.ArgumentParser(description="CHR 缓冲力计算与衰减曲线绘图")
+    parser.add_argument(
+        "--plot-decay-curves",
+        action="store_true",
+        help="绘制 CHR 力衰减曲线",
+    )
+    parser.add_argument(
+        "--thicknesses",
+        type=float,
+        nargs="+",
+        default=[1.0, 6.0],
+        help="要绘制的厚度列表，单位 mm，默认: 1 6",
+    )
+    parser.add_argument(
+        "--density",
+        type=float,
+        default=0.4,
+        help="材料密度，默认: 0.4",
+    )
+    parser.add_argument(
+        "--force-min",
+        type=float,
+        default=0.4,
+        help="缓冲前冲击力最小值，单位 kN，默认: 0.4",
+    )
+    parser.add_argument(
+        "--force-max",
+        type=float,
+        default=170.0,
+        help="缓冲前冲击力最大值，单位 kN，默认: 170.0",
+    )
+    parser.add_argument(
+        "--num-points",
+        type=int,
+        default=400,
+        help="曲线采样点数，默认: 400",
+    )
+    parser.add_argument(
+        "-o",
+        "--output",
+        type=str,
+        default=None,
+        help="输出图片路径",
+    )
+    parser.add_argument(
+        "--params-file",
+        type=str,
+        default="fitted_parameters.json",
+        help="拟合参数 JSON 路径",
+    )
+    return parser
+
 def main():
     """
     主函数：演示计算器的使用
     """
+    args = build_argparser().parse_args()
+
+    if args.plot_decay_curves:
+        output_path = plot_chr_force_decay_curves(
+            thicknesses_mm=args.thicknesses,
+            density=args.density,
+            force_min=args.force_min,
+            force_max=args.force_max,
+            num_points=args.num_points,
+            output_path=args.output,
+            params_file=args.params_file,
+        )
+        print(f"已生成 CHR 力衰减曲线: {output_path}")
+        return
+
     print("=== 缓冲材料力计算器 ===")
     
     # 初始化计算器

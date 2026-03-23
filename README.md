@@ -359,6 +359,15 @@ python3 scripts/plot_contact_grid.py "$MERGED_CSV" --target-force 1.0 -b 100 -c 
 python3 scripts/plot_contact_grid.py "$MERGED_CSV" --target-force 1.0 --figsize 12 10  # 1.0 kN
 python3 scripts/plot_contact_grid.py "$MERGED_CSV" --target-force 1.0 --force-figsize 12 8 --thickness-figsize 12 10  # 1.0 kN
 python3 scripts/plot_contact_grid.py "$MERGED_CSV" --target-force 1.0 --force-figsize 12 8  # 1.0 kN
+
+# CHR 力衰减曲线：默认密度 0.4，绘制 1 mm / 6 mm 厚度在 0~5 kN 范围内的曲线
+python3 scripts/ThicknessCalculate/force_calculator.py \
+  --plot-decay-curves \
+  --thicknesses 6 \
+  --density 0.4 \
+  --force-min 0 \
+  --force-max 3 \
+  -o /home/wang22/engineai/engineai_ros2_workspace/scripts/ThicknessCalculate/force_decay_curves_0to3kN_6mm.png
 ```
 
 
