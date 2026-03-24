@@ -183,3 +183,29 @@ echo "=========================================="
 echo "所有实验完成！"
 echo "=========================================="
 echo "数据文件（$SAVE_FORMAT）保存在: $EXPERIMENT_FOLDER"
+
+echo ""
+echo "批量摔倒风险汇总（batch_calculate_fall_risk）..."
+python3 scripts/batch_calculate_fall_risk.py \
+  --root "$EXPERIMENT_FOLDER"
+
+echo ""
+echo "合并接触数据（按方向 + 摔倒类型 + 最小力阈值）..."
+python3 scripts/merge_contact_data.py \
+  "$EXPERIMENT_FOLDER" \
+  --add-fall-type \
+  --group-by-direction \
+  --min-force-n "$CSV_MIN_FORCE_N"
+
+echo ""
+echo "合并为 all_directions_merged.csv..."
+python3 scripts/merge_contact_data.py \
+  "$EXPERIMENT_FOLDER" \
+  all_directions_merged.csv \
+  --pattern "merged_contact_data_*.csv" \
+  --fast-append
+
+MERGED_CSV="$EXPERIMENT_FOLDER/all_directions_merged.csv"
+echo ""
+echo "绘制接触网格图（plot_contact_grid）..."
+python3 scripts/plot_contact_grid.py "$MERGED_CSV" --target-force 1.0 --no-hardcode --no-force-filter
