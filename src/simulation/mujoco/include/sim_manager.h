@@ -141,6 +141,7 @@ bool IsContactVisualizationEnabled();
   // 启用/禁用防护功能
   void EnableProtection(bool enable) { protection_enabled_ = enable; }
   bool IsProtectionEnabled() const { return protection_enabled_; }
+  double GetContactProtectionScale(int contact_idx) const;
 
  private:
   // Private constructor for singleton
@@ -238,6 +239,7 @@ bool IsContactVisualizationEnabled();
   uint64_t prot_sess_frames_with_contact_{0};
   uint64_t prot_sess_frames_with_protection_{0};
   uint64_t prot_sess_total_contact_scalings_{0};
+  std::vector<double> last_contact_protection_scales_;
   uint64_t prot_sess_frames_max_gt_1kn_{0};
   uint64_t prot_sess_frames_max_gt_10kn_{0};
   uint64_t prot_sess_warn_no_protect_frames_{0};

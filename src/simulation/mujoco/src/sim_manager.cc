@@ -508,6 +508,17 @@ SimManager::~SimManager() {
   }
 }
 
+double SimManager::GetContactProtectionScale(int contact_idx) const {
+  if (!protection_enabled_) {
+    return 1.0;
+  }
+  if (contact_idx < 0 ||
+      contact_idx >= static_cast<int>(last_contact_protection_scales_.size())) {
+    return 1.0;
+  }
+  return last_contact_protection_scales_[static_cast<size_t>(contact_idx)];
+}
+
 void SimManager::LogProtectionSessionSummary() {
   if (!node_) {
     return;
@@ -1855,8 +1866,10 @@ void SimManager::ApplyProtectionToContactForces() {
   // 获取当前接触数量
   int ncon = d_->ncon;
   if (ncon == 0) {
+    last_contact_protection_scales_.clear();
     return;
   }
+  last_contact_protection_scales_.assign(static_cast<size_t>(ncon), 1.0);
   prot_sess_frames_with_contact_++;
 
   // 护具 map 与 ros_interface 绿球一致：每帧按需保证标准姿态缓存与当前 m_ 一致（物理线程内，与 TF 无关）
@@ -2030,12 +2043,18 @@ void SimManager::ApplyProtectionToContactForces() {
     // 确保缩放因子在合理范围内（0到1之间，因为防护应该减少力）
     scale_factor = std::max(0.0, std::min(1.0, scale_factor));
     
-    // CHR 公式在中小冲击力下衰减过强（scale 可低至 0.07），导致约束力不足、地面穿透
-    // 设置最小 scale 下限，与 ZZQ 表的下界（约 0.5）对齐，保证仿真稳定
+    // CHR 公式在中小冲击力下衰减过强，可能导致约束力不足、地面穿透。
+    // 对 CHR 设置分段最小 scale：
+    // - force before > 10 kN: 允许更低下限 0.05
+    // - force before <= 10 kN: 保持下限 0.3，保证仿真稳定
     if (force_method_ == "chr" && chr_zzq_force_) {
-      constexpr double kChrMinScale = 0.3;
-      if (scale_factor < kChrMinScale) {
-        scale_factor = kChrMinScale;
+      constexpr double kChrHighForceThresholdN = 2000.0;
+      constexpr double kChrMinScaleHighForce = 0.2;
+      constexpr double kChrMinScaleLowForce = 0.5;
+      const double chr_min_scale =
+          (contact_force_normal > kChrHighForceThresholdN) ? kChrMinScaleHighForce : kChrMinScaleLowForce;
+      if (scale_factor < chr_min_scale) {
+        scale_factor = chr_min_scale;
       }
     }
 
@@ -2185,6 +2204,8 @@ void SimManager::ApplyProtectionToContactForces() {
         }
       }
     }
+
+    last_contact_protection_scales_[static_cast<size_t>(i)] = scale_factor;
     
     // 记录统计信息
     protected_contacts++;
@@ -2402,7 +2423,6 @@ std::unique_ptr<DecomposedWrenchEigen> SimManager::GetJointDecomposedWrench(cons
     return nullptr;
   }
 }
-
 
 
 

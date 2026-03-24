@@ -97,6 +97,18 @@ def generate_launch_description():
         description='CSV文件保存路径（留空则使用默认路径）'
     )
 
+    declare_save_console_log_arg = DeclareLaunchArgument(
+        'save_console_log',
+        default_value='false',
+        description='是否将终端输出同时保存到 ROS 2 launch 日志文件 (true/false)'
+    )
+
+    declare_console_log_dir_arg = DeclareLaunchArgument(
+        'console_log_dir',
+        default_value='',
+        description='终端输出日志目录；仅在 save_console_log=true 时生效，留空则使用默认 ~/.ros/log'
+    )
+
     declare_headless_arg = DeclareLaunchArgument(
         'headless',
         default_value='false',
@@ -162,6 +174,8 @@ def generate_launch_description():
         save_policy_switch_csv_str = LaunchConfiguration('save_policy_switch_csv').perform(context)
         csv_format = LaunchConfiguration('csv_format').perform(context)
         csv_file_path = LaunchConfiguration('csv_file_path').perform(context)
+        save_console_log_str = LaunchConfiguration('save_console_log').perform(context)
+        console_log_dir = LaunchConfiguration('console_log_dir').perform(context)
         headless_str = LaunchConfiguration('headless').perform(context)
         csv_min_force_n_str = LaunchConfiguration('csv_min_force_n').perform(context)
         csv_joint_torque_str = LaunchConfiguration('csv_joint_forces_min_torque_nm').perform(context)
@@ -180,7 +194,14 @@ def generate_launch_description():
         save_joint_state_csv = save_joint_state_csv_str.lower() == 'true'
         save_link_kinetic_energy_csv = save_link_kinetic_energy_csv_str.lower() == 'true'
         save_policy_switch_csv = save_policy_switch_csv_str.lower() == 'true'
+        save_console_log = save_console_log_str.lower() == 'true'
         headless = headless_str.lower() == 'true'
+
+        node_output_mode = 'both' if save_console_log else 'screen'
+
+        extra_actions = []
+        if save_console_log and console_log_dir:
+            extra_actions.append(SetEnvironmentVariable('ROS_LOG_DIR', console_log_dir))
 
         # 读取URDF文件内容
         try:
@@ -227,7 +248,7 @@ def generate_launch_description():
             package='mujoco_simulator',           # 节点所属包
             executable='mujoco_simulator',        # 可执行文件名
             name='mujoco_simulator',              # 节点名称
-            output='screen',                      # 输出到终端
+            output=node_output_mode,              # 输出到终端；可选同时写 ROS 2 launch 日志
             emulate_tty=True,                     # 终端仿真，便于日志显示
             arguments=args,                       # 启动参数
             parameters=[
@@ -257,7 +278,7 @@ def generate_launch_description():
             package='interface_example',
             executable='joint_state_converter.py',
             name='joint_state_converter',
-            output='screen',
+            output=node_output_mode,
             parameters=[{'use_sim_time': True}]
         )
 
@@ -266,7 +287,7 @@ def generate_launch_description():
             package='robot_state_publisher',
             executable='robot_state_publisher',
             name='robot_state_publisher',
-            output='screen',
+            output=node_output_mode,
             parameters=[{
                 'robot_description': robot_description,
                 'use_sim_time': True
@@ -279,11 +300,11 @@ def generate_launch_description():
             executable='static_transform_publisher',
             name='static_transform_publisher',
             arguments=['0', '0', '0', '0', '0', '0', 'world', 'LINK_BASE'],
-            output='screen'
+            output=node_output_mode
         )
 
         # 返回节点对象列表
-        return [mujoco_node, joint_state_converter_node, robot_state_publisher_node, static_transform_publisher_node]
+        return [*extra_actions, mujoco_node, joint_state_converter_node, robot_state_publisher_node, static_transform_publisher_node]
 
     # 使用OpaqueFunction以便在launch时动态获取参数
     mujoco_launch = OpaqueFunction(function=launch_setup)
@@ -303,6 +324,8 @@ def generate_launch_description():
         declare_csv_min_force_n_arg,
         declare_csv_joint_forces_min_torque_nm_arg,
         declare_csv_path_arg,
+        declare_save_console_log_arg,
+        declare_console_log_dir_arg,
         declare_headless_arg,
         declare_urdf_file_arg,
         declare_perturb_force_arg,

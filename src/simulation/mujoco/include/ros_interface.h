@@ -189,6 +189,7 @@ class RosInterface {
     double force_magnitude;
     double force_normal;
     double force_friction;   // 接触坐标系下切向力大小 sqrt(f_c[1]^2 + f_c[2]^2)
+    double protection_scale = 1.0;  // 1.0=未衰减，<1.0=护具生效后的缩放因子
     double world_torques[3];
     double base_link_pos[3];
     double base_link_quat[4];

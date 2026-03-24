@@ -153,7 +153,7 @@ cd /home/wang22/engineai/engineai_ros2_workspace && conda activate engineai_ros2
 source install/setup.bash 
 # ros2 launch mujoco_simulator mujoco_simulator.launch.py csv_format:=csv or binary
 # 修改 pm_v2.yaml protection: enabled:true 启用护具功能（thickness:设置厚度）
-ros2 launch mujoco_simulator mujoco_simulator.launch.py save_contact_csv:=true save_perturbation_csv:=true save_joint_state_csv:=true save_sensor_vibration_csv:=true save_joint_forces_csv:=true save_link_kinetic_energy_csv:=true save_policy_switch_csv:=true csv_format:=csv csv_min_force_n:=400 csv_joint_forces_min_torque_nm:=10
+ros2 launch mujoco_simulator mujoco_simulator.launch.py save_contact_csv:=true save_perturbation_csv:=true save_joint_state_csv:=true save_sensor_vibration_csv:=true save_joint_forces_csv:=true save_link_kinetic_energy_csv:=true save_policy_switch_csv:=true save_console_log:=true console_log_dir:=~/data/mujoco_logs/launch_logs csv_format:=csv csv_min_force_n:=400 csv_joint_forces_min_torque_nm:=10
 # contact：接触力模长≥ csv_min_force_n 才写入。joint_forces：满足「||F||≥csv_min_force_n」或「||M||≥csv_joint_forces_min_torque_nm」则写入（OR）；后者可与 calculate_fall_risk 中 M_torsion_thr 同量级，||M|| 为子link偶矢模（非单列 M_torsion_mag）。任一侧 0 表示该条件不参与过滤。
 # csv_format:=binary 时写 *.bin；policy_switch 同为 policy_switch.bin（魔数 MJPSW01）。脚本见 scripts/mujoco_data_io.py（load_data_file）
 # binary 完整性：接触/扰动队列满时阻塞不丢条；物理线程结束前 Drain 并 flush 全部日志流。**Linux 上物理线程使用 64MB 栈（pthread）**，缓解退出时 stack smashing。
@@ -161,6 +161,7 @@ ros2 launch mujoco_simulator mujoco_simulator.launch.py save_contact_csv:=true s
 # mesh 模型若仅足底 box 与地面相交，摔倒段 contact_force_by_link 可能几乎只有踝部；`serial_links_mesh.xml` 已在膝/躯干增加接地球体以便记录膝、胸腹与地面接触。
 # contact_data.bin：进程异常退出时可能夹一条半截记录导致后续整段无法按旧逻辑连续解析；`mujoco_data_io.read_binary_contact_data` 已支持错位后向前搜索重新对齐，避免 bin 里后半段其它 link 的接触力被整段丢弃。
 # save_perturbation_csv: 推力；save_policy_switch_csv: RL 切换；留空目录则 ~/data/mujoco_logs/时间戳/
+# save_console_log: 将终端输出同时写入 ROS 2 launch 日志；console_log_dir 留空则使用默认 ~/.ros/log
 
 # # 推倒采样仿真器 - 支持交互式干扰力控制
 # # 基本启动
@@ -394,11 +395,11 @@ python3 scripts/plot_contact_grid.py "$MERGED_CSV" --target-force 1.0 --force-fi
 # CHR 力衰减曲线：默认密度 0.4，绘制 1 mm / 6 mm 厚度在 0~5 kN 范围内的曲线
 python3 scripts/ThicknessCalculate/force_calculator.py \
   --plot-decay-curves \
-  --thicknesses 6 \
+  --thicknesses 6 12 18 24\
   --density 0.4 \
   --force-min 0 \
-  --force-max 3 \
-  -o /home/wang22/engineai/engineai_ros2_workspace/scripts/ThicknessCalculate/force_decay_curves_0to3kN_6mm.png
+  --force-max 30 \
+  -o ./scripts/ThicknessCalculate/force_decay_curves_0to30kN_6mm_12mm_18mm_24mm.png
 ```
 
 
@@ -612,7 +613,7 @@ ros2 launch launch_urdf_only.launch.py urdf_file:=/home/wang22/engineai/engineai
 ```bash
 # 只需指定一个文件夹，自动查找 contact_data.csv、sensor_vibration_data.csv 等
 python3 scripts/calculate_fall_risk.py \
-  --log-dir /home/linslab/data/mujoco_logs/8dir-200.0N-0.4s-20260321_095833/forward-200.0N-1/20260321_095836 \
+  --log-dir /home/linslab/data/mujoco_logs/20260324_213449 \
   --plot \
   --t-start 3.0 --t-end 5.0
 # 输出默认保存到同目录 risk_results_summary.csv 等

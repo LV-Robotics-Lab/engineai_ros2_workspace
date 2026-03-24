@@ -416,7 +416,7 @@ bool RosInterface::Initialize() {
       if (csv_format_ == "csv") {
         // 写入CSV头部
         // 写入CSV头部（移除关节角度、关节加速度和电机扭矩，已移到独立的 joint_state_data.csv）
-        csv_file_ << "timestamp,contact_id,body1_name,body2_name,pos_x,pos_y,pos_z,robot_frame_x,robot_frame_y,robot_frame_z,force_x,force_y,force_z,force_magnitude,force_normal,force_friction,torque_x,torque_y,torque_z,base_link_x,base_link_y,base_link_z,base_link_qw,base_link_qx,base_link_qy,base_link_qz,base_link_vel_x,base_link_vel_y,base_link_vel_z,base_link_angvel_x,base_link_angvel_y,base_link_angvel_z,collision_link_x,collision_link_y,collision_link_z,collision_link_qw,collision_link_qx,collision_link_qy,collision_link_qz\n";
+        csv_file_ << "timestamp,contact_id,body1_name,body2_name,pos_x,pos_y,pos_z,robot_frame_x,robot_frame_y,robot_frame_z,force_x,force_y,force_z,force_magnitude,force_normal,force_friction,protection_scale,torque_x,torque_y,torque_z,base_link_x,base_link_y,base_link_z,base_link_qw,base_link_qx,base_link_qy,base_link_qz,base_link_vel_x,base_link_vel_y,base_link_vel_z,base_link_angvel_x,base_link_angvel_y,base_link_angvel_z,collision_link_x,collision_link_y,collision_link_z,collision_link_qw,collision_link_qx,collision_link_qy,collision_link_qz\n";
         csv_file_.flush();
       } else {
         // 二进制格式：写入文件头（包含关节数量等信息）
@@ -1569,6 +1569,7 @@ void RosInterface::PublishContactForces(const mjModel* m, mjData* d) {
 
 
   // 遍历所有接触点，计算并存储所有需要的数据
+  auto& sim_manager = SimManager::GetInstance();
   for (int i = 0; i < ncon; ++i) {
     const mjContact& contact = d->contact[i];
     
@@ -2358,6 +2359,7 @@ void RosInterface::PublishContactForces(const mjModel* m, mjData* d) {
             cdata.force_magnitude = (*csv_contact_force_magnitudes)[i];
             cdata.force_normal = (*csv_contact_force_normals)[i];
             cdata.force_friction = (*csv_contact_force_frictions)[i];
+            cdata.protection_scale = sim_manager.GetContactProtectionScale(i);
             cdata.world_torques[0] = (*csv_world_torques_x)[i];
             cdata.world_torques[1] = (*csv_world_torques_y)[i];
             cdata.world_torques[2] = (*csv_world_torques_z)[i];
@@ -2860,6 +2862,7 @@ void RosInterface::ContactWriterThread() {
                     << row.force_magnitude << ","
                     << row.force_normal << ","
                     << row.force_friction << ","
+                    << row.protection_scale << ","
                     << row.world_torques[0] << ","
                     << row.world_torques[1] << ","
                     << row.world_torques[2] << ","
