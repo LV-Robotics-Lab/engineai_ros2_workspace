@@ -48,15 +48,46 @@ Both computing units are maintained as open platforms by EngineAI.
 - GCC >= 11
 - CMake >= 3.22
 - Python >= 3.10
-#### Software Dependencies
+#### ROS 2 Source Setup (Ubuntu 24.04 / Jazzy)
+```bash
+sudo apt update
+sudo apt install -y curl gnupg2 lsb-release ca-certificates software-properties-common
+sudo add-apt-repository universe -y
+
+sudo curl -sSL https://raw.githubusercontent.com/ros/rosdistro/master/ros.key \
+  -o /usr/share/keyrings/ros-archive-keyring.gpg
+
+echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/ros-archive-keyring.gpg] http://packages.ros.org/ros2/ubuntu $(. /etc/os-release && echo ${UBUNTU_CODENAME}) main" \
+| sudo tee /etc/apt/sources.list.d/ros2.list > /dev/null
+
+sudo apt update
 ```
+#### ROS 2 Source Setup (Ubuntu 22.04 / Humble)
+```bash
+sudo apt update
+sudo apt install -y curl gnupg2 lsb-release ca-certificates software-properties-common
+sudo add-apt-repository universe -y
+
+sudo curl -sSL https://raw.githubusercontent.com/ros/rosdistro/master/ros.key \
+  -o /usr/share/keyrings/ros-archive-keyring.gpg
+
+echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/ros-archive-keyring.gpg] http://packages.ros.org/ros2/ubuntu $(. /etc/os-release && echo ${UBUNTU_CODENAME}) main" \
+| sudo tee /etc/apt/sources.list.d/ros2.list > /dev/null
+
+sudo apt update
+```
+#### Software Dependencies
+```bash
 sudo apt update
 sudo apt install rsync sshpass openssh-client libglfw3-dev libxinerama-dev libxcursor-dev
-sudo apt install ros-dev-tools ros-humble-rmw-cyclonedds-cpp ros-humble-ros-base
+# Ubuntu 24.04 (Jazzy)
+sudo apt install -y python3-rosdep python3-colcon-common-extensions ros-jazzy-rmw-cyclonedds-cpp ros-jazzy-ros-base
+# Ubuntu 22.04 (Humble)
+# sudo apt install -y python3-rosdep python3-colcon-common-extensions ros-humble-rmw-cyclonedds-cpp ros-humble-ros-base
 sudo apt install -y liblcm-dev
 sudo apt install -y libglib2.0-dev
 sudo apt install -y libgoogle-glog-dev
-conda create -n engineai_ros2 python=3.10
+conda create -n engineai_ros2 python=3.10 -y
 conda activate engineai_ros2
 # glog：rl_basic_example_CHR；其余：scripts/ 分析（fall_risk、plot_contact_grid、merge、mujoco_data_io、violin、ThicknessCalculate 等）
 conda install -y -c conda-forge glog pandas numpy matplotlib seaborn pyyaml scikit-learn scipy psutil tqdm
