@@ -47,6 +47,25 @@ import matplotlib
 import matplotlib.pyplot as plt
 
 
+# Threshold defaults
+COLLISION_FORCE_THRESHOLD_N = 400.0
+JOINT_RANGE_PERCENTILE_THRESHOLD = 0.01
+
+ACCELERATION_RISK_THRESHOLD_MS2 = 100.0
+ACCELERATION_RISK_WINDOW_MS = 20.0
+
+CONTACT_FORCE_RISK_THRESHOLD_N = 2000.0
+CONTACT_FORCE_RISK_VULNERABLE_THRESHOLD_N = 400.0
+CONTACT_FORCE_RISK_TORSO_THRESHOLD_N = 1500.0
+
+MOTOR_REGEN_POWER_THRESHOLD_W = 300.0
+
+JOINT_WRENCH_F_AXIAL_THRESHOLD_N = 2000.0
+JOINT_WRENCH_F_SHEAR_THRESHOLD_N = 2000.0
+JOINT_WRENCH_M_TORSION_THRESHOLD_NM = 100.0
+JOINT_WRENCH_M_BEND_THRESHOLD_NM = 100.0
+
+
 def filter_df_by_time(
     df: pd.DataFrame,
     t_start: Optional[float],
@@ -107,6 +126,9 @@ def get_joint_torque_limit(joint_name: str) -> float:
     返回:
         扭矩上限（N·m），如果未找到则返回 52.0（默认低扭矩）
     """
+    high_torque_limit_nm = 164.0
+    low_torque_limit_nm = 52.0
+
     # 高扭矩关节索引（Q90电机：164.0 N·m）
     high_torque_joints = {0, 1, 3, 6, 7, 9}  # J00, J01, J03, J06, J07, J09
     
@@ -118,16 +140,16 @@ def get_joint_torque_limit(joint_name: str) -> float:
         joint_idx = int(name_clean)
     except ValueError:
         # 如果无法解析为数字，返回默认值
-        return 52.0
+        return low_torque_limit_nm
     
     # 根据关节索引返回对应的扭矩上限
     if joint_idx in high_torque_joints:
-        return 164.0
+        return high_torque_limit_nm
     elif 0 <= joint_idx <= 23:
-        return 52.0
+        return low_torque_limit_nm
     else:
         # 超出范围，返回默认值
-        return 52.0
+        return low_torque_limit_nm
 
 
 def extract_timestamp_from_filename(file_path: str) -> Optional[str]:
@@ -152,7 +174,7 @@ def extract_timestamp_from_filename(file_path: str) -> Optional[str]:
 
 def extract_collision_timestamps(
     contact_df: pd.DataFrame,
-    force_threshold: float = 400.0
+    force_threshold: float = COLLISION_FORCE_THRESHOLD_N
 ) -> np.ndarray:
     """
     从 contact_data 中提取 non-foot impact 且 force 大于阈值的时间戳集合
@@ -163,7 +185,7 @@ def extract_collision_timestamps(
             - body1_name: 第一个物体名称
             - body2_name: 第二个物体名称
             - force_magnitude: 力的大小
-        force_threshold: 力的阈值（N），默认 400.0
+        force_threshold: 力的阈值（N），默认 COLLISION_FORCE_THRESHOLD_N
     
     返回:
         time_collision: 满足条件的时间戳数组（已排序且去重）
@@ -216,7 +238,7 @@ def extract_collision_timestamps(
 def extract_collision_nearjointlimit_timestamps(
     time_collision: np.ndarray,
     joint_state_df: pd.DataFrame,
-    joint_range_percentile: float = 0.01
+    joint_range_percentile: float = JOINT_RANGE_PERCENTILE_THRESHOLD
 ) -> np.ndarray:
     """
     从 extract_collision_timestamps 的帧中选择关节位置接近 1% 和 99% 关节范围的时间戳
@@ -226,7 +248,7 @@ def extract_collision_nearjointlimit_timestamps(
         joint_state_df: 关节状态数据 DataFrame，应包含列：
             - timestamp: 时间戳
             - joint_*_position: 各关节位置（列名格式为 joint_<index>_position）
-        joint_range_percentile: 关节范围百分位，默认 0.01（即 1% 和 99%）
+        joint_range_percentile: 关节范围百分位，默认 JOINT_RANGE_PERCENTILE_THRESHOLD（即 1% 和 99%）
     
     返回:
         time_collision_near_jointlimit: 接近关节限制的碰撞时间戳数组（已排序且去重）
@@ -308,9 +330,9 @@ def extract_collision_nearjointlimit_timestamps(
 def calculate_acceleration_risk(
     sensor_vibration_df: pd.DataFrame,
     time_collision: np.ndarray,
-    a_thr: float = 30.0,
+    a_thr: float = ACCELERATION_RISK_THRESHOLD_MS2,
     dt: float = 0.002,
-    window_ms: float = 20.0,
+    window_ms: float = ACCELERATION_RISK_WINDOW_MS,
     save_frame_by_frame_path: Optional[str] = None
 ) -> float:
     """
@@ -325,9 +347,9 @@ def calculate_acceleration_risk(
             - base_link_lin_acc_x, base_link_lin_acc_y, base_link_lin_acc_z: torso 线加速度
             - head_lin_acc_x, head_lin_acc_y, head_lin_acc_z: head 线加速度
         time_collision: 碰撞时间戳数组（从 extract_collision_timestamps 获取）
-        a_thr: 加速度阈值，默认 0.0（仅统计超过阈值的部分）
+        a_thr: 加速度阈值，默认 ACCELERATION_RISK_THRESHOLD_MS2（仅统计超过阈值的部分）
         dt: 采样时间间隔（秒）。如果为 None，则从 timestamp 列自动估计
-        window_ms: 评估时间窗（毫秒），默认 20.0 ms
+        window_ms: 评估时间窗（毫秒），默认 ACCELERATION_RISK_WINDOW_MS
     
     返回:
         risk_acc: 加速度风险值
@@ -493,8 +515,8 @@ def calculate_acceleration_risk(
 def calculate_contact_force_risk(
     contact_df: pd.DataFrame,
     time_collision: np.ndarray,
-    f_thr: float = 1000.0,
-    f_thr_vulnerable: float = 400.0,
+    f_thr: float = CONTACT_FORCE_RISK_THRESHOLD_N,
+    f_thr_vulnerable: float = CONTACT_FORCE_RISK_VULNERABLE_THRESHOLD_N,
     dt: float = 0.002,
     save_frame_by_frame_path: Optional[str] = None
 ) -> Tuple[float, pd.DataFrame]:
@@ -514,8 +536,8 @@ def calculate_contact_force_risk(
             - body2_name: 第二个物体名称
             - force_magnitude: 力的大小
         time_collision: 碰撞时间戳数组（从 extract_collision_timestamps 获取）
-        f_thr: 力阈值（N），默认 1000.0（用于一般关节）
-        f_thr_vulnerable: 脆弱关节的力阈值（N），默认 400.0（用于 HEAD 和 ELBOW_END）
+        f_thr: 力阈值（N），默认 CONTACT_FORCE_RISK_THRESHOLD_N（用于一般关节）
+        f_thr_vulnerable: 脆弱关节的力阈值（N），默认 CONTACT_FORCE_RISK_VULNERABLE_THRESHOLD_N（用于 HEAD 和 ELBOW_END）
         dt: 采样时间间隔（秒），默认 0.002。用于 episode 级时间积分
         save_frame_by_frame_path: 如果指定，保存逐帧数据到 CSV
     
@@ -621,12 +643,12 @@ def calculate_contact_force_risk(
 
     # 定义不同关节的阈值（关键词 -> 阈值）
     # HEAD, ELBOW_END: 400N（最脆弱）
-    # TORSO: 700N（中等脆弱）
-    # 其他: 1000N（默认）
+    # TORSO: 1500N（中等脆弱）
+    # 其他: CONTACT_FORCE_RISK_THRESHOLD_N（默认）
     vulnerable_thresholds = {
         'HEAD': f_thr_vulnerable,       # 400
         'ELBOW_END': f_thr_vulnerable,  # 400
-        'TORSO': 700.0,                 # 700
+        'TORSO': CONTACT_FORCE_RISK_TORSO_THRESHOLD_N,
     }
     
     def get_threshold_for_link(link_name: str) -> float:
@@ -701,8 +723,8 @@ def calculate_motor_torque_risk(
     mode: str = "const",
     wp: float = 1.0,
     wr: float = 1.0,
-    tau_max_const: float = 52.0,  # 注意：const 模式下会根据关节类型自动选择 164.0 或 52.0
-    P0_const: float = 500.0,
+    tau_max_const: float = 52.0,  # 注意：const 模式下会根据关节类型自动选择高/低扭矩上限
+    P0_const: float = MOTOR_REGEN_POWER_THRESHOLD_W,
     q_tau: float = 0.9,
     q_p: float = 0.9,
     eps: float = 1e-8,
@@ -724,8 +746,8 @@ def calculate_motor_torque_risk(
         wp, wr: 峰值扭矩与再生功率风险的权重
         tau_max_const: const 模式下未使用（会根据关节类型自动选择）
         P0_const: const 模式下所有关节共享的再生功率阈值
-        q_tau: data 模式下 |tau_j| 的分位数（默认 0.9，即 90% 分位数）
-        q_p: data 模式下 P_regen_j 的分位数（默认 0.9，即 90% 分位数）
+        q_tau: data 模式下 |tau_j| 的分位数（默认 0.9）
+        q_p: data 模式下 P_regen_j 的分位数（默认 0.9）
         eps: 数值下限，避免除以 0
         save_path: 若不为 None，则将 episode 级 breakdown 保存为 CSV
 
@@ -1270,8 +1292,8 @@ def plot_acceleration_risk_curves(frame_by_frame_df: pd.DataFrame, output_path: 
 def plot_acceleration_curves(
     sensor_vibration_df: pd.DataFrame,
     time_collision: Optional[np.ndarray] = None,
-    window_ms: float = 20.0,
-    a_thr: float = 30.0,
+    window_ms: float = ACCELERATION_RISK_WINDOW_MS,
+    a_thr: float = ACCELERATION_RISK_THRESHOLD_MS2,
     output_path: Optional[str] = None
 ) -> None:
     """
@@ -1283,8 +1305,8 @@ def plot_acceleration_curves(
             - base_link_lin_acc_x, base_link_lin_acc_y, base_link_lin_acc_z
             - head_lin_acc_x, head_lin_acc_y, head_lin_acc_z
         time_collision: 碰撞时间戳数组（可选），若提供则画垂线并标出 20ms 窗口
-        window_ms: 时间窗（ms），用于标出窗口范围，默认 20.0
-        a_thr: 加速度阈值（m/s^2），画水平参考线，默认 30.0
+        window_ms: 时间窗（ms），用于标出窗口范围，默认 ACCELERATION_RISK_WINDOW_MS
+        a_thr: 加速度阈值（m/s^2），画水平参考线，默认 ACCELERATION_RISK_THRESHOLD_MS2
         output_path: 图片保存路径（可选）
     """
     if sensor_vibration_df.empty:
@@ -1350,7 +1372,7 @@ def plot_acceleration_curves(
 def plot_contact_force_curves(
     contact_df: pd.DataFrame,
     time_collision: Optional[np.ndarray] = None,
-    f_thr: float = 1000.0,
+    f_thr: float = CONTACT_FORCE_RISK_THRESHOLD_N,
     output_path: Optional[str] = None
 ) -> None:
     """
@@ -1360,7 +1382,7 @@ def plot_contact_force_curves(
     参数:
         contact_df: 接触力数据 DataFrame，应包含列：timestamp, force_magnitude, force_normal, force_friction
         time_collision: 碰撞时间戳数组（可选），若提供则画垂线
-        f_thr: 力阈值（N），画水平参考线，默认 1000.0
+        f_thr: 力阈值（N），画水平参考线，默认 CONTACT_FORCE_RISK_THRESHOLD_N
         output_path: 图片保存路径（可选）
     """
     if contact_df.empty:
@@ -2103,10 +2125,10 @@ def calculate_joint_wrench_risk(
     time_collision: np.ndarray,
     time_collision_near_jointlimit: np.ndarray,
     dt: float = 0.002,
-    F_axial_thr: float = 1000.0,
-    F_shear_thr: float = 1000.0,
-    M_torsion_thr: float = 100.0,
-    M_bend_thr: float = 1000.0,
+    F_axial_thr: float = JOINT_WRENCH_F_AXIAL_THRESHOLD_N,
+    F_shear_thr: float = JOINT_WRENCH_F_SHEAR_THRESHOLD_N,
+    M_torsion_thr: float = JOINT_WRENCH_M_TORSION_THRESHOLD_NM,
+    M_bend_thr: float = JOINT_WRENCH_M_BEND_THRESHOLD_NM,
     w1: float = 1.0,
     w2: float = 1.0,
     w3: float = 0.01,
@@ -2138,10 +2160,10 @@ def calculate_joint_wrench_risk(
         time_collision: 碰撞时间戳数组（从 extract_collision_timestamps 获取）
         time_collision_near_jointlimit: 接近关节限制的碰撞时间戳数组（从 extract_collision_nearjointlimit_timestamps 获取）
         dt: 采样时间间隔（秒），默认 0.002
-        F_axial_thr: 轴向力阈值，默认 1000.0
-        F_shear_thr: 剪切力阈值，默认 1000.0
-        M_torsion_thr: 扭转力矩阈值，默认 100.0
-        M_bend_thr: 弯曲力矩阈值，默认 100.0
+        F_axial_thr: 轴向力阈值，默认 JOINT_WRENCH_F_AXIAL_THRESHOLD_N
+        F_shear_thr: 剪切力阈值，默认 JOINT_WRENCH_F_SHEAR_THRESHOLD_N
+        M_torsion_thr: 扭转力矩阈值，默认 JOINT_WRENCH_M_TORSION_THRESHOLD_NM
+        M_bend_thr: 弯曲力矩阈值，默认 JOINT_WRENCH_M_BEND_THRESHOLD_NM
         w1, w2, w3, w4: 各风险项的权重，默认均为 1.0
         save_frame_by_frame_path: 如果指定，保存逐帧数据到 CSV
     
@@ -2287,6 +2309,147 @@ def calculate_perturbation_risk(perturbation_df: pd.DataFrame) -> float:
     return risk
 
 
+def _build_collision_mask(timestamps: np.ndarray, collision_times: np.ndarray, tolerance: float = 0.001) -> np.ndarray:
+    """根据碰撞时间戳构造布尔掩码。"""
+    if timestamps.size == 0 or len(collision_times) == 0:
+        return np.zeros_like(timestamps, dtype=bool)
+
+    mask = np.zeros(len(timestamps), dtype=bool)
+    for t_collision in collision_times:
+        mask |= np.abs(timestamps - t_collision) <= tolerance
+    return mask
+
+
+def collect_risk_related_max_values(
+    contact_df: pd.DataFrame,
+    sensor_vibration_df: pd.DataFrame,
+    joint_state_df: pd.DataFrame,
+    joint_forces_df: pd.DataFrame,
+    time_collision: np.ndarray,
+    time_collision_near_jointlimit: np.ndarray,
+    acceleration_window_ms: float = ACCELERATION_RISK_WINDOW_MS,
+) -> Dict[str, float]:
+    """
+    统计与 risk 相关的关键物理量最大值，便于结果输出时快速查看。
+    """
+    max_values: Dict[str, float] = {}
+
+    # 1) contact force：仅统计 risk 中会使用到的非脚/踝碰撞
+    if not contact_df.empty and len(time_collision) > 0:
+        required_cols = {'timestamp', 'body1_name', 'body2_name', 'force_magnitude'}
+        if required_cols.issubset(contact_df.columns):
+            def get_robot_link(body1: str, body2: str) -> Optional[str]:
+                body1_str = str(body1).strip()
+                body2_str = str(body2).strip()
+                if body1_str.startswith("LINK_"):
+                    return body1_str
+                if body2_str.startswith("LINK_"):
+                    return body2_str
+                if body1_str.lower() not in ("world", "ground") and body2_str.lower() in ("world", "ground"):
+                    return body1_str
+                if body2_str.lower() not in ("world", "ground") and body1_str.lower() in ("world", "ground"):
+                    return body2_str
+                if body1_str and body2_str and body1_str.lower() not in ("world", "ground") and body2_str.lower() not in ("world", "ground"):
+                    return body2_str
+                return None
+
+            foot_ankle_keywords = ('foot', 'ankle', 'toe', 'heel', 'LINK_ANKLE', 'LINK_FOOT')
+
+            def is_foot_ankle_link(link_name: str) -> bool:
+                s = str(link_name).lower()
+                return any(kw.lower() in s for kw in foot_ankle_keywords)
+
+            contact_eval_df = contact_df.copy()
+            contact_eval_df['robot_link'] = contact_eval_df.apply(
+                lambda row: get_robot_link(row['body1_name'], row['body2_name']),
+                axis=1
+            )
+            contact_eval_df = contact_eval_df[contact_eval_df['robot_link'].notna()].copy()
+            if not contact_eval_df.empty:
+                timestamps = contact_eval_df['timestamp'].to_numpy(dtype=float)
+                collision_mask = _build_collision_mask(timestamps, time_collision)
+                contact_eval_df = contact_eval_df[collision_mask].copy()
+                contact_eval_df = contact_eval_df[
+                    ~contact_eval_df['robot_link'].apply(is_foot_ankle_link)
+                ].copy()
+                if not contact_eval_df.empty:
+                    max_values['max_contact_force_n'] = float(contact_eval_df['force_magnitude'].max())
+
+    # 2) acceleration：仅统计碰撞后窗口内 torso/head 加速度
+    if not sensor_vibration_df.empty and len(time_collision) > 0:
+        required_cols = {
+            'timestamp',
+            'base_link_lin_acc_x', 'base_link_lin_acc_y', 'base_link_lin_acc_z',
+            'head_lin_acc_x', 'head_lin_acc_y', 'head_lin_acc_z',
+        }
+        if required_cols.issubset(sensor_vibration_df.columns):
+            timestamps = sensor_vibration_df['timestamp'].to_numpy(dtype=float)
+            torso_acc_mag = np.sqrt(
+                sensor_vibration_df['base_link_lin_acc_x'].to_numpy(dtype=float) ** 2 +
+                sensor_vibration_df['base_link_lin_acc_y'].to_numpy(dtype=float) ** 2 +
+                sensor_vibration_df['base_link_lin_acc_z'].to_numpy(dtype=float) ** 2
+            )
+            head_acc_mag = np.sqrt(
+                sensor_vibration_df['head_lin_acc_x'].to_numpy(dtype=float) ** 2 +
+                sensor_vibration_df['head_lin_acc_y'].to_numpy(dtype=float) ** 2 +
+                sensor_vibration_df['head_lin_acc_z'].to_numpy(dtype=float) ** 2
+            )
+            window_s = acceleration_window_ms / 1000.0
+            window_mask = np.zeros(len(sensor_vibration_df), dtype=bool)
+            for t_collision in time_collision:
+                window_mask |= (timestamps >= t_collision) & (timestamps <= t_collision + window_s)
+            if np.any(window_mask):
+                max_values['max_torso_acceleration_ms2'] = float(np.nanmax(torso_acc_mag[window_mask]))
+                max_values['max_head_acceleration_ms2'] = float(np.nanmax(head_acc_mag[window_mask]))
+                max_values['max_acceleration_ms2'] = float(
+                    max(
+                        max_values['max_torso_acceleration_ms2'],
+                        max_values['max_head_acceleration_ms2'],
+                    )
+                )
+
+    # 3) regen power：统计全实验所有关节的最大再生功率
+    if not joint_state_df.empty:
+        torque_cols = [c for c in joint_state_df.columns if c.startswith("actuator_") and c.endswith("_force")]
+        max_regen_power_w = None
+        max_torque_nm = None
+        for torque_col in torque_cols:
+            base_name = torque_col[len("actuator_") : -len("_force")]
+            vel_col = f"joint_{base_name}_velocity"
+            if vel_col not in joint_state_df.columns:
+                continue
+            tau = joint_state_df[torque_col].to_numpy(dtype=float)
+            qd = joint_state_df[vel_col].to_numpy(dtype=float)
+            abs_tau = np.abs(tau)
+            regen_power = np.maximum(0.0, -(tau * qd))
+            if abs_tau.size > 0:
+                local_tau_max = float(np.nanmax(abs_tau))
+                max_torque_nm = local_tau_max if max_torque_nm is None else max(max_torque_nm, local_tau_max)
+            if regen_power.size > 0:
+                local_regen_max = float(np.nanmax(regen_power))
+                max_regen_power_w = local_regen_max if max_regen_power_w is None else max(max_regen_power_w, local_regen_max)
+        if max_torque_nm is not None:
+            max_values['max_motor_torque_nm'] = max_torque_nm
+        if max_regen_power_w is not None:
+            max_values['max_regen_power_w'] = max_regen_power_w
+
+    # 4) joint wrench：按 risk 的 gate 统计各项最大值
+    if not joint_forces_df.empty and len(time_collision) > 0:
+        required_cols = {'timestamp', 'F_axial_mag', 'F_shear_mag', 'M_torsion_mag', 'M_bend_mag'}
+        if required_cols.issubset(joint_forces_df.columns):
+            timestamps = joint_forces_df['timestamp'].to_numpy(dtype=float)
+            collision_mask = _build_collision_mask(timestamps, time_collision)
+            near_jointlimit_mask = _build_collision_mask(timestamps, time_collision_near_jointlimit)
+            if np.any(collision_mask):
+                max_values['max_joint_wrench_f_axial_n'] = float(np.nanmax(joint_forces_df.loc[collision_mask, 'F_axial_mag']))
+                max_values['max_joint_wrench_f_shear_n'] = float(np.nanmax(joint_forces_df.loc[collision_mask, 'F_shear_mag']))
+                max_values['max_joint_wrench_m_bend_nm'] = float(np.nanmax(joint_forces_df.loc[collision_mask, 'M_bend_mag']))
+            if np.any(near_jointlimit_mask):
+                max_values['max_joint_wrench_m_torsion_nm'] = float(np.nanmax(joint_forces_df.loc[near_jointlimit_mask, 'M_torsion_mag']))
+
+    return max_values
+
+
 def calculate_total_fall_risk(
     contact_df: pd.DataFrame,
     sensor_vibration_df: pd.DataFrame,
@@ -2294,9 +2457,11 @@ def calculate_total_fall_risk(
     joint_forces_df: pd.DataFrame,
     perturbation_df: Optional[pd.DataFrame] = None,
     output_base: Optional[str] = None,
+    force_threshold: float = COLLISION_FORCE_THRESHOLD_N,
+    acceleration_threshold: float = ACCELERATION_RISK_THRESHOLD_MS2,
     w_contact: float = 1.0,
-    w_acceleration: float = 0.001,
-    w_motor: float = 10.0,
+    w_acceleration: float = 1.0,
+    w_motor: float = 1.0,
     w_joint_wrench: float = 1.0,
 ) -> Dict:
     """
@@ -2309,14 +2474,16 @@ def calculate_total_fall_risk(
         joint_forces_df: 关节力数据
         perturbation_df: 扰动数据（可选）
         output_base: 输出文件路径前缀（可选）
+        force_threshold: 提取碰撞时间戳的接触力阈值
+        acceleration_threshold: 加速度风险阈值
         w_contact: 接触力风险权重，默认 1.0
-        w_acceleration: 加速度风险权重，默认 1.0
-        w_motor: 电机扭矩风险权重，默认 1.0
+        w_acceleration: 加速度风险权重，默认 0.001
+        w_motor: 电机扭矩风险权重，默认 10.0
         w_joint_wrench: 关节力风险权重，默认 1.0
         
     注意:
-        - force_threshold 由 extract_collision_timestamps 函数管理（默认 400.0）
-        - a_thr 由 calculate_acceleration_risk 函数管理（默认 20.0）
+        - force_threshold 由 extract_collision_timestamps 函数管理（默认 COLLISION_FORCE_THRESHOLD_N）
+        - a_thr 由 calculate_acceleration_risk 函数管理（默认 ACCELERATION_RISK_THRESHOLD_MS2）
     
     返回:
         Dict包含：
@@ -2327,8 +2494,7 @@ def calculate_total_fall_risk(
         - time_collision: 碰撞时间戳数组（全局可用，供其他 risk 计算使用）
     """
     # 提取碰撞时间戳（全局可用，供其他 risk 计算使用）
-    # force_threshold 由 extract_collision_timestamps 函数管理默认值
-    time_collision = extract_collision_timestamps(contact_df)
+    time_collision = extract_collision_timestamps(contact_df, force_threshold=force_threshold)
     
     # 提取接近关节限制的碰撞时间戳
     time_collision_near_jointlimit = extract_collision_nearjointlimit_timestamps(
@@ -2354,10 +2520,10 @@ def calculate_total_fall_risk(
         time_collision=time_collision,
         save_frame_by_frame_path=contact_force_frame_by_frame_path
     )
-    # a_thr 由 calculate_acceleration_risk 函数管理默认值
     acceleration_risk = calculate_acceleration_risk(
         sensor_vibration_df,
         time_collision=time_collision,
+        a_thr=acceleration_threshold,
         save_frame_by_frame_path=acceleration_frame_by_frame_path
     )
     
@@ -2399,6 +2565,15 @@ def calculate_total_fall_risk(
         breakdowns['contact_force'] = contact_breakdown
     if not joint_wrench_breakdown.empty:
         breakdowns['joint_wrench'] = joint_wrench_breakdown
+
+    max_values = collect_risk_related_max_values(
+        contact_df=contact_df,
+        sensor_vibration_df=sensor_vibration_df,
+        joint_state_df=joint_state_df,
+        joint_forces_df=joint_forces_df,
+        time_collision=time_collision,
+        time_collision_near_jointlimit=time_collision_near_jointlimit,
+    )
     
     return {
         'contact_force_risk': contact_risk,
@@ -2408,6 +2583,7 @@ def calculate_total_fall_risk(
         'perturbation_risk': perturbation_risk,
         'total_risk': total_risk,
         'breakdowns': breakdowns,
+        'max_values': max_values,
         'time_collision': time_collision  # 全局可用，供其他 risk 计算使用
     }
 
@@ -2524,14 +2700,14 @@ def main():
         '--a-thr',
         type=float,
         default=None,
-        help='加速度阈值 (m/s²)，用于 risk_acc 计算。如果不指定，使用默认值 20.0'
+        help=f'加速度阈值 (m/s²)，用于 risk_acc 计算。如果不指定，使用默认值 {ACCELERATION_RISK_THRESHOLD_MS2}'
     )
     
     parser.add_argument(
         '--force-threshold',
         type=float,
-        default=400.0,
-        help='接触力阈值 (N)，用于提取碰撞时间戳，默认 400.0'
+        default=COLLISION_FORCE_THRESHOLD_N,
+        help=f'接触力阈值 (N)，用于提取碰撞时间戳，默认 {COLLISION_FORCE_THRESHOLD_N}'
     )
     
     args = parser.parse_args()
@@ -2604,7 +2780,9 @@ def main():
         joint_state_df,
         joint_forces_df,
         perturbation_df,
-        output_base=output_base
+        output_base=output_base,
+        force_threshold=args.force_threshold,
+        acceleration_threshold=(ACCELERATION_RISK_THRESHOLD_MS2 if args.a_thr is None else args.a_thr)
     )
     
     # 输出结果
@@ -2616,6 +2794,29 @@ def main():
     if perturbation_df is not None:
         print(f"扰动risk: {risk_results['perturbation_risk']:.6f}")
     print(f"总risk: {risk_results['total_risk']:.6f}")
+    max_values = risk_results.get('max_values', {})
+    if max_values:
+        print("\n--- 风险相关项最大值 ---")
+        if 'max_contact_force_n' in max_values:
+            print(f"最大 contact force: {max_values['max_contact_force_n']:.4f} N")
+        if 'max_torso_acceleration_ms2' in max_values:
+            print(f"最大 torso acceleration: {max_values['max_torso_acceleration_ms2']:.4f} m/s²")
+        if 'max_head_acceleration_ms2' in max_values:
+            print(f"最大 head acceleration: {max_values['max_head_acceleration_ms2']:.4f} m/s²")
+        if 'max_acceleration_ms2' in max_values:
+            print(f"最大 acceleration: {max_values['max_acceleration_ms2']:.4f} m/s²")
+        if 'max_motor_torque_nm' in max_values:
+            print(f"最大 motor torque: {max_values['max_motor_torque_nm']:.4f} N·m")
+        if 'max_regen_power_w' in max_values:
+            print(f"最大 regen power: {max_values['max_regen_power_w']:.4f} W")
+        if 'max_joint_wrench_f_axial_n' in max_values:
+            print(f"最大 joint wrench axial force: {max_values['max_joint_wrench_f_axial_n']:.4f} N")
+        if 'max_joint_wrench_f_shear_n' in max_values:
+            print(f"最大 joint wrench shear force: {max_values['max_joint_wrench_f_shear_n']:.4f} N")
+        if 'max_joint_wrench_m_torsion_nm' in max_values:
+            print(f"最大 joint wrench torsion: {max_values['max_joint_wrench_m_torsion_nm']:.4f} N·m")
+        if 'max_joint_wrench_m_bend_nm' in max_values:
+            print(f"最大 joint wrench bend moment: {max_values['max_joint_wrench_m_bend_nm']:.4f} N·m")
     
     # 保存结果到文件
     if args.output:
@@ -2661,6 +2862,8 @@ def main():
             'jointforce_risk': round(risk_results['joint_wrench_risk'], 4),
             'all_risk': round(risk_results['total_risk'], 4),
         }
+        for key, value in max_values.items():
+            summary_dict[key] = round(float(value), 4)
         
         summary_df = pd.DataFrame([summary_dict])
         summary_path = f"{output_base}_summary.csv"
@@ -2721,7 +2924,7 @@ def main():
                     time_collision = time_collision[(time_collision >= t_start) & (time_collision <= t_end)]
                 acc_df = filter_df_by_time(sensor_vibration_df, t_start, t_end)
                 if not acc_df.empty:
-                    a_thr = 30.0 if args.a_thr is None else args.a_thr
+                    a_thr = ACCELERATION_RISK_THRESHOLD_MS2 if args.a_thr is None else args.a_thr
                     suffix = f"_{t_start}_{t_end}s" if (t_start is not None and t_end is not None) else ""
                     plot_acceleration_curves(
                         acc_df,
@@ -2756,7 +2959,7 @@ def main():
                     plot_contact_force_curves(
                         contact_plot_df,
                         time_collision=time_collision if len(time_collision) > 0 else None,
-                        f_thr=1000.0,
+                        f_thr=CONTACT_FORCE_RISK_THRESHOLD_N,
                         output_path=f"{output_base}_contact_force_curves{suffix}.png"
                     )
                     plot_contact_force_by_link(
