@@ -421,7 +421,7 @@ bool RosInterface::Initialize() {
       if (csv_format_ == "csv") {
         // 写入CSV头部
         // 写入CSV头部（移除关节角度、关节加速度和电机扭矩，已移到独立的 joint_state_data.csv）
-        csv_file_ << "timestamp,contact_id,body1_name,body2_name,pos_x,pos_y,pos_z,robot_frame_x,robot_frame_y,robot_frame_z,force_x,force_y,force_z,force_magnitude,force_normal,force_friction,protection_scale,torque_x,torque_y,torque_z,base_link_x,base_link_y,base_link_z,base_link_qw,base_link_qx,base_link_qy,base_link_qz,base_link_vel_x,base_link_vel_y,base_link_vel_z,base_link_angvel_x,base_link_angvel_y,base_link_angvel_z,collision_link_x,collision_link_y,collision_link_z,collision_link_qw,collision_link_qx,collision_link_qy,collision_link_qz\n";
+        csv_file_ << "timestamp,contact_id,body1_name,body2_name,pos_x,pos_y,pos_z,robot_frame_x,robot_frame_y,robot_frame_z,force_x,force_y,force_z,force_magnitude,force_normal,force_unprotected,force_friction,protection_scale,torque_x,torque_y,torque_z,base_link_x,base_link_y,base_link_z,base_link_qw,base_link_qx,base_link_qy,base_link_qz,base_link_vel_x,base_link_vel_y,base_link_vel_z,base_link_angvel_x,base_link_angvel_y,base_link_angvel_z,collision_link_x,collision_link_y,collision_link_z,collision_link_qw,collision_link_qx,collision_link_qy,collision_link_qz\n";
         csv_file_.flush();
       } else {
         // 二进制格式：写入文件头（包含关节数量等信息）
@@ -762,7 +762,7 @@ void RosInterface::OpenCsvFilesAtDir(const std::string& csv_dir) {
     }
     if (csv_file_.is_open()) {
       if (csv_format_ == "csv") {
-        csv_file_ << "timestamp,contact_id,body1_name,body2_name,pos_x,pos_y,pos_z,robot_frame_x,robot_frame_y,robot_frame_z,force_x,force_y,force_z,force_magnitude,force_normal,force_friction,protection_scale,torque_x,torque_y,torque_z,base_link_x,base_link_y,base_link_z,base_link_qw,base_link_qx,base_link_qy,base_link_qz,base_link_vel_x,base_link_vel_y,base_link_vel_z,base_link_angvel_x,base_link_angvel_y,base_link_angvel_z,collision_link_x,collision_link_y,collision_link_z,collision_link_qw,collision_link_qx,collision_link_qy,collision_link_qz\n";
+        csv_file_ << "timestamp,contact_id,body1_name,body2_name,pos_x,pos_y,pos_z,robot_frame_x,robot_frame_y,robot_frame_z,force_x,force_y,force_z,force_magnitude,force_normal,force_unprotected,force_friction,protection_scale,torque_x,torque_y,torque_z,base_link_x,base_link_y,base_link_z,base_link_qw,base_link_qx,base_link_qy,base_link_qz,base_link_vel_x,base_link_vel_y,base_link_vel_z,base_link_angvel_x,base_link_angvel_y,base_link_angvel_z,collision_link_x,collision_link_y,collision_link_z,collision_link_qw,collision_link_qx,collision_link_qy,collision_link_qz\n";
         csv_file_.flush();
       } else {
         int32_t num_joints = num_total_joints_;
@@ -2864,6 +2864,12 @@ void RosInterface::ContactWriterThread() {
           WriteContactDataBinary(row);
         } else {
           // CSV格式写入
+          // 由 protection_scale 反推出衰减前的法向力：force_unprotected = force_normal / protection_scale
+          // protection_scale 定义为：protected_force / unprotected_force
+          double force_unprotected = 0.0;
+          if (row.protection_scale > 1e-12) {
+            force_unprotected = row.force_normal / row.protection_scale;
+          }
           csv_file_ << std::fixed << std::setprecision(6)
                     << row.sim_time << ","
                     << row.contact_id << ","
@@ -2880,6 +2886,7 @@ void RosInterface::ContactWriterThread() {
                     << row.world_forces[2] << ","
                     << row.force_magnitude << ","
                     << row.force_normal << ","
+                    << force_unprotected << ","
                     << row.force_friction << ","
                     << row.protection_scale << ","
                     << row.world_torques[0] << ","
@@ -3061,6 +3068,10 @@ void RosInterface::FlushRemainingData() {
           WriteContactDataBinary(row);
         } else {
           // CSV格式（简化版，与ContactWriterThread中的相同）
+          double force_unprotected = 0.0;
+          if (row.protection_scale > 1e-12) {
+            force_unprotected = row.force_normal / row.protection_scale;
+          }
           csv_file_ << std::fixed << std::setprecision(6)
                     << row.sim_time << ","
                     << row.contact_id << ","
@@ -3077,7 +3088,9 @@ void RosInterface::FlushRemainingData() {
                     << row.world_forces[2] << ","
                     << row.force_magnitude << ","
                     << row.force_normal << ","
+                    << force_unprotected << ","
                     << row.force_friction << ","
+                    << row.protection_scale << ","
                     << row.world_torques[0] << ","
                     << row.world_torques[1] << ","
                     << row.world_torques[2] << ","

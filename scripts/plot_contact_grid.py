@@ -727,6 +727,27 @@ def calculate_part_statistics(df, density=0.4, target_force=1.0, force_column='f
     else:
         part_stats['max_fail_type'] = 'N/A'
     
+    # 额外输出：scale（来自 CSV 的 protection_scale；它已包含 CHR 的“最小缩放因子”逻辑）
+    if 'protection_scale' in df.columns:
+        part_stats['max_protection_scale'] = part_stats['max_idx'].apply(
+            lambda idx: float(df.loc[idx, 'protection_scale']) if idx in df.index and pd.notna(df.loc[idx, 'protection_scale']) else 1.0
+        )
+    else:
+        part_stats['max_protection_scale'] = 1.0
+
+    # 额外输出：衰减前力（优先读取 CSV 的 force_unprotected；没有则用 force_normal/protection_scale 反推）
+    if 'force_unprotected' in df.columns:
+        part_stats['max_force_unprotected_n'] = part_stats['max_idx'].apply(
+            lambda idx: float(df.loc[idx, 'force_unprotected']) if idx in df.index and pd.notna(df.loc[idx, 'force_unprotected']) else part_stats.loc[part_stats['max_idx'] == idx, 'max_force_n'].iloc[0]
+            if idx in df.index else np.nan
+        )
+    else:
+        # fallback：反推 unprotected（注意 protection_scale 可能为 0）
+        part_stats['max_force_unprotected_n'] = part_stats.apply(
+            lambda r: (r['max_force_n'] / r['max_protection_scale']) if pd.notna(r['max_protection_scale']) and r['max_protection_scale'] > 1e-12 else r['max_force_n'],
+            axis=1
+        )
+
     # 删除临时列
     part_stats = part_stats.drop('max_idx', axis=1)
     
@@ -2733,7 +2754,7 @@ def main():
     parser.add_argument(
         '--yz-map-step',
         type=float,
-        default=0.05,
+        default=0.02,
         help='YZ 护具 TSV 网格步长（m，默认 0.05；可用 0.025 变细一倍）',
     )
     parser.add_argument(
@@ -2903,7 +2924,7 @@ def main():
             if part_stats is not None and len(part_stats) > 0:
                 print("\n各身体部分的最大力和厚度统计:")
                 print("-" * 200)
-                print(f"{'身体部分':<20} {'最大力(N)':<15} {'最大力(kN)':<15} {'最大厚度(mm)':<15} {'数据点数':<10} {'最大力位置(x,y,z)':<30} {'body1':<25} {'body2':<25} {'fail-type':<30}")
+                print(f"{'身体部分':<20} {'衰减后力(N)':<15} {'衰减后力(kN)':<15} {'最大厚度(mm)':<15} {'衰减前力(N)':<15} {'scale':<10} {'数据点数':<10} {'最大力位置(x,y,z)':<30} {'body1':<25} {'body2':<25} {'fail-type':<30}")
                 print("-" * 200)
                 for _, row in part_stats.iterrows():
                     body_part = row['body_part']
@@ -2917,20 +2938,27 @@ def main():
                     max_body1_name = row.get('max_body1_name', 'N/A')
                     max_body2_name = row.get('max_body2_name', 'N/A')
                     max_fail_type = row.get('max_fail_type', 'N/A')
+                    max_force_unprotected_n = row.get('max_force_unprotected_n', max_force_n)
+                    max_scale = row.get('max_protection_scale', 1.0)
+                    scale_str = f"{max_scale:.3f}" if pd.notna(max_scale) else "N/A"
                     
                     thickness_str = f"{max_thickness:.2f}" if pd.notna(max_thickness) else "N/A"
                     position_str = f"({max_x:.3f},{max_y:.3f},{max_z:.3f})"
                     body1_str = str(max_body1_name) if pd.notna(max_body1_name) else "N/A"
                     body2_str = str(max_body2_name) if pd.notna(max_body2_name) else "N/A"
                     fail_type_str = str(max_fail_type) if pd.notna(max_fail_type) else "N/A"
-                    print(f"{body_part:<20} {max_force_n:<15.2f} {max_force_kn:<15.3f} {thickness_str:<15} {count:<10} {position_str:<30} {body1_str:<25} {body2_str:<25} {fail_type_str:<30}")
+                    print(
+                        f"{body_part:<20} {max_force_n:<15.2f} {max_force_kn:<15.3f} {thickness_str:<15} "
+                        f"{max_force_unprotected_n:<15.2f} {scale_str:<10} {count:<10} "
+                        f"{position_str:<30} {body1_str:<25} {body2_str:<25} {fail_type_str:<30}"
+                    )
                 print("-" * 200)
                 
                 # 打印无法满足目标要求的点
                 if unsatisfied_points is not None and len(unsatisfied_points) > 0:
                     print(f"\n无法满足目标要求（目标力={target_force}kN，最大厚度24mm仍无法满足）的接触点:")
                     print("-" * 200)
-                    print(f"{'身体部分':<20} {'最大力(N)':<15} {'最大力(kN)':<15} {'最大厚度(mm)':<15} {'数据点数':<10} {'最大力位置(x,y,z)':<30} {'body1':<25} {'body2':<25} {'fail-type':<30}")
+                    print(f"{'身体部分':<20} {'衰减后力(N)':<15} {'衰减后力(kN)':<15} {'最大厚度(mm)':<15} {'衰减前力(N)':<15} {'scale':<10} {'数据点数':<10} {'最大力位置(x,y,z)':<30} {'body1':<25} {'body2':<25} {'fail-type':<30}")
                     print("-" * 200)
                     for _, row in unsatisfied_points.iterrows():
                         body_part = row['body_part']
@@ -2944,13 +2972,20 @@ def main():
                         max_body1_name = row.get('max_body1_name', 'N/A')
                         max_body2_name = row.get('max_body2_name', 'N/A')
                         max_fail_type = row.get('max_fail_type', 'N/A')
+                        max_force_unprotected_n = row.get('max_force_unprotected_n', max_force_n)
+                        max_scale = row.get('max_protection_scale', 1.0)
+                        scale_str = f"{max_scale:.3f}" if pd.notna(max_scale) else "N/A"
                         
                         thickness_str = "N/A"
                         position_str = f"({max_x:.3f},{max_y:.3f},{max_z:.3f})"
                         body1_str = str(max_body1_name) if pd.notna(max_body1_name) else "N/A"
                         body2_str = str(max_body2_name) if pd.notna(max_body2_name) else "N/A"
                         fail_type_str = str(max_fail_type) if pd.notna(max_fail_type) else "N/A"
-                        print(f"{body_part:<20} {max_force_n:<15.2f} {max_force_kn:<15.3f} {thickness_str:<15} {count:<10} {position_str:<30} {body1_str:<25} {body2_str:<25} {fail_type_str:<30}")
+                        print(
+                            f"{body_part:<20} {max_force_n:<15.2f} {max_force_kn:<15.3f} {thickness_str:<15} "
+                            f"{max_force_unprotected_n:<15.2f} {scale_str:<10} {count:<10} "
+                            f"{position_str:<30} {body1_str:<25} {body2_str:<25} {fail_type_str:<30}"
+                        )
                     print("-" * 200)
             else:
                 print("警告: 无法计算身体部分统计信息")

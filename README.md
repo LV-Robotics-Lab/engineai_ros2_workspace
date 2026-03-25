@@ -350,7 +350,7 @@ python3 scripts/merge_contact_data.py \
 
 ```bash
 python3 scripts/merge_contact_data.py \
-  /home/linslab/data/mujoco_logs/only_passive_push_1600/8dir-200.0N-0.4s-20260321_154532 \
+  /home/wang22/data/mujoco_logs/protector_map_passive_push_1600/8dir-200.0N-0.4s-20260325_104946 \
   all_directions_merged.csv \
   --pattern "merged_contact_data_*.csv" \
   --fast-append
@@ -435,7 +435,7 @@ python3 scripts/fig4_violin.py /path/to/all_directions_merged.csv -o 输出目�
 MERGED_CSV=/home/linslab/data/mujoco_logs/protector_passive_push_1034/8dir-200.0N-0.4s-20260320_025850/all_directions_merged.csv
 
 # 默认：力图 + 厚度图（chr）；--target-force 1.0 即 1 kN；PNG 与 YZ TSV 默认写出
-python3 scripts/plot_contact_grid.py "$MERGED_CSV" --target-force 1.0 --no-hardcode --no-force-filter  # 1.0 = 1 kN
+python3 scripts/plot_contact_grid.py "$MERGED_CSV" --target-force 1.0 --no-hardcode --no-force-filter --yz-map-step 0.02 # 1.0 = 1 kN
 
 # 同上：
 python3 scripts/plot_contact_grid.py "$MERGED_CSV" --target-force 1.0  # 1.0 kN
