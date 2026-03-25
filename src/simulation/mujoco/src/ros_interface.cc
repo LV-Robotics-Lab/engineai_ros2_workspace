@@ -42,6 +42,11 @@ const int kDimQuaternion = 4;          // 四元数的维度
 
 // 全局标志位：控制CSV记录时机（所有CSV统一使用）
 static bool all_csv_enabled = false;  // 是否启用所有CSV记录（在reset后启用）
+// 当我们在 PrepareNewExperiment() 里主动触发 SimManager::RequestReset() 后，
+// 下一帧可能会出现一次“仿真时间回退(time rollback)”；此时 UpdateSimState() 的
+// time rollback 检测逻辑不应再执行“手动 reset 切 CSV 目录”的分支，
+// 否则会产生半截子目录/少量数据。
+static std::atomic<bool> skip_next_time_rollback_due_to_request_reset{false};
 
 // 3D旋转变换函数
 /**
@@ -661,6 +666,9 @@ void RosInterface::PrepareNewExperiment(const std::string& csv_dir) {
   CloseAllCsvFiles();
   OpenCsvFilesAtDir(csv_dir);
   all_csv_enabled = true;  // 新实验立即开始记录
+  // 标记：下面的 time rollback 是我们自己请求的 reset 触发，
+  // 让 UpdateSimState() 跳过“切换 CSV 目录”的那段逻辑。
+  skip_next_time_rollback_due_to_request_reset.store(true, std::memory_order_release);
   SimManager::GetInstance().RequestReset();
 
   RCLCPP_INFO(node_->get_logger(), "新实验已准备: %s, CSV已切换, 已触发reset", csv_dir.c_str());
@@ -907,7 +915,18 @@ void RosInterface::UpdateSimState(const mjModel* m, mjData* d) {
   // 跳过，避免重复关闭/打开 CSV 产生多余文件夹
   static bool skip_next_manual_reset_due_to_our_delayed_ = false;
   const double kTimeRollbackThreshold = 0.01;
-  if (skip_next_manual_reset_due_to_our_delayed_) {
+  if (skip_next_time_rollback_due_to_request_reset.exchange(false, std::memory_order_acq_rel)) {
+    // 这是 PrepareNewExperiment() 主动 RequestReset() 导致的 time rollback：
+    // 仍需要完成 reset 的“信号发布/auto sampling 重置”，
+    // 但不应再次切换 CSV 目录（否则会产生半截子目录）。
+    auto& sim_manager = SimManager::GetInstance();
+    sim_manager.ResetAutoSampling();
+    RCLCPP_INFO(node_->get_logger(), "RequestReset detected (time rollback), auto_sampling reset, no CSV dir switch");
+
+    std_msgs::msg::Empty reset_msg;
+    mujoco_reset_pub_->publish(reset_msg);
+    RCLCPP_INFO(node_->get_logger(), "Published /mujoco/reset_complete (RequestReset)");
+  } else if (skip_next_manual_reset_due_to_our_delayed_) {
     skip_next_manual_reset_due_to_our_delayed_ = false;
     // 时间回退来自本帧的 delayed 自动 reset，跳过手动 reset 逻辑（不切换 CSV）
   } else if (last_sim_time_ >= 0 && d->time < last_sim_time_ - kTimeRollbackThreshold) {
