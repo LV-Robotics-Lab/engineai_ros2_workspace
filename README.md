@@ -43,25 +43,12 @@ Both computing units are maintained as open platforms by EngineAI.
 
 ### Development Environment Requirements for Your Host PC
 #### Basic Environment
-- Ubuntu 22.04
-- ROS2 Humble Desktop
+- **Ubuntu 22.04**（原仓库默认开发环境）
+- **ROS 2 Humble** Desktop（与 22.04 配套）
 - GCC >= 11
 - CMake >= 3.22
-- Python >= 3.10
-#### ROS 2 Source Setup (Ubuntu 24.04 / Jazzy)
-```bash
-sudo apt update
-sudo apt install -y curl gnupg2 lsb-release ca-certificates software-properties-common
-sudo add-apt-repository universe -y
-
-sudo curl -sSL https://raw.githubusercontent.com/ros/rosdistro/master/ros.key \
-  -o /usr/share/keyrings/ros-archive-keyring.gpg
-
-echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/ros-archive-keyring.gpg] http://packages.ros.org/ros2/ubuntu $(. /etc/os-release && echo ${UBUNTU_CODENAME}) main" \
-| sudo tee /etc/apt/sources.list.d/ros2.list > /dev/null
-
-sudo apt update
-```
+- Python >= 3.10；conda 与系统 ROS 混用时，**须与该系统 `rclpy` 的 Python 主版本一致**（Humble 多为 3.10，Jazzy 多为 3.12）
+- （可选）**Ubuntu 24.04 + ROS 2 Jazzy**：见下文并列说明
 #### ROS 2 Source Setup (Ubuntu 22.04 / Humble)
 ```bash
 sudo apt update
@@ -76,24 +63,117 @@ echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/ros-a
 
 sudo apt update
 ```
+#### ROS 2 Source Setup (Ubuntu 24.04 / Jazzy)
+```bash
+sudo apt update
+sudo apt install -y curl gnupg2 lsb-release ca-certificates software-properties-common
+sudo add-apt-repository universe -y
+
+sudo curl -sSL https://raw.githubusercontent.com/ros/rosdistro/master/ros.key \
+  -o /usr/share/keyrings/ros-archive-keyring.gpg
+
+echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/ros-archive-keyring.gpg] http://packages.ros.org/ros2/ubuntu $(. /etc/os-release && echo ${UBUNTU_CODENAME}) main" \
+| sudo tee /etc/apt/sources.list.d/ros2.list > /dev/null
+
+sudo apt update
+```
 #### Software Dependencies
+
+**Ubuntu 22.04 + ROS 2 Humble（原工程默认）**
+
 ```bash
 sudo apt update
 sudo apt install rsync sshpass openssh-client libglfw3-dev libxinerama-dev libxcursor-dev
-# Ubuntu 24.04 (Jazzy)
-sudo apt install -y python3-rosdep python3-colcon-common-extensions ros-jazzy-rmw-cyclonedds-cpp ros-jazzy-ros-base
-# Ubuntu 22.04 (Humble)
-# sudo apt install -y python3-rosdep python3-colcon-common-extensions ros-humble-rmw-cyclonedds-cpp ros-humble-ros-base
+sudo apt install -y python3-rosdep python3-colcon-common-extensions ros-humble-rmw-cyclonedds-cpp ros-humble-ros-base
 sudo apt install -y liblcm-dev
 sudo apt install -y libglib2.0-dev
 sudo apt install -y libgoogle-glog-dev
+sudo apt install -y tmux
+# 原工程按「有本地显示器」使用：登录图形会话后直接 ros2 launch / 脚本即可；无需 xvfb。
+```
+
+**Ubuntu 24.04 + ROS 2 Jazzy**
+
+```bash
+sudo apt update
+sudo apt install rsync sshpass openssh-client libglfw3-dev libxinerama-dev libxcursor-dev
+sudo apt install -y python3-rosdep python3-colcon-common-extensions ros-jazzy-rmw-cyclonedds-cpp ros-jazzy-ros-base
+sudo apt install -y liblcm-dev
+sudo apt install -y libglib2.0-dev
+sudo apt install -y libgoogle-glog-dev
+# 有桌面/显示器时通常与上表相同即可。若该机无物理显示器（纯 SSH 服务器），再额外安装下文「无显示器补充包」。
+```
+
+**无物理显示器的 Ubuntu 24.04（可选，常见于无显卡输出主机）**
+
+MuJoCo 即使用 `headless:=true` 仍会走 GLFW，需要虚拟 X 与 Mesa GL；24.04 上 `libgl1-mesa-glx` 已废弃，用 `libgl1`。
+
+```bash
+sudo apt install -y xvfb libgl1 libgl1-mesa-dri libglu1-mesa
+```
+
+#### Conda 环境（Ubuntu 22.04 / Humble：Python 3.10）
+
+与 **Humble** 系统包混用时，conda 建议使用 **Python 3.10**，与 `/opt/ros/humble` 中 `rclpy` 一致。
+
+```bash
 conda create -n engineai_ros2 python=3.10 -y
 conda activate engineai_ros2
 # glog：rl_basic_example_CHR；其余：scripts/ 分析（fall_risk、plot_contact_grid、merge、mujoco_data_io、violin、ThicknessCalculate 等）
 conda install -y -c conda-forge glog pandas numpy matplotlib seaborn pyyaml scikit-learn scipy psutil tqdm
 pip install mujoco==3.3.6 mediapy urdfpy trimesh
-# publish_zero_joint_states.py：需 source ROS；check_mnn_tensor.py：可选 MNN Python 绑定
+```
 
+```bash
+source /opt/ros/humble/setup.bash
+source install/setup.bash
+python -c "import yaml, rclpy; print('conda + rclpy OK')"
+```
+
+#### Conda 环境（Ubuntu 24.04 / Jazzy：Python 3.12）
+
+与 **Jazzy** 混用时须用 **Python 3.12**，否则常见 `rclpy._rclpy_pybind11` 导入失败。
+
+```bash
+conda create -n engineai_ros2 python=3.12 -y
+conda activate engineai_ros2
+conda install -y -c conda-forge glog pandas numpy matplotlib seaborn pyyaml scikit-learn scipy psutil tqdm
+pip install mujoco==3.3.6 mediapy urdfpy trimesh
+# Python 3.12 下 urdfpy 依赖的旧版 networkx 会报错，需升级到 3.x（pip 可能提示与 urdfpy 声明冲突，实测可正常用）
+pip install "networkx>=3.2"
+```
+
+```bash
+source /opt/ros/jazzy/setup.bash
+source install/setup.bash
+python -c "import yaml, rclpy; print('conda + rclpy OK')"
+```
+
+说明：`publish_zero_joint_states.py` 需先 `source` ROS；`check_mnn_tensor.py` 可选安装 MNN Python 绑定。
+
+#### 无显示器主机上跑仿真 / 自动采集（仅 Ubuntu 24.04 / Jazzy 等无显场景）
+
+**Ubuntu 22.04 + Humble 按原工程默认可不接显示器文档**：有本地显示器时直接运行即可，**不要**套 `xvfb-run`。
+
+仅在 **无物理显示器** 的机器上（例如 24.04 服务器），MuJoCo 在 `headless:=true` 仍会创建**隐藏 GLFW 窗口**，需要有效 `DISPLAY`，请先用上文「无物理显示器的 Ubuntu 24.04」装好 `xvfb` 等包，再例如：
+
+```bash
+export LIBGL_ALWAYS_SOFTWARE=1   # 可选：强制软件光栅，无独显/驱动不完整时常更稳
+mkdir -p ~/data/mujoco_logs
+# 新建 tmux，防止ssh断连terminal关闭
+tmux new -s myjob
+xvfb-run -a -s "-screen 0 1280x720x24" bash -lc 'source ~/miniconda3/etc/profile.d/conda.sh && conda activate engineai_ros2 && source /opt/ros/jazzy/setup.bash && cd ~/engineai_ros2_workspace && source install/setup.bash && ./scripts/automated_collection_continuous.sh 2>&1 | tee ~/data/mujoco_logs/run_$(date +%Y%m%d_%H%M%S).log'
+# 退出 tmux
+Ctrl+b 然后按 d
+# 重连 tmux
+tmux attach -t myjob
+# 路径请换成本机 conda 与工作空间；`tee` 与有显示器时「./scripts/automated_collection_continuous.sh 2>&1 | tee ...」一致
+```
+
+调试：运控会等到 `joint_bridge` 才进入主循环，可检查：
+
+```bash
+ros2 topic echo /motion/motion_state --once
 ```
 
 <!-- #### LCM (Lightweight Communications and Marshalling) Installation
@@ -221,6 +301,7 @@ chmod +x /home/wang22/engineai/engineai_ros2_workspace/scripts/automated_collect
 chmod +x /home/wang22/engineai/engineai_ros2_workspace/scripts/automated_collection_continuous.sh
 ./scripts/automated_collection_continuous.sh
 ./scripts/automated_collection_continuous.sh 2>&1 | tee ~/data/mujoco_logs/run_$(date +%Y%m%d_%H%M%S).log
+# 无物理显示器（多为 24.04 服务器）：上文「无显示器主机上跑仿真 / 自动采集」中的 xvfb-run 一行已含相同 tee 录 log；22.04 有显示器则不需要 xvfb
 # 断电摔倒采样
 # pm_v2.yaml default_force_magnitude = 0.0, auto_sampling = true, 然后运行下面代码
 chmod +x /home/wang22/engineai/engineai_ros2_workspace/scripts/automated_collection_poweroff.sh
@@ -241,7 +322,7 @@ cd /home/wang22/engineai/engineai_ros2_workspace
 conda activate engineai_ros2
 # plot contact force max
 python3 scripts/analyze_contact_forces.py logs/forward-200.0N-20251005_162754/merged_contact_data_forward-200.0N-20251005_162754_20251005_171533.csv
-# plot contact point with force（mujoco/mediapy 见上文 Software Dependencies 中 pip 一行）
+# plot contact point with force（mujoco/mediapy 见上文 Conda 环境中 pip 一行）
 # 合并多次采样的contact point
 # 合并特定方向的数据（生成1个文件）指定输出文件名
 python3 scripts/merge_contact_data.py logs/4in1 merged_4in1.csv --pattern "all_directions_merged_*.csv"
