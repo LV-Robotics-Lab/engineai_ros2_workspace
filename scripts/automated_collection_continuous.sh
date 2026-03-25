@@ -34,6 +34,7 @@ DIRECTION_NAMES=("forward" "forward_left" "left" "backward_left" "backward" "bac
 
 RL_LAUNCH="rl_basic_example_${CONTROLLER}.launch.py"
 RL_PROCESS="rl_basic_example_${CONTROLLER}"
+cleanup_done=0
 
 echo "=========================================="
 echo "自动化推倒数据采集 - 连续模式"
@@ -101,23 +102,51 @@ echo "实验数据将保存到: $EXPERIMENT_FOLDER"
 
 # 清理函数
 cleanup_processes() {
+    if [ "$cleanup_done" -eq 1 ]; then
+        return
+    fi
+    cleanup_done=1
+
     echo "开始清理所有进程..."
     pkill -TERM -f "mujoco_simulator" 2>/dev/null
     pkill -TERM -f "$RL_PROCESS" 2>/dev/null
     pkill -TERM -f "ros2 launch" 2>/dev/null
+    pkill -TERM -f "joint_state_converter.py" 2>/dev/null
+    pkill -TERM -f "robot_state_publisher" 2>/dev/null
+    pkill -TERM -f "static_transform_publisher" 2>/dev/null
     for i in {1..10}; do
-        if ! pgrep -f "mujoco_simulator" > /dev/null && ! pgrep -f "$RL_PROCESS" > /dev/null; then
+        if ! pgrep -f "mujoco_simulator" > /dev/null && \
+           ! pgrep -f "$RL_PROCESS" > /dev/null && \
+           ! pgrep -f "joint_state_converter.py" > /dev/null && \
+           ! pgrep -f "robot_state_publisher" > /dev/null && \
+           ! pgrep -f "static_transform_publisher" > /dev/null; then
             break
         fi
         sleep 1
     done
-    if pgrep -f "mujoco_simulator" > /dev/null || pgrep -f "$RL_PROCESS" > /dev/null; then
+    if pgrep -f "mujoco_simulator" > /dev/null || \
+       pgrep -f "$RL_PROCESS" > /dev/null || \
+       pgrep -f "joint_state_converter.py" > /dev/null || \
+       pgrep -f "robot_state_publisher" > /dev/null || \
+       pgrep -f "static_transform_publisher" > /dev/null; then
         pkill -9 -f "mujoco" 2>/dev/null
         pkill -9 -f "rl_basic" 2>/dev/null
+        pkill -9 -f "joint_state_converter.py" 2>/dev/null
+        pkill -9 -f "robot_state_publisher" 2>/dev/null
+        pkill -9 -f "static_transform_publisher" 2>/dev/null
     fi
+    ros2 daemon stop >/dev/null 2>&1 || true
     sleep 2
     echo "进程清理完成"
 }
+
+on_exit() {
+    local exit_code=$?
+    cleanup_processes
+    exit "$exit_code"
+}
+
+trap on_exit INT TERM EXIT
 
 # 启动 RL 控制器（只启动一次）
 sed -i "s/auto_sampling: .*/auto_sampling: true/" src/simulation/mujoco/assets/config/pm_v2.yaml
