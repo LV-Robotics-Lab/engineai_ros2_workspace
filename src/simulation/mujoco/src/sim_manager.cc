@@ -2246,6 +2246,50 @@ void SimManager::ApplyProtectionToContactForces() {
       }
     }
 
+    // 同步衰减接触“闭合速度”（法向相对速度）：
+    // 仅在接触双方沿法向正在互相逼近时生效，目标是将闭合速度幅值按 scale_factor 降低，
+    // 避免出现“只降力不降速”导致的下一帧反弹/震荡放大。
+    if (m_->nv > 0 && m_->nv <= 1024 && body1_id >= 0 && body1_id < m_->nbody &&
+        body2_id >= 0 && body2_id < m_->nbody) {
+      // contact.frame 的第 1 列是法向（世界系）
+      const mjtNum nx = contact.frame[0];
+      const mjtNum ny = contact.frame[1];
+      const mjtNum nz = contact.frame[2];
+
+      std::vector<mjtNum> jacp1(static_cast<size_t>(3 * m_->nv), 0.0);
+      std::vector<mjtNum> jacp2(static_cast<size_t>(3 * m_->nv), 0.0);
+      mj_jac(m_, d_, jacp1.data(), nullptr, contact.pos, body1_id);
+      mj_jac(m_, d_, jacp2.data(), nullptr, contact.pos, body2_id);
+
+      // 构造法向相对速度 Jacobian: Jn = n^T * (J2 - J1)，满足 vn = Jn * qvel
+      std::vector<mjtNum> jn(static_cast<size_t>(m_->nv), 0.0);
+      for (int v = 0; v < m_->nv; ++v) {
+        const mjtNum dJx = jacp2[static_cast<size_t>(v)] - jacp1[static_cast<size_t>(v)];
+        const mjtNum dJy = jacp2[static_cast<size_t>(m_->nv + v)] - jacp1[static_cast<size_t>(m_->nv + v)];
+        const mjtNum dJz = jacp2[static_cast<size_t>(2 * m_->nv + v)] - jacp1[static_cast<size_t>(2 * m_->nv + v)];
+        jn[static_cast<size_t>(v)] = nx * dJx + ny * dJy + nz * dJz;
+      }
+
+      const mjtNum vn = mju_dot(jn.data(), d_->qvel, m_->nv);
+      // 约定：vn < 0 表示沿法向正在闭合；仅对闭合速度做衰减
+      if (vn < -1e-6) {
+        const mjtNum vn_target = static_cast<mjtNum>(scale_factor) * vn;
+        const mjtNum delta_vn = vn_target - vn;  // > 0，减小闭合速度幅值
+
+        // 通过最小广义冲量修正 qvel：delta_qvel = M^{-1} * Jn^T * lambda
+        std::vector<mjtNum> Minv_jn(static_cast<size_t>(m_->nv), 0.0);
+        mj_solveM(m_, d_, Minv_jn.data(), jn.data(), 1);
+        const mjtNum eff_mass_inv = mju_dot(jn.data(), Minv_jn.data(), m_->nv);  // Jn*M^-1*Jn^T
+
+        if (eff_mass_inv > 1e-12) {
+          const mjtNum lambda = delta_vn / eff_mass_inv;
+          for (int v = 0; v < m_->nv; ++v) {
+            d_->qvel[v] += lambda * Minv_jn[static_cast<size_t>(v)];
+          }
+        }
+      }
+    }
+
     last_contact_protection_scales_[static_cast<size_t>(i)] = scale_factor;
     
     // 记录统计信息

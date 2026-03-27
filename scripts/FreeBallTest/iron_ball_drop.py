@@ -9,6 +9,7 @@ from mpl_toolkits.mplot3d import Axes3D
 import pandas as pd
 import os
 import xml.etree.ElementTree as ET
+import time
 
 # 加载模型 - 使用脚本所在目录构建路径
 script_dir = os.path.dirname(os.path.abspath(__file__))
@@ -256,76 +257,88 @@ impact_peak_force = 0.0
 impact_end_time = None
 impact_velocity = None  # 记录撞击时的实际速度
 
-print("开始运行模拟...")
+print("启动可视化并运行模拟...")
 print(f"时间步长: {dt} 秒")
 print(f"总模拟时间: {timesteps * dt} 秒")
 print(f"使用碰撞力方法 (mj_contactForce)")
 
-# 运行模拟
-for i in range(timesteps):
-    mujoco.mj_step(model, data)
-    
-    t = i * dt
-    
-    # 使用mj_contactForce获取接触力数据
-    contact_data, total_world_force, total_world_torque, total_contact_force_magnitude = get_contact_forces_mj_contactForce(model, data)
-    
-    # 调试：打印接触力数据
-    if i % 1000 == 0:
-        print(f"Step {i}, Time {t:.4f}s")
-        print(f"接触数量: {len(contact_data)}")
-        if len(contact_data) > 0:
-            print(f"接触力合力: {total_contact_force_magnitude:.4f} N")
-            print(f"接触力向量: ({total_world_force[0]:.4f}, {total_world_force[1]:.4f}, {total_world_force[2]:.4f})")
+i = 0
+with mujoco.viewer.launch_passive(model, data) as viewer:
+    print("可视化窗口已打开，开始实时步进模拟...")
+    while viewer.is_running() and i < timesteps:
+        step_start = time.time()
+        mujoco.mj_step(model, data)
+        t = data.time
         
-        # 检查球的位置
-        ball_pos = data.xpos[1]  # body 1 是 iron_ball
-        print(f"球的位置: x={ball_pos[0]:.4f}, y={ball_pos[1]:.4f}, z={ball_pos[2]:.4f}")
-        print("---")
+        # 使用mj_contactForce获取接触力数据
+        contact_data, total_world_force, total_world_torque, total_contact_force_magnitude = get_contact_forces_mj_contactForce(model, data)
+        
+        # 调试：打印接触力数据
+        if i % 1000 == 0:
+            print(f"Step {i}, Time {t:.4f}s")
+            print(f"接触数量: {len(contact_data)}")
+            if len(contact_data) > 0:
+                print(f"接触力合力: {total_contact_force_magnitude:.4f} N")
+                print(f"接触力向量: ({total_world_force[0]:.4f}, {total_world_force[1]:.4f}, {total_world_force[2]:.4f})")
+            
+            # 检查球的位置
+            ball_pos = data.xpos[1]  # body 1 是 iron_ball
+            print(f"球的位置: x={ball_pos[0]:.4f}, y={ball_pos[1]:.4f}, z={ball_pos[2]:.4f}")
+            print("---")
 
-    # 记录接触力数据
-    contact_force_log.append([t, len(contact_data), total_contact_force_magnitude, 
-                             total_world_force[0], total_world_force[1], total_world_force[2],
-                             total_world_torque[0], total_world_torque[1], total_world_torque[2]])
+        # 记录接触力数据
+        contact_force_log.append([t, len(contact_data), total_contact_force_magnitude, 
+                                 total_world_force[0], total_world_force[1], total_world_force[2],
+                                 total_world_torque[0], total_world_torque[1], total_world_torque[2]])
 
-    # 检测冲击开始（碰撞力方法）
-    # 通过检测接触力阈值来判断碰撞开始（>0.001N）
-    if not impact_started and total_contact_force_magnitude > 0.001:
-        impact_started = True
-        impact_start_time = t
-        impact_peak_force = total_contact_force_magnitude
-        # 记录撞击时的实际速度
-        ball_body_id = 1  # iron_ball 的 body ID
-        if ball_body_id < model.nbody:
-            # 方法1: 使用 cvel (body 速度，包含线速度和角速度)
-            # cvel 是 6D 向量：前3个是线速度，后3个是角速度
-            cvel_start = ball_body_id * 6
-            if cvel_start + 3 <= len(data.cvel):
-                ball_lin_vel = data.cvel[cvel_start:cvel_start+3]
-                # z方向速度（向下为负，取绝对值）
-                impact_velocity = abs(ball_lin_vel[2])
-            # 方法2: 如果没有cvel，尝试从qvel获取
-            elif len(data.qvel) >= 6:
-                # 对于自由落体球，qvel的前3个可能是线速度
-                if len(data.qvel) >= 3:
-                    impact_velocity = abs(data.qvel[2])  # z方向速度
+        # 检测冲击开始（碰撞力方法）
+        # 通过检测接触力阈值来判断碰撞开始（>0.001N）
+        if not impact_started and total_contact_force_magnitude > 0.001:
+            impact_started = True
+            impact_start_time = t
+            impact_peak_force = total_contact_force_magnitude
+            # 记录撞击时的实际速度
+            ball_body_id = 1  # iron_ball 的 body ID
+            if ball_body_id < model.nbody:
+                # 方法1: 使用 cvel (body 速度，包含线速度和角速度)
+                # cvel 是 6D 向量：前3个是线速度，后3个是角速度
+                cvel_start = ball_body_id * 6
+                if cvel_start + 3 <= len(data.cvel):
+                    ball_lin_vel = data.cvel[cvel_start:cvel_start+3]
+                    # z方向速度（向下为负，取绝对值）
+                    impact_velocity = abs(ball_lin_vel[2])
+                # 方法2: 如果没有cvel，尝试从qvel获取
+                elif len(data.qvel) >= 6:
+                    # 对于自由落体球，qvel的前3个可能是线速度
+                    if len(data.qvel) >= 3:
+                        impact_velocity = abs(data.qvel[2])  # z方向速度
+                    else:
+                        # 如果qvel只包含平移，直接使用
+                        impact_velocity = abs(data.qvel[0]) if len(data.qvel) > 0 else None
                 else:
-                    # 如果qvel只包含平移，直接使用
-                    impact_velocity = abs(data.qvel[0]) if len(data.qvel) > 0 else None
-            else:
-                impact_velocity = None
+                    impact_velocity = None
 
-    # 冲击过程：记录峰值
-    if impact_started:
-        impact_peak_force = max(impact_peak_force, total_contact_force_magnitude)
-        # 通过检测接触力阈值来判断碰撞结束（<0.1N）
-        # 注意：这个阈值可以调整，如果接触力太小则认为碰撞结束
-        if total_contact_force_magnitude < 0.1 and impact_end_time is None:
-            impact_end_time = t
+        # 冲击过程：记录峰值
+        if impact_started:
+            impact_peak_force = max(impact_peak_force, total_contact_force_magnitude)
+            # 通过检测接触力阈值来判断碰撞结束（<0.1N）
+            # 注意：这个阈值可以调整，如果接触力太小则认为碰撞结束
+            if total_contact_force_magnitude < 0.1 and impact_end_time is None:
+                impact_end_time = t
 
-print("模拟完成，启动可视化...")
-# 可视化模拟（在模拟完成后）
-mujoco.viewer.launch(model, data)
+        viewer.sync()
+        i += 1
+
+        # 按仿真时间步进行节拍，避免一闪而过
+        elapsed = time.time() - step_start
+        sleep_time = dt - elapsed
+        if sleep_time > 0:
+            time.sleep(sleep_time)
+
+if i >= timesteps:
+    print("模拟完成（达到设定步数）。")
+else:
+    print("模拟提前结束（可视化窗口已关闭）。")
 
 # 接触力DataFrame
 contact_columns = ["time", "num_contacts", "total_force_magnitude", 
