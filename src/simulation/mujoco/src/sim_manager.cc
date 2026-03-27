@@ -1865,9 +1865,15 @@ void SimManager::ApplyProtectionToContactForces() {
   
   // 获取当前接触数量
   int ncon = d_->ncon;
+  // 对每个接触索引做一阶低通，减少 scale 帧间跳变导致的接触抖动/远滑
+  static std::vector<double> filtered_scales_prev;
   if (ncon == 0) {
     last_contact_protection_scales_.clear();
+    filtered_scales_prev.clear();
     return;
+  }
+  if (filtered_scales_prev.size() != static_cast<size_t>(ncon)) {
+    filtered_scales_prev.assign(static_cast<size_t>(ncon), 1.0);
   }
   last_contact_protection_scales_.assign(static_cast<size_t>(ncon), 1.0);
   prot_sess_frames_with_contact_++;
@@ -2044,19 +2050,54 @@ void SimManager::ApplyProtectionToContactForces() {
     scale_factor = std::max(0.0, std::min(1.0, scale_factor));
     
     // CHR 公式在中小冲击力下衰减过强，可能导致约束力不足、地面穿透。
-    // 对 CHR 设置分段最小 scale：
-    // - force before > 10 kN: 允许更低下限 0.05
-    // - force before <= 10 kN: 保持下限 0.3，保证仿真稳定
+    // 使用“线性过渡”的最小 scale，减少阈值附近突变：
+    // - <=500N:       min_scale = 1.0
+    // - 500N~2000N:   min_scale 线性从 1.0 -> 0.4
+    // - 2000N~3500N:  min_scale 线性从 0.4 -> 0.1
+    // - >3500N:       min_scale = 0.1
     if (force_method_ == "chr" && chr_zzq_force_) {
-      constexpr double kChrHighForceThresholdN = 2000.0;
-      constexpr double kChrMinScaleHighForce = 0.2;
-      constexpr double kChrMinScaleLowForce = 0.5;
-      const double chr_min_scale =
-          (contact_force_normal > kChrHighForceThresholdN) ? kChrMinScaleHighForce : kChrMinScaleLowForce;
+      constexpr double kChrMinScaleHighForce = 0.1;   // 高冲击下限
+      constexpr double kChrMinScaleMidForce = 0.5;    // 中冲击下限
+      constexpr double kChrMinScaleLowForce = 1.0;    // 低冲击下限（等效不缩放）
+      constexpr double kN1 = 500.0;                   // 低->中过渡起点
+      constexpr double kN2 = 2000.0;                  // 中->高过渡拐点
+      constexpr double kN3 = 10000.0;                  // 中->高过渡终点
+
+      double chr_min_scale = kChrMinScaleHighForce;
+      if (contact_force_normal <= kN1) {
+        chr_min_scale = kChrMinScaleLowForce;
+      } else if (contact_force_normal <= kN2) {
+        const double t = (contact_force_normal - kN1) / (kN2 - kN1);
+        chr_min_scale = kChrMinScaleLowForce +
+                        t * (kChrMinScaleMidForce - kChrMinScaleLowForce);
+      } else if (contact_force_normal <= kN3) {
+        const double t = (contact_force_normal - kN2) / (kN3 - kN2);
+        chr_min_scale = kChrMinScaleMidForce +
+                        t * (kChrMinScaleHighForce - kChrMinScaleMidForce);
+      } else {
+        chr_min_scale = kChrMinScaleHighForce;
+      }
       if (scale_factor < chr_min_scale) {
         scale_factor = chr_min_scale;
       }
     }
+
+    // 双速率低通：
+    // - scale 下降（防护增强）时：快跟随，避免冲击峰值压不住
+    // - scale 上升（防护减弱）时：慢回升，抑制阈值附近抖动/远滑
+    // - 对 CHR 的高冲击段(>kN3=3500N)，无论升降都使用快跟随，降低高力段相位滞后
+    constexpr double kScaleLpAlphaDown = 0.2;  // 快响应
+    constexpr double kScaleLpAlphaUp = 0.8;    // 慢回升
+    constexpr double kChrFastFollowForceN = 2000.0;
+    const double prev_scale = filtered_scales_prev[static_cast<size_t>(i)];
+    double alpha = (scale_factor < prev_scale) ? kScaleLpAlphaDown : kScaleLpAlphaUp;
+    if (force_method_ == "chr" && chr_zzq_force_ && contact_force_normal > kChrFastFollowForceN) {
+      alpha = kScaleLpAlphaDown;
+    }
+    scale_factor = alpha * prev_scale + (1.0 - alpha) * scale_factor;
+    // 低通后再次夹紧，防止数值漂移
+    scale_factor = std::max(0.0, std::min(1.0, scale_factor));
+    filtered_scales_prev[static_cast<size_t>(i)] = scale_factor;
 
     // 实际施加到 efc_force 的是 scale_factor，CHR 原始 force_protected_kN 可能极小；日志与统计用有效力
     const double effective_force_kN = force_unprotected_kN * scale_factor;

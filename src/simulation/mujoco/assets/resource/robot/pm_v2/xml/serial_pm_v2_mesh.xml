@@ -28,9 +28,14 @@
                      contype="1": 接触类型为1
                      conaffinity="1": 接触亲和性为1
                      friction: 摩擦系数 (滑动摩擦 滚动摩擦 旋转摩擦)
-                     condim="6": 接触维度，6表示完整的6D接触
-                     solimp: 求解器参数，控制接触的软硬程度
-                     solref: 求解器参考参数，控制接触的响应特性
+                     condim="6": 接触维度，6表示完整的6D接触（法向+切向）
+                     solimp: 接触阻抗曲线参数。常用 3 项为 dmin dmax width：
+                             - dmin/dmax 越接近 1.0，接触越“硬”
+                             - width 越大，接触过渡越平滑（单位 m，默认 0.001m）
+                     solref: 接触参考参数。2 项为 timeconst dampratio：
+                             - timeconst 越小，恢复越快（更硬，峰值力可能更大）
+                             - dampratio=1 近似临界阻尼，<1 易振荡，>1 过阻尼
+                     margin: 接触边界外扩（单位 m）。当距离进入 margin 区间时开始参与接触求解
                      rgba: 可视化颜色 (红 绿 蓝 透明度) -->
                 <!-- 非 ankle 的 link 继承此 friction=2；ankle（脚/脚趾）在各自 default 里覆盖为 1 -->
                 <geom group="3" contype="1" conaffinity="1" friction="1.0 0.005 0.0001" 
@@ -58,23 +63,32 @@
                 <!-- 左脚碰撞几何体 - 使用mesh模型进行精确碰撞检测 -->
                 <default class="collision_left_foot">
                     <!-- <geom type="mesh" mesh="LINK_ANKLE_ROLL_L" rgba="0.804 0.361 0.031 0.5"/> -->
-                    <geom type="box" size="0.102292353 0.053555 0.01" pos="0.0170 0.00166 -0.03631" rgba="0.804 0.361 0.031 0.5" friction="1 0.005 0.0001"/>
+                    <!-- 脚底接触参数单独设置：保留摩擦，显式覆盖接触求解参数 -->
+                    <geom type="box" size="0.102292353 0.053555 0.01" pos="0.0170 0.00166 -0.03631"
+                          rgba="0.804 0.361 0.031 0.5" friction="1 0.005 0.0001"
+                          condim="6" solimp="0.93 0.97 0.001" solref="0.001 1" margin="0.0015"/>
                 </default>
 
                 <!-- 左脚脚趾碰撞几何体 - 使用mesh模型进行精确碰撞检测 -->
                 <default class="collision_left_foot_toe">
-                    <geom type="box" size="0.028 0.047805 0.01" quat="0.9741537 0 -0.2258863 0" pos="0.139 0.0 -0.0235" rgba="0.804 0.361 0.031 0.5" friction="1 0.005 0.0001"/>
+                    <geom type="box" size="0.028 0.047805 0.01" quat="0.9741537 0 -0.2258863 0" pos="0.139 0.0 -0.0235"
+                          rgba="0.804 0.361 0.031 0.5" friction="1 0.005 0.0001"
+                          condim="6" solimp="0.93 0.97 0.001" solref="0.001 1" margin="0.0015"/>
                 </default>
 
                 <!-- 右脚碰撞几何体 - 使用mesh模型进行精确碰撞检测 -->
                 <default class="collision_right_foot">
                     <!-- <geom type="mesh" mesh="LINK_ANKLE_ROLL_R" rgba="0.804 0.361 0.031 0.5"/> -->
-                    <geom type="box" size="0.102292353 0.053555 0.01" pos="0.0170 -0.00166 -0.03631" rgba="0.804 0.361 0.031 0.5" friction="1 0.005 0.0001"/>
+                    <geom type="box" size="0.102292353 0.053555 0.01" pos="0.0170 -0.00166 -0.03631"
+                          rgba="0.804 0.361 0.031 0.5" friction="1 0.005 0.0001"
+                          condim="6" solimp="0.93 0.97 0.001" solref="0.001 1" margin="0.0015"/>
                 </default>
 
                 <!-- 右脚脚趾碰撞几何体 - 使用mesh模型进行精确碰撞检测 -->
                 <default class="collision_right_foot_toe">
-                    <geom type="box" size="0.028 0.047805 0.01" quat="0.9741537 0 -0.2258863 0" pos="0.139 0.0 -0.0235" rgba="0.804 0.361 0.031 0.5" friction="1 0.005 0.0001"/>
+                    <geom type="box" size="0.028 0.047805 0.01" quat="0.9741537 0 -0.2258863 0" pos="0.139 0.0 -0.0235"
+                          rgba="0.804 0.361 0.031 0.5" friction="1 0.005 0.0001"
+                          condim="6" solimp="0.93 0.97 0.001" solref="0.001 1" margin="0.0015"/>
                 </default>
 
                 <!-- 左肘末端碰撞几何体 - 使用mesh模型进行精确碰撞检测 -->

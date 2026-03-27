@@ -206,12 +206,88 @@ def plot_chr_force_decay_curves(
     return output_path
 
 
+def plot_chr_force_decay_and_scale_curves(
+    thicknesses_mm=(1.0, 6.0),
+    density=0.4,
+    force_min=0.4,
+    force_max=170.0,
+    num_points=400,
+    output_path=None,
+    params_file="fitted_parameters.json",
+):
+    """
+    同时绘制 CHR 力衰减曲线和 scale 曲线。
+
+    上图：缓冲前冲击力 vs 缓冲后冲击力；
+    下图：缓冲前冲击力 vs scale(F_after / F_before)。
+    """
+    calculator = ForceCalculator(params_file=params_file)
+    force_before = np.linspace(force_min, force_max, num_points)
+
+    fig, (ax_decay, ax_scale) = plt.subplots(
+        2, 1, figsize=(10, 10), sharex=True, gridspec_kw={"hspace": 0.12}
+    )
+
+    ax_decay.plot(
+        force_before,
+        force_before,
+        linestyle="--",
+        color="0.55",
+        linewidth=1.5,
+        label="No protection",
+    )
+
+    for thickness_mm in thicknesses_mm:
+        force_after = calculator.calculate_force_after(thickness_mm, density, force_before)
+        ratio = np.divide(
+            force_after,
+            force_before,
+            out=np.zeros_like(force_after),
+            where=force_before > 0.0,
+        )
+        reduction_percent = np.where(force_before > 0.0, (1.0 - ratio) * 100.0, 0.0)
+        label = (
+            f"CHR, {thickness_mm:g} mm "
+            f"(max reduction {np.max(reduction_percent):.1f}%)"
+        )
+        ax_decay.plot(force_before, force_after, linewidth=2.2, label=label)
+        ax_scale.plot(force_before, ratio, linewidth=2.2, label=f"{thickness_mm:g} mm")
+
+    ax_decay.set_title(f"CHR Force Decay Curves (density={density:g})")
+    ax_decay.set_ylabel("Protected force after impact (kN)")
+    ax_decay.grid(True, linestyle="--", alpha=0.35)
+    ax_decay.legend()
+
+    ax_scale.set_title(f"CHR Scale Curves (density={density:g})")
+    ax_scale.set_xlabel("Unprotected force before impact (kN)")
+    ax_scale.set_ylabel("Scale (F_after / F_before)")
+    ax_scale.grid(True, linestyle="--", alpha=0.35)
+    ax_scale.legend(title="Thickness")
+
+    if output_path is None:
+        thickness_tag = "_".join(f"{t:g}mm" for t in thicknesses_mm)
+        output_path = os.path.join(
+            os.path.dirname(os.path.abspath(__file__)),
+            f"force_decay_scale_curves_{thickness_tag}.png",
+        )
+
+    fig.tight_layout()
+    fig.savefig(output_path, dpi=200, bbox_inches="tight")
+    plt.close(fig)
+    return output_path
+
+
 def build_argparser():
     parser = argparse.ArgumentParser(description="CHR 缓冲力计算与衰减曲线绘图")
     parser.add_argument(
         "--plot-decay-curves",
         action="store_true",
         help="绘制 CHR 力衰减曲线",
+    )
+    parser.add_argument(
+        "--plot-scale-curves",
+        action="store_true",
+        help="绘制 CHR scale 曲线 (F_after / F_before)",
     )
     parser.add_argument(
         "--thicknesses",
@@ -265,6 +341,19 @@ def main():
     """
     args = build_argparser().parse_args()
 
+    if args.plot_decay_curves and args.plot_scale_curves:
+        output_path = plot_chr_force_decay_and_scale_curves(
+            thicknesses_mm=args.thicknesses,
+            density=args.density,
+            force_min=args.force_min,
+            force_max=args.force_max,
+            num_points=args.num_points,
+            output_path=args.output,
+            params_file=args.params_file,
+        )
+        print(f"已生成 CHR 力衰减+scale 曲线: {output_path}")
+        return
+
     if args.plot_decay_curves:
         output_path = plot_chr_force_decay_curves(
             thicknesses_mm=args.thicknesses,
@@ -276,6 +365,19 @@ def main():
             params_file=args.params_file,
         )
         print(f"已生成 CHR 力衰减曲线: {output_path}")
+        return
+
+    if args.plot_scale_curves:
+        output_path = plot_chr_force_decay_and_scale_curves(
+            thicknesses_mm=args.thicknesses,
+            density=args.density,
+            force_min=args.force_min,
+            force_max=args.force_max,
+            num_points=args.num_points,
+            output_path=args.output,
+            params_file=args.params_file,
+        )
+        print(f"已生成 CHR scale 曲线: {output_path}")
         return
 
     print("=== 缓冲材料力计算器 ===")
