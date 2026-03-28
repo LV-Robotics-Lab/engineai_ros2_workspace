@@ -962,8 +962,7 @@ class RlBasicRunnerCHR : public rclcpp::Node {
     }
     // 每次收到 reset 信号都重新初始化状态
     mujoco_reset_received_ = true;
-    walking_start_time_ = time_;
-    reset_time_ = time_;  // 记录 reset 时间，用于摔倒检测延迟
+    // reset_time_ / time_ 在下方与 episode 一起清零，用于 fall_detection_delay（time_-reset_time_ 即本 episode 时长）
     test_force_fall_triggered_ = false;  // 允许本次 reset 后再次强制触发（若配置了 test_force_fall_direction）
     is_walking_mode_ = true;
     is_damping_mode_ = false;
@@ -988,8 +987,18 @@ class RlBasicRunnerCHR : public rclcpp::Node {
     if (quat_error_history_.size() > 0) quat_error_history_.setZero();
     initial_quat_offset_computed_ = false;
     initial_quat_offset_ = std::nullopt;
+
+    // 行走策略：与首次进入 joint_bridge 一致，重置 episode 时间与观测栈。
+    // 否则 time_ 已很大时不再做 q_des 从 initial_joint_q_ 的过渡，且历史帧仍含摔倒前观测，易导致 reset 后乱扭、偏航摔倒。
+    time_ = 0.0;
+    reset_time_ = 0.0;
+    walking_start_time_ = 0.0;
+    is_first_time_ = true;
+    mlp_net_observation_walking_.setZero();
+    mlp_net_action_walking_.setZero();
+    resample_initial_joint_q_on_next_control_ = true;
     
-    RCLCPP_INFO(get_logger(), "Received MuJoCo reset signal, restarting walking from time: %.2f", time_);
+    RCLCPP_INFO(get_logger(), "Received MuJoCo reset signal, restarting walking (episode time reset)");
   }
   
   // 根据重力投影方向选择 mimic Policy
@@ -1184,6 +1193,12 @@ class RlBasicRunnerCHR : public rclcpp::Node {
     
     auto joint_state = message_handler_->GetLatestJointState();
     if (!joint_state) return;
+
+    if (resample_initial_joint_q_on_next_control_) {
+      initial_joint_q_ =
+          Eigen::Map<const Eigen::VectorXd>(joint_state->position.data(), joint_state->position.size());
+      resample_initial_joint_q_on_next_control_ = false;
+    }
 
     // 仅当处于 damping 模式（mimic 轨迹已播完）且收到 reset 时，在本周期内恢复走路；
     // mimic 播放期间不强制恢复，否则会每帧被拉回 walking 再触发摔倒，轨迹永远播不完、进不了 damping
@@ -1974,6 +1989,7 @@ class RlBasicRunnerCHR : public rclcpp::Node {
   double walking_duration_;
   double walking_start_time_;
   bool mujoco_reset_received_;
+  bool resample_initial_joint_q_on_next_control_ = false;
   Eigen::Vector3d command_;
   
   // Fall detection state (cached from CalculateObservation for reuse)

@@ -12,7 +12,7 @@ CONTROLLER=XZL
 SAVE_FORMAT=csv
 
 # MuJoCo 是否使用隐藏窗口模式运行
-MUJOCO_HEADLESS=true
+MUJOCO_HEADLESS=false
 
 # MuJoCo CSV 写入阈值：低于则省略行，减小体积
 CSV_MIN_FORCE_N=400

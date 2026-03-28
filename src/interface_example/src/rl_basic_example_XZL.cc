@@ -51,6 +51,7 @@ class RlBasicRunnerXZL : public rclcpp::Node {
           fall_stable_count_ = 0;    // 重置摔倒检测防抖
           is_first_time_ = true;     // 下一帧会重新用当前 obs 填充 history buffer
           time_ = 0.0;               // 重置计时，使 falling_detect_after_sec 在每次 reset 后重新生效
+          global_phase_ = 0.0;       // 与 episode 对齐，避免 reset 后相位与姿态脱节
         });
 
     // 加载扭矩限制参数
@@ -240,6 +241,13 @@ class RlBasicRunnerXZL : public rclcpp::Node {
 
     RCLCPP_DEBUG(get_logger(), "Updating state");
     UpdateState(joint_state);
+
+    // MuJoCo reset / 离开再进 joint_bridge 后 is_first_time_=true：用当前仿真关节作为过渡起点，避免仍用启动时的 initial_joint_q_
+    if (is_first_time_) {
+      if (q_real_.size() == initial_joint_q_.size()) {
+        initial_joint_q_ = q_real_;
+      }
+    }
     
     RCLCPP_DEBUG(get_logger(), "Calculating observation");
     CalculateObservation();

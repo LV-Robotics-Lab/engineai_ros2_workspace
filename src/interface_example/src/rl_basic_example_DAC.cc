@@ -493,6 +493,9 @@ class RlBasicRunnerDAC : public rclcpp::Node {
     if (mlp_net_action_.size() > 0) {
       mlp_net_action_.setZero();
     }
+    if (goal_buffer_.size() > 0) {
+      goal_buffer_.setZero();
+    }
 
     RCLCPP_INFO(get_logger(), "MuJoCo reset: restart dance (base policy) at time: %.2f", time_);
   }

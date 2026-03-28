@@ -480,8 +480,8 @@ python3 scripts/ThicknessCalculate/force_calculator.py \
   --thicknesses 6 12 18 24 \
   --density 0.4 \
   --force-min 0 \
-  --force-max 30 \
-  -o ./scripts/ThicknessCalculate/force_decay_scale_curves_0to30kN_6mm_12mm_18mm_24mm.png
+  --force-max 85 \
+  -o ./scripts/ThicknessCalculate/force_decay_scale_curves_0to85kN_6mm_12mm_18mm_24mm.png
 ```
 
 

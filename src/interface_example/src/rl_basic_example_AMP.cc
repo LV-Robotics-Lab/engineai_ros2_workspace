@@ -207,7 +207,9 @@ class RlBasicRunnerAMP : public rclcpp::Node {
     }
     is_walking_mode_ = true;
     mujoco_reset_received_ = true;
-    reset_time_ = time_;
+    // 与 CHR/XZL 一致：episode 时间清零，否则 time_ 已很大时 walking 过渡 (walking_transition_time_) 不再生效
+    time_ = 0.0;
+    reset_time_ = 0.0;
     fall_stable_count_ = 0;
     global_phase_ = 0.0;
     walking_is_first_time_ = true;
@@ -312,6 +314,13 @@ class RlBasicRunnerAMP : public rclcpp::Node {
 
     RCLCPP_DEBUG(get_logger(), "Updating state");
     UpdateState(joint_state);
+
+    // MuJoCo reset 后 walking_is_first_time_=true：下一帧用当前 keyframe 关节作为过渡起点（initial_joint_q_ 仅 Initialize 时采一次会偏）
+    if (walking_is_first_time_) {
+      if (q_real_.size() == initial_joint_q_.size()) {
+        initial_joint_q_ = q_real_;
+      }
+    }
 
     if (is_walking_mode_ && enable_falling_switch_ && mujoco_reset_received_ &&
         (time_ - reset_time_) >= falling_detect_after_sec_ && DetectFall()) {

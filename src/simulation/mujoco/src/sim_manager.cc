@@ -2056,8 +2056,8 @@ void SimManager::ApplyProtectionToContactForces() {
     // - 2000N~3500N:  min_scale 线性从 0.4 -> 0.1
     // - >3500N:       min_scale = 0.1
     if (force_method_ == "chr" && chr_zzq_force_) {
-      constexpr double kChrMinScaleHighForce = 0.1;   // 高冲击下限
-      constexpr double kChrMinScaleMidForce = 0.5;    // 中冲击下限
+      constexpr double kChrMinScaleHighForce = 0.01;   // 高冲击下限
+      constexpr double kChrMinScaleMidForce = 0.03;    // 中冲击下限
       constexpr double kChrMinScaleLowForce = 1.0;    // 低冲击下限（等效不缩放）
       constexpr double kN1 = 500.0;                   // 低->中过渡起点
       constexpr double kN2 = 2000.0;                  // 中->高过渡拐点
@@ -2086,7 +2086,7 @@ void SimManager::ApplyProtectionToContactForces() {
     // - scale 下降（防护增强）时：快跟随，避免冲击峰值压不住
     // - scale 上升（防护减弱）时：慢回升，抑制阈值附近抖动/远滑
     // - 对 CHR 的高冲击段(>kN3=3500N)，无论升降都使用快跟随，降低高力段相位滞后
-    constexpr double kScaleLpAlphaDown = 0.2;  // 快响应
+    constexpr double kScaleLpAlphaDown = 0.1;  // 快响应
     constexpr double kScaleLpAlphaUp = 0.8;    // 慢回升
     constexpr double kChrFastFollowForceN = 2000.0;
     const double prev_scale = filtered_scales_prev[static_cast<size_t>(i)];
