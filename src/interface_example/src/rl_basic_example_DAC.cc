@@ -73,6 +73,12 @@ class RlBasicRunnerDAC : public rclcpp::Node {
         rclcpp::spin_some(shared_from_this());
         std::this_thread::sleep_for(std::chrono::milliseconds(100));
       }
+      while (!message_handler_->GetLatestJointState()) {
+        rclcpp::spin_some(shared_from_this());
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+        RCLCPP_INFO_THROTTLE(get_logger(), *get_clock(), 1000,
+                             "Waiting for first /hardware/joint_state from MuJoCo...");
+      }
 
       auto initial_state = message_handler_->GetLatestJointState();
       if (!initial_state) return false;

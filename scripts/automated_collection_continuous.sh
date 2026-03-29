@@ -6,7 +6,7 @@
 # 8方向循环：0=前, 45=左前, 90=左, 135=左后, 180=后, 225=右后, 270=右, 315=右前
 
 # 运控选择：XZL 或 CHR
-CONTROLLER=XZL
+CONTROLLER=CHR
 
 # 保存格式：csv（文本）或 bin（二进制，体积小、写入快）
 SAVE_FORMAT=csv
@@ -190,6 +190,12 @@ for ((i=1; i<=TOTAL_EXPERIMENTS; i++)); do
             csv_format:=$SAVE_FORMAT \
             csv_file_path:="$RUN_CSV_DIR" &
         MUJOCO_PID=$!
+        # 运控先于 MuJoCo 启动时，Initialize 会阻塞直到 joint_bridge + joint_state；若仍因旧二进制等失败退出，此处能立刻发现
+        sleep 2
+        if ! kill -0 "$RL_PID" 2>/dev/null; then
+            echo "错误: 运控进程 ($RL_PROCESS) 已退出。常见原因: Initialize 在收到 joint_bridge 时尚无 joint_state（需重新编译 interface_example 含关节等待修复），或 lib/配置错误。请查看该 launch 终端日志。"
+            exit 1
+        fi
     else
         # 后续：先发布方向，再发布路径，触发 CSV 切换 + reset
         echo "切换新实验目录并触发 reset..."
