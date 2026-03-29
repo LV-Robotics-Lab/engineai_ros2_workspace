@@ -28,14 +28,24 @@ motion_states:
     # _13_force 是 无护具的主动摔倒
     # _1_map 是 有简单护具的主动摔倒
     mimic_policies:
-      forward: "policies/toFront_1_map.mnn"
-      forward_left: "policies/toLeftFront_1_map.mnn"
-      left: "policies/toLeft_1_map.mnn"
-      backward_left: "policies/toLeftBack_1_map.mnn"
-      backward: "policies/toBack_1_map.mnn"
-      backward_right: "policies/toRightBack_1_map.mnn"
-      right: "policies/toRight_1_map.mnn"
-      forward_right: "policies/toRightFront_1_map.mnn"
+      # forward: "policies/toFront_1_map.mnn"
+      # forward_left: "policies/toLeftFront_1_map.mnn"
+      # left: "policies/toLeft_1_map.mnn"
+      # backward_left: "policies/toLeftBack_1_map.mnn"
+      # backward: "policies/toBack_1_map.mnn"
+      # backward_right: "policies/toRightBack_1_map.mnn"
+      # right: "policies/toRight_1_map.mnn"
+      # forward_right: "policies/toRightFront_1_map.mnn"
+      
+      forward: "policies/toFront_13_force.mnn"
+      forward_left: "policies/toLeftFront_13_force.mnn"
+      left: "policies/toLeft_13_force.mnn"
+      backward_left: "policies/toLeftBack_13_force.mnn"
+      backward: "policies/toBack_13_force.mnn"
+      backward_right: "policies/toRightBack_13_force.mnn"
+      right: "policies/toRight_13_force.mnn"
+      forward_right: "policies/toRightFront_13_force.mnn"
+
     mimic_trajectories:
       forward: "trajectories/toFront_1_converted_50fps.csv"
       forward_left: "trajectories/toLeftFront_1_converted_50fps.csv"
