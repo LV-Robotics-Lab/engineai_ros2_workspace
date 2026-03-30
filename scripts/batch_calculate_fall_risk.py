@@ -22,7 +22,7 @@
 单次 risk 结果仍在各实验子目录（与原始 csv/bin 同文件夹）。
 批量汇总默认写在 --root（与各子实验文件夹同级）::
 
-    all_runs_summary.csv   # 1 行：全批次各分项 risk 的算术平均 + n_runs
+    all_runs_summary.csv   # 1 行：n_runs + 各分项跨 run 的 mean/median/…（列名如 contact_risk_median；单次 summary 仅 episode 标量无此类列）
     per_run_risk.csv       # 每行一次实验的明细（原合并表）
     stats_by_direction.csv
     stats_overall.txt
@@ -41,8 +41,9 @@ import sys
 import threading
 import time
 from pathlib import Path
-from typing import List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple
 
+import numpy as np
 import pandas as pd
 
 # 与 calculate_fall_risk 同目录，保证可 import mujoco_data_io
@@ -54,6 +55,35 @@ try:
 except ImportError:
     resolve_paths_from_log_dir = None  # type: ignore
     read_binary_policy_switch = None  # type: ignore
+
+
+def summarize_scalar_across_runs(values: np.ndarray) -> Dict[str, float]:
+    """
+    对多次实验的同一标量 risk（如 contact_risk）做跨 run 描述统计。
+    键名用于 all_runs_summary：`contact_risk_median` 等（跨多次实验）；单次 `*_summary.csv` 无此类列，仅有 `contact_risk` 等 episode 标量。
+    """
+    v = np.asarray(values, dtype=float)
+    v = v[np.isfinite(v)]
+    if v.size == 0:
+        return {}
+    p01, p05, p25, p50, p75, p95, p99 = (
+        float(np.quantile(v, q)) for q in (0.01, 0.05, 0.25, 0.5, 0.75, 0.95, 0.99)
+    )
+    return {
+        "mean": float(np.mean(v)),
+        "median": p50,
+        "min": float(np.min(v)),
+        "max": float(np.max(v)),
+        "iqr": float(p75 - p25),
+        "p25": p25,
+        "p75": p75,
+        "p01": p01,
+        "p05": p05,
+        "p95": p95,
+        "p99": p99,
+        "p95_minus_p05": float(p95 - p05),
+        "p99_minus_p01": float(p99 - p01),
+    }
 
 
 def is_valid_run_dir(d: Path) -> bool:
@@ -456,22 +486,47 @@ def main() -> int:
     merged.to_csv(detail_csv, index=False, float_format="%.6f")
     print(f"\n已写入: {detail_csv} ({len(merged)} 行，逐实验明细)")
 
-    # all_runs_summary：全批次各 risk 列算术平均
-    mean_keys = [
+    # all_runs_summary：列名与单次 risk_results_summary 一致（contact_risk_mean 等）；contact_risk 仍为跨 run 均值（兼容旧脚本）
+    scalar_risk_keys = [
         "contact_risk",
         "vibration_risk",
         "motor_risk",
         "jointforce_risk",
         "all_risk",
     ]
+    _distribution_stat_names = (
+        "mean",
+        "median",
+        "min",
+        "max",
+        "iqr",
+        "p25",
+        "p75",
+        "p01",
+        "p05",
+        "p95",
+        "p99",
+        "p95_minus_p05",
+        "p99_minus_p01",
+    )
     summary_row: dict = {"n_runs": len(merged)}
-    for k in mean_keys:
-        if k in merged.columns:
-            summary_row[k] = float(merged[k].mean())
+    for k in scalar_risk_keys:
+        if k not in merged.columns:
+            continue
+        s = pd.to_numeric(merged[k], errors="coerce").dropna()
+        stats = summarize_scalar_across_runs(s.to_numpy(dtype=float))
+        if not stats:
+            continue
+        summary_row[k] = stats["mean"]
+        for name in _distribution_stat_names:
+            summary_row[f"{k}_{name}"] = stats[name]
     summary_df = pd.DataFrame([summary_row])
     all_csv = out_dir / "all_runs_summary.csv"
     summary_df.to_csv(all_csv, index=False, float_format="%.6f")
-    print(f"已写入: {all_csv}（全批次平均值，1 行）")
+    print(
+        f"已写入: {all_csv}（全批次 1 行；分布列名与单次 summary 一致，取值为跨 run 统计）",
+        flush=True,
+    )
 
     if "all_risk" in merged.columns:
         g = merged.groupby("direction", dropna=False)

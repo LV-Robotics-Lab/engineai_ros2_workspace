@@ -826,13 +826,13 @@ python3 scripts/calculate_fall_risk.py \
 
 - 目录可为「实验文件夹下直接放日志」，或「实验文件夹/时间戳/」下再放日志（连续采集常见后者）；脚本两种都支持。
 - 每个**实际日志目录**内的 `risk_results_*.csv` 仍由 `calculate_fall_risk.py` 写在该目录（与原始 csv/bin 同文件夹）。
-- **`--root` 下**：`all_runs_summary.csv`（全批次各 risk **平均值**，1 行）、`per_run_risk.csv`（每次实验一行明细）、`stats_by_direction.csv`、`stats_overall.txt`。
+- **`--root` 下**：`all_runs_summary.csv`（1 行：`n_runs`；`contact_risk` 等 5 列为跨 run **算术平均**（与 `contact_risk_mean` 同值）；另有跨 run 的 `contact_risk_median`、`contact_risk_iqr` 等。**单次** `risk_results_summary.csv` 只有每条轨迹的标量 risk + `max_*`，**不含**这些分位数列——分位数只在「多次实验汇总」时有意义）、`per_run_risk.csv`（每次实验一行明细）、`stats_by_direction.csv`、`stats_overall.txt`。
 - 另 **`policy_switch_walking_combined.csv`**：合并各子目录 `policy_switch.csv` / `.bin` 中仅 **`from_mode == walking`** 的行；`--no-combine-policy-switch` 可关闭。
 - 子进程 `calculate_fall_risk` 较慢时，stderr 会**周期性刷新剩余/已用时**（见下「长时子任务进度」）。
 
 ```bash
 python3 scripts/batch_calculate_fall_risk.py \
-  --root /home/wang22/data/mujoco_logs/protector_all12_passive_push_1600/8dir-200.0N-0.4s-20260328_144535
+  --root /home/wang22/data/mujoco_logs/8dir-200.0N-0.4s-20260329_134130
 ```
 
 - **长时子任务进度**：每个目录跑 `calculate_fall_risk.py` 时，**stderr** 会每隔约 **10 秒**用同一行刷新（`\r`），显示当前子任务已用时，以及有历史平均耗时后的**本批剩余时间（不含当前子任务）**。关闭：`--no-progress-ticker` 或 `--progress-ticker-interval 0`；改间隔：`--progress-ticker-interval 5`。

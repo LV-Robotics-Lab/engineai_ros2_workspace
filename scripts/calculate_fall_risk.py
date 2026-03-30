@@ -964,8 +964,18 @@ def calculate_motor_torque_risk(
     if save_frame_by_frame_path is not None:
         try:
             frame_by_frame_df = save_frame_by_frame_risk_data(
-                joint_state_df, torque_cols, timestamps, mode, wp, wr, 
-                tau_max_const, P0_const, q_tau, q_p, eps, dt
+                joint_state_df,
+                torque_cols,
+                timestamps,
+                mode,
+                wp,
+                wr,
+                tau_max_const,
+                P0_const,
+                q_tau,
+                q_p,
+                eps,
+                dt,
             )
             if not frame_by_frame_df.empty:
                 frame_by_frame_df.to_csv(save_frame_by_frame_path, index=False, float_format='%.4f')
@@ -2189,7 +2199,7 @@ def calculate_joint_wrench_risk(
         dt = 0.002
     
     # 获取时间戳
-    timestamps = joint_forces_df['timestamp'].to_numpy(dtype=float)
+    timestamps = joint_forces_df["timestamp"].to_numpy(dtype=float)
     tolerance = 0.001  # 1ms 容差
     
     # 创建碰撞时间戳的掩码
@@ -2651,7 +2661,8 @@ def main():
         type=str,
         default=None,
         help='输出结果文件路径前缀 (CSV格式，可选)。将自动生成：'
-             '{output}_summary.csv 和 {output}_*_breakdown.csv'
+             '{output}_summary.csv（episode 标量 risk、filename、max_* 等）'
+             '和 {output}_*_breakdown.csv'
     )
     
     parser.add_argument(
