@@ -105,7 +105,7 @@
                     <!-- class="collision_knee": 使用膝关节碰撞几何体类 -->
                     <geom class="collision_left_knee"/>
                     <!-- 摔倒分析：胫骨侧向地面延伸的接地球（mesh 下端常与地不相交，否则 contact 日志几乎只有足底） -->
-                    <geom type="sphere" size="0.04" pos="0 0 -0.22" contype="1" conaffinity="1" friction="1 0.005 0.0001" group="3" rgba="0.5 0.5 0.5 0.25"/>
+                    <!-- <geom type="sphere" size="0.04" pos="0 0 -0.22" contype="1" conaffinity="1" friction="1 0.005 0.0001" group="3" rgba="0.5 0.5 0.5 0.25"/> -->
                     
                     <!-- 左踝关节俯仰轴链接 -->
                     <!-- name="LINK_ANKLE_PITCH_L": 左踝关节俯仰轴链接名称 -->
@@ -228,7 +228,7 @@
                     <joint name="J09_KNEE_PITCH_R" pos="0 0 0" axis="0 1 0" range="-0.3491 2.3911" actuatorfrcrange="-164 164" class="joint" armature="0.045325"/>
                     <geom type="mesh" rgba="0.5 0.5 0.5 1" mesh="LINK_KNEE_PITCH_R_VISUAL" class="visual"/>
                     <geom class="collision_right_knee"/>
-                    <geom type="sphere" size="0.04" pos="0 0 -0.22" contype="1" conaffinity="1" friction="1 0.005 0.0001" group="3" rgba="0.5 0.5 0.5 0.25"/>
+                    <!-- <geom type="sphere" size="0.04" pos="0 0 -0.22" contype="1" conaffinity="1" friction="1 0.005 0.0001" group="3" rgba="0.5 0.5 0.5 0.25"/> -->
                     <body name="LINK_ANKLE_PITCH_R" pos="-0.026756 -0.00041994 -0.36305">
                         <inertial pos="0.00073183 0 -0.00669428" quat="0.667584 -0.233091 -0.233091 0.667584" mass="0.115345" diaginertia="1.511e-05 1.42164e-05 1.17736e-05"/>
                         <joint name="J10_ANKLE_PITCH_R" pos="0 0 0" axis="0 1 0" range="-0.6807 0.7243" actuatorfrcrange="-61 61" class="joint" armature="0.039175"/>
@@ -282,7 +282,7 @@
         <!-- 碰撞几何体 - 使用mesh模型 -->
         <geom class="collision_torso_yaw"/>
         <!-- 前摔时胸腹侧可与地面接触（仅靠 torso mesh 时前倾常无 world 接触） -->
-        <geom type="sphere" size="0.09" pos="0.11 0 -0.10" contype="1" conaffinity="1" friction="1 0.005 0.0001" group="3" rgba="0.5 0.5 0.5 0.25"/>
+        <!-- <geom type="sphere" size="0.09" pos="0.11 0 -0.10" contype="1" conaffinity="1" friction="1 0.005 0.0001" group="3" rgba="0.5 0.5 0.5 0.25"/> -->
         
         <!-- ==================== 左臂运动链 (Left Arm Kinematic Chain) ==================== -->
         <!-- 左肩关节俯仰轴链接 -->
