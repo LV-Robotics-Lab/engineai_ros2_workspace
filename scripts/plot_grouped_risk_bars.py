@@ -3,6 +3,7 @@ from pathlib import Path
 import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.font_manager as fm
+from matplotlib.colors import to_rgba
 
 
 def _get_available_font(font_names):
@@ -89,23 +90,27 @@ def _add_sig_bracket(
         fontfamily=fontfamily,
     )
 
-
+# "#BEB0D0", "#A7C0DE", "#6C91C2", "#A3514F"
 def plot_grouped_risk_bars_pub(
     group_names,
     group_medians,
     group_errors,
     risk_names=("Contact force", "Joint wrench", "Vibration", "Motor current"),
-    risk_colors=("#BEB0D0", "#A7C0DE", "#6C91C2", "#A3514F"),
+    risk_colors=("#C82423", "#2878B5", "#9AC9DB", "#F8AC8C"),
     ylabel="Risk value",
+    xlabel=None,
     title=None,
     figsize_cm=_DEFAULT_FIGSIZE_CM,
     bar_width=0.18,
+    bar_gap=0.0,
     capsize=3,
     edgecolor="#666666",
     linewidth=0.8,
     errorbar_color="#666666",
     legend=True,
     legend_ncol=2,
+    legend_loc="upper center",
+    legend_bbox_to_anchor=(0.5, 1.10),
     ylim=None,
     yticks=None,
     show_grid=False,
@@ -183,6 +188,14 @@ def plot_grouped_risk_bars_pub(
     if group_errors.shape[:2] != group_medians.shape:
         raise ValueError("group_errors first two dims must match group_medians")
 
+    # Matplotlib 的 `ax.bar(color=...)` 支持传入 RGBA 元组。
+    # 这里希望：
+    # - 填充色使用给定 alpha（例如 0.3）
+    # - 柱子边框 edgecolor 不透明（alpha=1.0），并且与填充的 RGB 一致
+    fill_alpha = 0.3
+    risk_colors_fill = [to_rgba(c, fill_alpha) for c in risk_colors]
+    risk_colors_edge = [to_rgba(c, 1.0) for c in risk_colors]
+
     w_cm, h_cm = float(figsize_cm[0]), float(figsize_cm[1])
     if w_cm <= 0 or h_cm <= 0:
         raise ValueError("figsize_cm 宽高须为正数（厘米）")
@@ -191,7 +204,11 @@ def plot_grouped_risk_bars_pub(
     )
 
     x = np.arange(n_groups)
-    offsets = (np.arange(n_risks) - (n_risks - 1) / 2.0) * bar_width
+    if bar_gap < 0:
+        raise ValueError("bar_gap must be >= 0")
+    # offsets 的步长 = bar_width + bar_gap
+    # 这样组内柱子之间会有空隙，而柱子的实际宽度仍保持为 bar_width。
+    offsets = (np.arange(n_risks) - (n_risks - 1) / 2.0) * (bar_width + bar_gap)
 
     ymax_candidates = []
 
@@ -206,8 +223,8 @@ def plot_grouped_risk_bars_pub(
             positions,
             heights,
             width=bar_width,
-            color=risk_colors[i],
-            edgecolor=edgecolor,
+            color=risk_colors_fill[i],
+            edgecolor=risk_colors_edge[i],
             linewidth=linewidth,
             yerr=yerr,
             capsize=capsize,
@@ -226,6 +243,8 @@ def plot_grouped_risk_bars_pub(
     ax.set_xticks(x)
     ax.set_xticklabels(group_names)
     ax.set_ylabel(ylabel, fontfamily=MYRIAD_FONT, fontsize=_LABEL_FONTSIZE)
+    if xlabel is not None:
+        ax.set_xlabel(xlabel, fontfamily=MYRIAD_FONT, fontsize=_LABEL_FONTSIZE)
 
     if title is not None:
         ax.set_title(title, pad=8, fontfamily=MYRIAD_FONT, fontsize=_LABEL_FONTSIZE)
@@ -262,8 +281,8 @@ def plot_grouped_risk_bars_pub(
         leg = ax.legend(
             frameon=False,
             ncol=legend_ncol,
-            loc="upper center",
-            bbox_to_anchor=(0.5, 1.10),
+            loc=legend_loc,
+            bbox_to_anchor=legend_bbox_to_anchor,
             handlelength=1.3,
             columnspacing=1.2,
             handletextpad=0.5,
@@ -287,7 +306,8 @@ def plot_grouped_risk_bars_pub(
             x2 = x[g2] + offsets[r2]
             _add_sig_bracket(ax, x1, x2, y, h, text)
 
-    plt.tight_layout()
+    # 之前使用 matplotlib 默认 tight_layout pad，会让图的上下左右留白偏大。
+    plt.tight_layout(pad=0.3)
 
     if save_path is not None:
         # 与 plot_contact_grid.py 一致：PNG 常用 300 dpi、透明底、不用 tight 裁边
@@ -330,7 +350,7 @@ if __name__ == "__main__":
         group_names=group_names,
         group_medians=group_medians,
         group_errors=group_errors,
-        risk_names=("Contact force", "Joint wrench", "Vibration", "Motor current"),
+        risk_names=("Contact Risk", "Joint Risk", "Vibration Risk", "Motor Risk"),
         ylabel="Median risk",
         save_path=str(_out_dir / "risk_bar_pub.png"),
     )

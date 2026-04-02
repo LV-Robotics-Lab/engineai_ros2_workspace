@@ -28,17 +28,20 @@ _ROW_NAMES = [
 ]
 
 _GROUP_LABELS = [
-    "Non",
-    "Silicone\nRubber",
-    "Non-newtonian Fluid\nFoam Material",
+    "Non Protector",
+    "Silicone Rubber",
+    "Non-newtonian Fluid Foam",
 ]
 
 _RISK_SPECS = [
-    ("contact", "Contact force"),
-    ("jointforce", "Joint wrench"),
+    ("contact", "Contact"),
+    ("jointforce", "Joint"),
     ("vibration", "Vibration"),
-    ("motor", "Motor current"),
+    ("motor", "Motor"),
 ]
+
+_CASE_LABELS = tuple(_GROUP_LABELS)  # 3 个 case（图例）
+_RISK_LABELS = tuple(label for _, label in _RISK_SPECS)  # 4 个 risk（横轴）
 
 
 def _load_rows(csv_path: Path) -> dict[str, dict[str, str]]:
@@ -48,7 +51,9 @@ def _load_rows(csv_path: Path) -> dict[str, dict[str, str]]:
     return rows
 
 
-def _build_arrays(rows_by_name: dict[str, dict[str, str]]) -> tuple[list[list[float]], list[list[list[float]]]]:
+def _build_arrays(
+    rows_by_name: dict[str, dict[str, str]],
+) -> tuple[list[list[float]], list[list[list[float]]]]:
     """柱高为各分项 ``*_risk_mean``；误差条全 0（不画分位数区间）。"""
     means: list[list[float]] = []
     zero_errors: list[list[list[float]]] = []
@@ -73,19 +78,33 @@ def main() -> None:
 
     rows_by_name = _load_rows(csv_path)
     group_means, group_errors = _build_arrays(rows_by_name)
-    risk_names = tuple(label for _, label in _RISK_SPECS)
+
+    # 将维度从：
+    #   (n_cases=3, n_risks=4) -> (n_risks=4, n_cases=3)
+    # 这样才能满足：横轴是 4 种 risk，标签/图例是 3 种 case。
+    n_cases = len(group_means)
+    n_risks = len(group_means[0])
+    group_means_t = [[group_means[c][r] for c in range(n_cases)] for r in range(n_risks)]
+    group_errors_t = [[group_errors[c][r] for c in range(n_cases)] for r in range(n_risks)]
 
     _OUTPUT_FIGURES.mkdir(parents=True, exist_ok=True)
     out_path = _OUTPUT_FIGURES / "fig2-1_compare_risks_of_different_materials.png"
     fig, _ax = plot_grouped_risk_bars_pub(
-        group_names=_GROUP_LABELS,
-        group_medians=group_means,
-        group_errors=group_errors,
-        risk_names=risk_names,
+        group_names=_RISK_LABELS,  # x-axis：4 risks
+        group_medians=group_means_t,
+        group_errors=group_errors_t,
+        risk_names=_CASE_LABELS,  # legend：3 cases
+        # 由于现在每组里是 3 个 case，因此颜色也需要 3 个
+        risk_colors=("#C82423", "#2878B5", "#F8AC8C"),
         ylabel="Mean risk",
-        figsize_cm=(9.0, 7.0),
+        figsize_cm=(9.0, 7.2),
         capsize=0,
         save_path=str(out_path),
+        bar_gap=0.03,
+        legend_ncol=1,
+        legend_loc="upper right",
+        # 收回到坐标轴内部，减少整体边距
+        legend_bbox_to_anchor=(0.98, 0.98),
     )
     plt.close(fig)
     print(f"已保存: {out_path}")
