@@ -499,8 +499,35 @@ class RlBasicRunnerAMP : public rclcpp::Node {
     }
 
     Eigen::VectorXd obs = Eigen::VectorXd::Zero(param_->num_observations * param_->num_include_obs_steps);
-    obs.head(param_->num_observations * param_->num_include_obs_steps) =
-        Eigen::Map<Eigen::VectorXd>(mlp_net_observation_.transpose().data(), mlp_net_observation_.size());
+    // AMP fall policy history flattening must match mjlab export ordering:
+    // [term0(t0..tH-1) features..., term1(t0..tH-1) features..., ...]
+    // 也就是 term 内部 time-major，然后保留 term 的 feature 维度顺序。
+    //
+    // AMP single observation order is:
+    // [base_ang_vel(3), projected_gravity(3), joint_pos_rel(kDoF), joint_vel_rel(kDoF), last_action(kDoF)]
+    const int H = param_->num_include_obs_steps;
+    const int kDoF = param_->num_actions;
+    const int base_dim = 3;
+    const int grav_dim = 3;
+
+    const int pos_start = base_dim + grav_dim;       // 6
+    const int vel_start = pos_start + kDoF;         // 6 + kDoF
+    const int act_start = vel_start + kDoF;         // 6 + 2*kDoF
+
+    int offset = 0;
+    auto append_term_time_major = [&](int term_start, int term_dim) {
+      for (int t = 0; t < H; ++t) {
+        obs.segment(offset, term_dim) =
+            mlp_net_observation_.col(t).segment(term_start, term_dim);
+        offset += term_dim;
+      }
+    };
+
+    append_term_time_major(/*base_ang_vel*/ 0, base_dim);
+    append_term_time_major(/*projected_gravity*/ base_dim, grav_dim);
+    append_term_time_major(/*joint_pos_rel*/ pos_start, kDoF);
+    append_term_time_major(/*joint_vel_rel*/ vel_start, kDoF);
+    append_term_time_major(/*last_action*/ act_start, kDoF);
 
     try {
       mlp_net_action_ = (mlp_net_->Inference(obs.cast<float>())).cast<double>();
