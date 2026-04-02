@@ -2056,8 +2056,8 @@ void SimManager::ApplyProtectionToContactForces() {
     // - 2000N~3500N:  min_scale 线性从 0.4 -> 0.1
     // - >3500N:       min_scale = 0.1
     if (force_method_ == "chr" && chr_zzq_force_) {
-      constexpr double kChrMinScaleHighForce = 0.01;   // 高冲击下限
-      constexpr double kChrMinScaleMidForce = 0.03;    // 中冲击下限
+      constexpr double kChrMinScaleHighForce = 0.01;   // 高冲击下限，非牛顿0.01，硅胶0.4
+      constexpr double kChrMinScaleMidForce = 0.03;    // 中冲击下限，非牛顿0.03，硅胶0.4
       constexpr double kChrMinScaleLowForce = 1.0;    // 低冲击下限（等效不缩放）
       constexpr double kN1 = 500.0;                   // 低->中过渡起点
       constexpr double kN2 = 2000.0;                  // 中->高过渡拐点
