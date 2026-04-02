@@ -6,7 +6,7 @@
 # 8方向循环：0=前, 45=左前, 90=左, 135=左后, 180=后, 225=右后, 270=右, 315=右前
 
 # 运控选择：XZL 或 CHR
-CONTROLLER=CHR
+CONTROLLER=XZL
 
 # 保存格式：csv（文本）或 bin（二进制，体积小、写入快）
 SAVE_FORMAT=csv

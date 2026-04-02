@@ -1,17 +1,44 @@
+from pathlib import Path
+
 import numpy as np
 import matplotlib.pyplot as plt
+import matplotlib.font_manager as fm
+
+
+def _get_available_font(font_names):
+    """Return the first font name in ``font_names`` that exists on the system."""
+    available_fonts = [f.name for f in fm.fontManager.ttflist]
+    for font_name in font_names:
+        if font_name in available_fonts:
+            return font_name
+    return "DejaVu Sans"
+
+
+# 与 plot_contact_grid.py 一致：刻度数字用 Times 系；英文标签/图例等用 Myriad 系
+TIMES_FONT = _get_available_font(
+    ["Times New Roman", "TimesNewRoman", "Nimbus Roman", "DejaVu Serif"]
+)
+MYRIAD_FONT = _get_available_font(["Myriad Pro", "MyriadPro", "DejaVu Sans"])
+
+_TICK_FONTSIZE = 8
+_LABEL_FONTSIZE = 10
+_LEGEND_FONTSIZE = 9
+
+_CM_PER_INCH = 2.54
+# 与原先默认 8×4.8 英寸一致
+_DEFAULT_FIGSIZE_CM = (8.0 * _CM_PER_INCH, 4.8 * _CM_PER_INCH)
 
 
 def _set_pub_style():
-    """Set a clean publication-style matplotlib theme."""
+    """Matplotlib 全局样式；具体刻度字体在绘图后按 Times / Myriad 再设。"""
     plt.rcParams.update({
-        "font.family": "DejaVu Sans",   # 若你本机有 Arial，可改成 Arial
-        "font.size": 10,
-        "axes.labelsize": 11,
-        "axes.titlesize": 11,
-        "xtick.labelsize": 10,
-        "ytick.labelsize": 10,
-        "legend.fontsize": 9,
+        "font.family": MYRIAD_FONT,
+        "font.size": _LABEL_FONTSIZE,
+        "axes.labelsize": _LABEL_FONTSIZE,
+        "axes.titlesize": _LABEL_FONTSIZE,
+        "xtick.labelsize": _TICK_FONTSIZE,
+        "ytick.labelsize": _TICK_FONTSIZE,
+        "legend.fontsize": _LEGEND_FONTSIZE,
         "axes.linewidth": 1.0,
         "xtick.major.width": 1.0,
         "ytick.major.width": 1.0,
@@ -22,14 +49,45 @@ def _set_pub_style():
     })
 
 
-def _add_sig_bracket(ax, x1, x2, y, h, text, lw=1.0, color="#444444", fontsize=10):
+def _apply_tick_fonts(ax):
+    """x 轴分组名为英文 → Myriad；y 轴刻度为数字 → Times；均为 8pt（对齐 plot_contact_grid）。"""
+    for label in ax.get_xticklabels():
+        label.set_fontfamily(MYRIAD_FONT)
+        label.set_fontsize(_TICK_FONTSIZE)
+    for label in ax.get_yticklabels():
+        label.set_fontfamily(TIMES_FONT)
+        label.set_fontsize(_TICK_FONTSIZE)
+
+
+def _add_sig_bracket(
+    ax,
+    x1,
+    x2,
+    y,
+    h,
+    text,
+    lw=1.0,
+    color="#444444",
+    fontsize=9,
+    fontfamily=None,
+):
     """
     Add a significance bracket between x1 and x2.
     """
+    if fontfamily is None:
+        fontfamily = MYRIAD_FONT
     ax.plot([x1, x1, x2, x2], [y, y + h, y + h, y],
             lw=lw, c=color, clip_on=False)
-    ax.text((x1 + x2) / 2, y + h, text,
-            ha="center", va="bottom", color=color, fontsize=fontsize)
+    ax.text(
+        (x1 + x2) / 2,
+        y + h,
+        text,
+        ha="center",
+        va="bottom",
+        color=color,
+        fontsize=fontsize,
+        fontfamily=fontfamily,
+    )
 
 
 def plot_grouped_risk_bars_pub(
@@ -40,7 +98,7 @@ def plot_grouped_risk_bars_pub(
     risk_colors=("#BEB0D0", "#A7C0DE", "#6C91C2", "#A3514F"),
     ylabel="Risk value",
     title=None,
-    figsize=(8.0, 4.8),
+    figsize_cm=_DEFAULT_FIGSIZE_CM,
     bar_width=0.18,
     capsize=3,
     edgecolor="#666666",
@@ -54,7 +112,7 @@ def plot_grouped_risk_bars_pub(
     grid_axis="y",
     sig_brackets=None,
     save_path=None,
-    dpi=600,
+    dpi=300,
 ):
     """
     Publication-style grouped bar plot with asymmetric error bars.
@@ -77,6 +135,10 @@ def plot_grouped_risk_bars_pub(
     risk_colors : tuple/list[str]
         每个 risk 的颜色，建议保持 4 个，与 risk 顺序一致
 
+    figsize_cm : tuple[float, float]
+        画布大小 ``(width, height)``，单位 **厘米**；内部会除以 2.54 转为英寸传给 matplotlib。
+        默认与原先 ``8×4.8`` 英寸一致（``(20.32, 12.192)`` cm）。
+
     sig_brackets : list[dict] or None
         显著性标记列表。每个元素示例：
         {
@@ -88,6 +150,13 @@ def plot_grouped_risk_bars_pub(
             "y": 25.0,            # 横线起始高度
             "h": 0.8              # 横线高度
         }
+
+    save_path : str or None
+        若给定路径，按 ``plot_contact_grid.py`` 惯例保存 **PNG**（或其它后缀由路径决定）：
+        ``dpi`` 默认 300，``bbox_inches=None``, ``pad_inches=0``, ``transparent=True``。
+
+    dpi : int
+        保存位图时的分辨率，默认 300（与 ``plot_contact_grid`` 一致）。
 
     Returns
     -------
@@ -114,7 +183,12 @@ def plot_grouped_risk_bars_pub(
     if group_errors.shape[:2] != group_medians.shape:
         raise ValueError("group_errors first two dims must match group_medians")
 
-    fig, ax = plt.subplots(figsize=figsize)
+    w_cm, h_cm = float(figsize_cm[0]), float(figsize_cm[1])
+    if w_cm <= 0 or h_cm <= 0:
+        raise ValueError("figsize_cm 宽高须为正数（厘米）")
+    fig, ax = plt.subplots(
+        figsize=(w_cm / _CM_PER_INCH, h_cm / _CM_PER_INCH)
+    )
 
     x = np.arange(n_groups)
     offsets = (np.arange(n_risks) - (n_risks - 1) / 2.0) * bar_width
@@ -151,10 +225,10 @@ def plot_grouped_risk_bars_pub(
 
     ax.set_xticks(x)
     ax.set_xticklabels(group_names)
-    ax.set_ylabel(ylabel)
+    ax.set_ylabel(ylabel, fontfamily=MYRIAD_FONT, fontsize=_LABEL_FONTSIZE)
 
     if title is not None:
-        ax.set_title(title, pad=8)
+        ax.set_title(title, pad=8, fontfamily=MYRIAD_FONT, fontsize=_LABEL_FONTSIZE)
 
     if yticks is not None:
         ax.set_yticks(yticks)
@@ -169,19 +243,23 @@ def plot_grouped_risk_bars_pub(
         ax.grid(axis=grid_axis, linestyle="-", linewidth=0.5,
                 color="#DDDDDD", alpha=0.8, zorder=0)
 
-    # Spine styling
+    # Spine styling（与 plot_contact_grid 左/下轴 1.0 线宽一致）
     ax.spines["top"].set_visible(False)
     ax.spines["right"].set_visible(False)
     ax.spines["left"].set_color("#444444")
     ax.spines["bottom"].set_color("#444444")
+    ax.spines["left"].set_linewidth(1.0)
+    ax.spines["bottom"].set_linewidth(1.0)
 
     ax.tick_params(axis="both", colors="#333333")
     ax.yaxis.label.set_color("#222222")
     if title is not None:
         ax.title.set_color("#222222")
 
+    _apply_tick_fonts(ax)
+
     if legend:
-        ax.legend(
+        leg = ax.legend(
             frameon=False,
             ncol=legend_ncol,
             loc="upper center",
@@ -190,6 +268,9 @@ def plot_grouped_risk_bars_pub(
             columnspacing=1.2,
             handletextpad=0.5,
         )
+        for text in leg.get_texts():
+            text.set_fontfamily(MYRIAD_FONT)
+            text.set_fontsize(_LEGEND_FONTSIZE)
 
     # significance brackets
     if sig_brackets is not None:
@@ -209,13 +290,23 @@ def plot_grouped_risk_bars_pub(
     plt.tight_layout()
 
     if save_path is not None:
-        fig.savefig(save_path, dpi=dpi, bbox_inches="tight")
+        # 与 plot_contact_grid.py 一致：PNG 常用 300 dpi、透明底、不用 tight 裁边
+        fig.savefig(
+            save_path,
+            dpi=dpi,
+            bbox_inches=None,
+            pad_inches=0,
+            transparent=True,
+        )
 
     return fig, ax
 
 
 
 if __name__ == "__main__":
+    _out_dir = Path(__file__).resolve().parent.parent / "OutputFigures"
+    _out_dir.mkdir(parents=True, exist_ok=True)
+
     group_names = [
         "No protector",
         "Normal material",
@@ -241,7 +332,7 @@ if __name__ == "__main__":
         group_errors=group_errors,
         risk_names=("Contact force", "Joint wrench", "Vibration", "Motor current"),
         ylabel="Median risk",
-        save_path="risk_bar_pub.pdf",
+        save_path=str(_out_dir / "risk_bar_pub.png"),
     )
 
     plt.show()
@@ -271,7 +362,7 @@ if __name__ == "__main__":
         risk_names=("Contact force", "Joint wrench", "Vibration", "Motor current"),
         ylabel="Median risk",
         sig_brackets=sig_brackets,
-        save_path="risk_bar_pub_sig.pdf",
+        save_path=str(_out_dir / "risk_bar_pub_sig.png"),
     )
 
     plt.show()

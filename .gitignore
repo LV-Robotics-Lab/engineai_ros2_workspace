@@ -29,3 +29,6 @@ logs/*.jpeg
 !logs/.gitkeep
 
 MUJOCO_LOG.TXT
+
+# 图表脚本导出的 PNG 等（见 scripts 下 fig / plot_* 写入路径）
+/OutputFigures/

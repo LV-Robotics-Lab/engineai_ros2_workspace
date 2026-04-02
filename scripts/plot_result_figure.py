@@ -1,8 +1,12 @@
-import matplotlib.pyplot as plt
-from matplotlib.patches import Rectangle, FancyArrowPatch, Circle
-import numpy as np, os
+from pathlib import Path
 
-outdir = "./"
+import matplotlib.pyplot as plt
+import numpy as np
+from matplotlib.patches import Circle, FancyArrowPatch, Rectangle
+
+# 与 fig2-1 / plot_grouped_risk_bars 一致：PNG 写入仓库根目录 OutputFigures/（.gitignore）
+_out_dir = Path(__file__).resolve().parent.parent / "OutputFigures"
+_out_dir.mkdir(parents=True, exist_ok=True)
 
 def add_box(ax, x, y, w, h, title, subtitle=None, lw=1.5):
     ax.add_patch(Rectangle((x, y), w, h, fill=False, linewidth=lw))
@@ -38,7 +42,7 @@ def matrix(ax, data, rows, cols, title=""):
     return im
 
 def save_fig(fig, name):
-    path = os.path.join(outdir, name)
+    path = str(_out_dir / name)
     fig.savefig(path, dpi=180, bbox_inches="tight")
     plt.close(fig)
     return path
