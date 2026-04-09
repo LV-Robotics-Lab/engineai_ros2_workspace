@@ -1191,7 +1191,8 @@ def find_max_force_per_position(df, force_column='force_normal', enable_force_fi
     excluded_links = [
         # 'LINK_HEAD_YAW',  # 头部
         'LINK_ANKLE_ROLL_L', 'LINK_ANKLE_ROLL_R',  # 踝关节横滚
-        'LINK_ANKLE_PITCH_L', 'LINK_ANKLE_PITCH_R'  # 踝关节俯仰
+        'LINK_ANKLE_PITCH_L', 'LINK_ANKLE_PITCH_R',  # 踝关节俯仰
+        # 'LINK_HEAD_YAW', 'LINK_TORSO_YAW'
     ]
     
     # 如果有body2_name列，过滤掉头部和踝关节链接

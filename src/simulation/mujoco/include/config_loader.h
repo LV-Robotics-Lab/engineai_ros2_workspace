@@ -31,6 +31,9 @@ class ConfigLoader {
   double GetContactMarkerSize() const { return contact_marker_size_; }
   double GetContactForceScale() const { return contact_force_scale_; }
   bool IsContactVisualizationEnabled() const { return contact_visualization_enabled_; }
+  bool IsContactPointVisualizationEnabled() const { return contact_point_visualization_enabled_; }
+  bool IsContactSplitVisualizationEnabled() const { return contact_split_visualization_enabled_; }
+  bool IsPerturbationForceVisualizationEnabled() const { return perturbation_force_visualization_enabled_; }
 
   // 碰撞模型配置
   std::string GetCollisionModelType() const { return collision_model_type_; }
@@ -98,6 +101,9 @@ class ConfigLoader {
   double contact_marker_size_ = 0.03;
   double contact_force_scale_ = 0.01;
   bool contact_visualization_enabled_ = true;
+  bool contact_point_visualization_enabled_ = true;
+  bool contact_split_visualization_enabled_ = true;
+  bool perturbation_force_visualization_enabled_ = true;
 
   // 碰撞模型配置
   std::string collision_model_type_ = "simplified";  // 碰撞模型类型："simplified", "mesh", "mjlab", 或 "default"

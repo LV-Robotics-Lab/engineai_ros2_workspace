@@ -246,8 +246,9 @@ def get_contact_forces_mj_contactForce(model, data):
 # 使用碰撞力方法，不需要传感器配置
 
 # 模拟参数
-timesteps = 200000  # 模拟总步数 (增加步数以适应更小的时间步长)
 dt = model.opt.timestep
+sim_time = 5.0  # 默认仿真时长（秒）
+timesteps = int(sim_time / dt)
 contact_force_log = []  # 接触力数据日志
 
 # 接触力分析变量

@@ -90,6 +90,15 @@ bool ConfigLoader::LoadConfig() {
       if (contact_viz["enabled"]) {
         contact_visualization_enabled_ = contact_viz["enabled"].as<bool>();
       }
+      if (contact_viz["point_enabled"]) {
+        contact_point_visualization_enabled_ = contact_viz["point_enabled"].as<bool>();
+      }
+      if (contact_viz["split_enabled"]) {
+        contact_split_visualization_enabled_ = contact_viz["split_enabled"].as<bool>();
+      }
+      if (contact_viz["pertforce_enabled"]) {
+        perturbation_force_visualization_enabled_ = contact_viz["pertforce_enabled"].as<bool>();
+      }
       if (contact_viz["force_scale"]) {
         contact_force_scale_ = contact_viz["force_scale"].as<double>();
       }

@@ -963,13 +963,11 @@ bool SimManager::Initialize() {
   mjvOption opt;
   mjv_defaultOption(&opt);
   
-  // 启用接触点可视化 - 这是关键设置
-  opt.flags[mjVIS_CONTACTPOINT] = 1;  // 显示接触点
-  opt.flags[mjVIS_CONTACTFORCE] = config_loader_->IsContactVisualizationEnabled() ? 1 : 0;  // 根据配置文件决定是否显示接触力
-  opt.flags[mjVIS_CONTACTSPLIT] = 1;  // 显示接触分离
-  
-  // 启用外力可视化 - 显示TorqueController施加的推力
-  opt.flags[mjVIS_PERTFORCE] = 1;  // 显示施加的外力
+  // 可视化选项由 YAML 配置统一控制
+  opt.flags[mjVIS_CONTACTPOINT] = config_loader_->IsContactPointVisualizationEnabled() ? 1 : 0;
+  opt.flags[mjVIS_CONTACTFORCE] = config_loader_->IsContactVisualizationEnabled() ? 1 : 0;
+  opt.flags[mjVIS_CONTACTSPLIT] = config_loader_->IsContactSplitVisualizationEnabled() ? 1 : 0;
+  opt.flags[mjVIS_PERTFORCE] = config_loader_->IsPerturbationForceVisualizationEnabled() ? 1 : 0;
   
   // 添加调试信息
   RCLCPP_INFO(logger, "Visualization enabled: CONTACTPOINT=%d, CONTACTFORCE=%d, CONTACTSPLIT=%d, PERTFORCE=%d", 
@@ -1733,11 +1731,11 @@ void SimManager::PhysicsThread(std::string_view filename) {
       sim_->Load(m_, d_, filename.data());
       const std::unique_lock<std::recursive_mutex> lock(sim_->mtx);
 
-      // 设置可视化选项 - 在模型加载后设置
-      sim_->opt.flags[mjVIS_CONTACTPOINT] = 1;  // 显示接触点
-      sim_->opt.flags[mjVIS_CONTACTFORCE] = config_loader_->IsContactVisualizationEnabled() ? 1 : 0;  // 根据配置文件决定是否显示接触力
-      sim_->opt.flags[mjVIS_CONTACTSPLIT] = 1;  // 显示接触分离
-      sim_->opt.flags[mjVIS_PERTFORCE] = 1;  // 显示施加的外力
+      // 设置可视化选项 - 在模型加载后设置（与初始化时保持一致）
+      sim_->opt.flags[mjVIS_CONTACTPOINT] = config_loader_->IsContactPointVisualizationEnabled() ? 1 : 0;
+      sim_->opt.flags[mjVIS_CONTACTFORCE] = config_loader_->IsContactVisualizationEnabled() ? 1 : 0;
+      sim_->opt.flags[mjVIS_CONTACTSPLIT] = config_loader_->IsContactSplitVisualizationEnabled() ? 1 : 0;
+      sim_->opt.flags[mjVIS_PERTFORCE] = config_loader_->IsPerturbationForceVisualizationEnabled() ? 1 : 0;
       RCLCPP_INFO(logger, "Visualization flags set in sim_->opt: CONTACTPOINT=%d, CONTACTFORCE=%d, CONTACTSPLIT=%d, PERTFORCE=%d", 
                   sim_->opt.flags[mjVIS_CONTACTPOINT], sim_->opt.flags[mjVIS_CONTACTFORCE], 
                   sim_->opt.flags[mjVIS_CONTACTSPLIT], sim_->opt.flags[mjVIS_PERTFORCE]);

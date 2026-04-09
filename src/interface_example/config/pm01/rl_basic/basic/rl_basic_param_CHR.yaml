@@ -37,7 +37,7 @@ motion_states:
       # right: "policies/toRight_1_map.mnn"
       # forward_right: "policies/toRightFront_1_map.mnn"
       
-      forward: "policies/toFront_13_force.mnn"
+      forward: "policies/toFront_16_map2.mnn"
       forward_left: "policies/toLeftFront_13_force.mnn"
       left: "policies/toLeft_13_force.mnn"
       backward_left: "policies/toLeftBack_13_force.mnn"

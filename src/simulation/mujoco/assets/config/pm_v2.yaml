@@ -21,7 +21,10 @@ collision_model:
 
 # 接触力可视化配置 - 用于在仿真界面中显示接触力
 contact_visualization:
-  enabled: true        # 是否启用接触力可视化功能
+  enabled: false        # 是否启用接触力可视化功能, false=不显示，true=显示
+  point_enabled: false  # 是否显示接触点
+  split_enabled: false  # 是否显示接触分离
+  pertforce_enabled: false # 是否显示外力箭头
   force_scale: 0.01   # 力矢量显示的比例因子（0.01表示将实际力缩小100倍显示，便于观察）
   marker_size: 0.1    # 可视化标记的大小（箭头、球体等标记的尺寸）
   position_offset: 0.0 # 位置偏移量（用于调整可视化标记的位置）
@@ -34,8 +37,8 @@ protection:
   enabled: false            # 是否启用防护功能（与旧版默认一致）
   thickness: 6.0             # 护具厚度（mm），use_protector_map=false 时使用
   use_protector_map: true     # 是否使用护具地图（yz_map_front/back.tsv）
-  protector_map_front: yz_map_front_passive_20260325_223003.tsv      # 前侧(x>=0) TSV 文件名
-  protector_map_back: yz_map_back_passive_20260325_223003.tsv       # 后侧(x<0) TSV 文件名
+  protector_map_front: yz_map_front_20260331_222436.tsv      # 前侧(x>=0) TSV 文件名
+  protector_map_back: yz_map_back_20260331_222436.tsv       # 后侧(x<0) TSV 文件名
   force_method: chr          # 力衰减：zzq=RT-FEM表(旧版), chr=公式
   density: 0.4               # 材料密度，chr 方法使用；use_protector_map=false 时从此读取
 
@@ -53,8 +56,8 @@ perturbation:
   force_step: 20.0                  # 推力调整步长（牛顿），用于+/-键调整推力大小
   torque_step: 0.0                  # 扭矩调整步长（牛·米），用于+/-键调整推力大小
   force_duration: 0.4               # 推力持续时间（秒），按下键盘后推力持续的时间
-  auto_sampling: false
-  auto_direction_angle: 315         # 推力方向（度）：0=前, 45=左前, 90=左, 135=左后, 180=后, 225=右后, 270=右, 315=右前
+  auto_sampling: true
+  auto_direction_angle: 0         # 推力方向（度）：0=前, 45=左前, 90=左, 135=左后, 180=后, 225=右后, 270=右, 315=右前
   auto_delay: 3.0                   # 施加推力等待时间（秒）
 
 # 传感器配置 - 定义传感器数据的话题

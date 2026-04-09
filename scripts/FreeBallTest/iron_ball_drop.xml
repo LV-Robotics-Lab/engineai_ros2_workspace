@@ -11,10 +11,10 @@
     <!-- autolimits="true": 自动设置关节限制 -->
     
     <!-- 仿真选项 -->
-    <option gravity="0 0 -9.81" integrator="RK4" timestep="0.00001" tolerance="1e-12" cone="elliptic"/>
+    <option gravity="0 0 -9.81" integrator="RK4" timestep="0.002" tolerance="1e-12" cone="elliptic"/>
     <!-- gravity="0 0 -9.81": 重力加速度，z轴向下9.81 m/s² -->
     <!-- integrator="RK4": 使用四阶龙格库塔积分器 -->
-    <!-- timestep="0.00001": 仿真时间步长，0.01毫秒，用于高精度冲击力分析 -->
+    <!-- timestep="0.002": 仿真时间步长，2毫秒 -->
     <!-- tolerance="1e-12": 数值求解容差，确保高精度计算 -->
     <!-- cone="elliptic": 使用椭圆锥接触模型，提供更精确的接触力计算 -->
     
@@ -85,7 +85,7 @@
         <!-- 铁质物体的默认设置 -->
         <default class="iron_object">
             <geom density="7860" friction="0.5 0.005 0.0001" condim="6" 
-                   solimp="0.9 0.95" solref="0.0005 1" material="iron"/>
+                   solimp="0.98 0.995" solref="0.00005 0.2" material="iron"/>
             <!-- density="7860": 密度，铁的标准密度7860 kg/m³ -->
             <!-- friction="0.5 0.005 0.0001": 摩擦系数，滑动/滚动/旋转摩擦 -->
             <!-- condim="6": 接触维度，6表示完整3D接触, 3表示平面接触, 4表示圆柱接触 -->
@@ -130,7 +130,7 @@
         <!-- 地面物体的默认设置 -->
         <default class="ground_object">
             <geom density="7860" friction="0.8 0.005 0.0001" condim="6" 
-                   solimp="0.9 0.95" solref="0.0005 1" material="iron"/>
+                   solimp="0.98 0.995" solref="0.00005 0.3" material="iron"/>
             <!-- density="7860": 密度，铁的标准密度7860 kg/m³ -->
             <!-- friction="0.5 0.005 0.0001": 摩擦系数，滑动/滚动/旋转摩擦 -->
             <!-- condim="6": 接触维度，6表示完整3D接触 -->
@@ -306,10 +306,15 @@
 
     <!-- 接触对定义 - 中等刚度接触设置 -->
     <contact>
-        <pair geom1="ground" geom2="ball_geom" solref="0.0005 1" solreffriction="0.0005 1"/>
+        <pair geom1="ground" geom2="ball_geom" solref="0.0085 1" solimp="0.7 0.95" solreffriction="0.0005 1"/>
         <!-- geom1="ground": 地面几何体 -->
         <!-- geom2="ball_geom": 球体几何体 -->
-        <!-- solref="0.0005 1": 中等刚度接触参数，产生适中的冲击时间 -->
+        <!-- solref="0.0005 1" solimp="0.9 0.95": 无护具参数 -->
+        <!-- solref="0.0015 1" solimp="0.7 0.95": 6mm护具参数 -->
+        <!-- solref="0.0034 1" solimp="0.7 0.95": 12mm护具参数 -->
+        <!-- solref="0.0041 1" solimp="0.7 0.95": 18mm护具参数 -->
+        <!-- solref="0.0085 1" solimp="0.7 0.95": 24mm护具参数 -->
+
         <!-- solreffriction="0.0005 1": 中等摩擦刚度参数，提供适当的摩擦阻尼 -->
     </contact>
 
