@@ -7,7 +7,7 @@ from matplotlib import font_manager as fm
 from matplotlib import transforms
 from matplotlib.legend_handler import HandlerTuple
 from matplotlib.lines import Line2D
-from matplotlib.ticker import FormatStrFormatter, MaxNLocator
+from matplotlib.ticker import FormatStrFormatter, LinearLocator
 
 from plot_curves import plot_rounded_trace, style_axis_like_paper
 
@@ -49,6 +49,15 @@ def _add_scalebar_below_axis(ax, x0: float, length: float, label: str = "0.2s") 
 
 def _time_window(df: pd.DataFrame, t_col: str = "timestamp") -> pd.DataFrame:
     return df[(df[t_col] >= TIME_MIN) & (df[t_col] <= TIME_MAX)].copy()
+
+
+def _set_three_ticks_with_zero(ax) -> None:
+    ymin, ymax = ax.get_ylim()
+    # 让 0 成为固定刻度之一（用于 a/c/d 图）
+    if ymax <= 0:
+        ax.yaxis.set_major_locator(LinearLocator(3))
+        return
+    ax.set_yticks([0.0, ymax / 2.0, ymax])
 
 
 def _extract_torso_speed(link_ke_df: pd.DataFrame) -> pd.DataFrame:
@@ -93,6 +102,30 @@ def _group_contact_force(contact_df: pd.DataFrame, keywords: tuple[str, ...]) ->
     return agg.sort_values("timestamp")
 
 
+def _group_contact_force_max(contact_df: pd.DataFrame, keywords: tuple[str, ...]) -> pd.DataFrame:
+    if "timestamp" not in contact_df.columns or "force_normal" not in contact_df.columns:
+        raise KeyError("contact_data.csv 缺少 timestamp 或 force_normal")
+    if "body1_name" not in contact_df.columns or "body2_name" not in contact_df.columns:
+        raise KeyError("contact_data.csv 缺少 body1_name 或 body2_name")
+
+    b1 = contact_df["body1_name"].fillna("").astype(str)
+    b2 = contact_df["body2_name"].fillna("").astype(str)
+
+    mask = False
+    for kw in keywords:
+        mask = mask | b1.str.contains(kw, case=False) | b2.str.contains(kw, case=False)
+
+    hit = contact_df.loc[mask, ["timestamp", "force_normal"]].copy()
+    if hit.empty:
+        base = contact_df[["timestamp"]].drop_duplicates().copy()
+        base["force_normal"] = 0.0
+        return base.sort_values("timestamp")
+
+    # 每一帧取目标部位接触力最大值
+    agg = hit.groupby("timestamp", as_index=False)["force_normal"].max()
+    return agg.sort_values("timestamp")
+
+
 def _align_to_timebase(series_df: pd.DataFrame, timebase: np.ndarray, value_col: str) -> np.ndarray:
     s = series_df.sort_values("timestamp")
     t = s["timestamp"].to_numpy()
@@ -108,24 +141,31 @@ def _prepare_dataset(log_dir: Path) -> dict:
 
     torso_speed_df = _extract_torso_speed(link_ke)
     pe_df = _extract_total_pe(link_ke)
-    knee_df = _group_contact_force(contact, ("KNEE",))
-    elbow_df = _group_contact_force(contact, ("ELBOW",))
+    knee_df = _group_contact_force(contact, ("link_hip_yaw", "link_knee_pitch"))
+    elbow_df = _group_contact_force_max(contact, ("link_shoulder_yaw", "link_elbow_"))
     torso_df = _group_contact_force(contact, ("TORSO",))
     head_df = _group_contact_force(contact, ("HEAD",))
 
-    # 公共时间轴用 link_kinetic_energy 的时间戳
+    # a/b 仍使用 link_kinetic_energy 时间轴
     t = torso_speed_df["timestamp"].to_numpy()
-    torso_force = _align_to_timebase(torso_df, t, "force_normal")
-    head_force = _align_to_timebase(head_df, t, "force_normal")
-    vulnerable_force = np.maximum(torso_force, head_force)
+
+    # d 图按 contact 时间戳逐帧求 max(torso, head)，避免插值稀释峰值
+    torso_contact = torso_df.rename(columns={"force_normal": "torso_force"})
+    head_contact = head_df.rename(columns={"force_normal": "head_force"})
+    vulnerable_df = pd.merge(torso_contact, head_contact, on="timestamp", how="outer").fillna(0.0)
+    vulnerable_df["vulnerable_force"] = vulnerable_df[["torso_force", "head_force"]].max(axis=1)
+    vulnerable_df = vulnerable_df.sort_values("timestamp")
 
     return {
-        "t": t,
+        "t_ab": t,
         "torso_speed": torso_speed_df["torso_speed"].to_numpy(),
         "pe": _align_to_timebase(pe_df, t, "total_PE"),
-        "knee_force": _align_to_timebase(knee_df, t, "force_normal"),
-        "elbow_force": _align_to_timebase(elbow_df, t, "force_normal"),
-        "vulnerable_force": vulnerable_force,
+        "t_knee": knee_df["timestamp"].to_numpy(),
+        "knee_force": knee_df["force_normal"].to_numpy(),
+        "t_elbow": elbow_df["timestamp"].to_numpy(),
+        "elbow_force": elbow_df["force_normal"].to_numpy(),
+        "t_vulnerable": vulnerable_df["timestamp"].to_numpy(),
+        "vulnerable_force": vulnerable_df["vulnerable_force"].to_numpy(),
     }
 
 
@@ -150,28 +190,28 @@ def main() -> None:
     active = _prepare_dataset(active_dir)
     passive = _prepare_dataset(passive_dir)
 
-    t = active["t"]
-    if len(t) == 0:
+    t_ab = active["t_ab"]
+    if len(t_ab) == 0:
         raise RuntimeError("3.0s~5.0s 时间窗口内没有数据")
 
-    fig_width_cm = 9.33
-    fig_height_cm = 18
+    fig_width_cm = 12
+    fig_height_cm = 9
     cm_to_inch = 1.0 / 2.54
     fig, axes = plt.subplots(
-        4,
-        1,
+        2,
+        2,
         figsize=(fig_width_cm * cm_to_inch, fig_height_cm * cm_to_inch),
         dpi=300,
     )
-    ax_a, ax_b, ax_c, ax_d = axes
+    ax_a, ax_b, ax_c, ax_d = axes.flatten()
 
     # a) Torso 速度对比
     plot_rounded_trace(
-        ax_a, t, active["torso_speed"], label="Active", lw=2.5, color=COLOR_ACTIVE,
+        ax_a, t_ab, active["torso_speed"], label="Active", lw=2.5, color=COLOR_ACTIVE,
         smooth_window=smooth_window, polyorder=polyorder, num_dense=num_dense
     )
     plot_rounded_trace(
-        ax_a, t, passive["torso_speed"], label="Passive", lw=2.5, color=COLOR_PASSIVE,
+        ax_a, t_ab, passive["torso_speed"], label="Passive", lw=2.5, color=COLOR_PASSIVE,
         smooth_window=smooth_window, polyorder=polyorder, num_dense=num_dense
     )
     style_axis_like_paper(ax_a, ylabel="Torso Speed (m/s)")
@@ -183,11 +223,11 @@ def main() -> None:
 
     # b) PE 对比
     plot_rounded_trace(
-        ax_b, t, active["pe"], label="Active", lw=2.5, color=COLOR_ACTIVE,
+        ax_b, t_ab, active["pe"], label="Active", lw=2.5, color=COLOR_ACTIVE,
         smooth_window=smooth_window, polyorder=polyorder, num_dense=num_dense
     )
     plot_rounded_trace(
-        ax_b, t, passive["pe"], label="Passive", lw=2.5, color=COLOR_PASSIVE,
+        ax_b, t_ab, passive["pe"], label="Passive", lw=2.5, color=COLOR_PASSIVE,
         smooth_window=smooth_window, polyorder=polyorder, num_dense=num_dense
     )
     style_axis_like_paper(ax_b, ylabel="Potential Energy (J)")
@@ -199,19 +239,19 @@ def main() -> None:
 
     # c) Knee / Elbow 分开冲击力对比（不再相加）
     plot_rounded_trace(
-        ax_c, t, active["knee_force"] / 1000.0, lw=2.5, alpha=0.5, color=COLOR_ACTIVE,
+        ax_c, active["t_knee"], active["knee_force"] / 1000.0, lw=2.5, alpha=0.5, color=COLOR_ACTIVE,
         smooth_window=smooth_window, polyorder=polyorder, num_dense=num_dense
     )
     plot_rounded_trace(
-        ax_c, t, passive["knee_force"] / 1000.0, lw=2.5, alpha=0.5, color=COLOR_PASSIVE,
+        ax_c, passive["t_knee"], passive["knee_force"] / 1000.0, lw=2.5, alpha=0.5, color=COLOR_PASSIVE,
         smooth_window=smooth_window, polyorder=polyorder, num_dense=num_dense
     )
     plot_rounded_trace(
-        ax_c, t, active["elbow_force"] / 1000.0, lw=2.0, alpha=0.9, color=COLOR_ACTIVE,
+        ax_c, active["t_elbow"], active["elbow_force"] / 1000.0, lw=2.0, alpha=0.9, color=COLOR_ACTIVE,
         smooth_window=smooth_window, polyorder=polyorder, num_dense=num_dense
     )
     plot_rounded_trace(
-        ax_c, t, passive["elbow_force"] / 1000.0, lw=2.0, alpha=0.9, color=COLOR_PASSIVE,
+        ax_c, passive["t_elbow"], passive["elbow_force"] / 1000.0, lw=2.0, alpha=0.9, color=COLOR_PASSIVE,
         smooth_window=smooth_window, polyorder=polyorder, num_dense=num_dense
     )
     style_axis_like_paper(ax_c, ylabel="Knee / Elbow\nCollision (kN)")
@@ -239,11 +279,11 @@ def main() -> None:
 
     # d) Torso / Head 每帧取最大值（脆弱部位碰撞力）
     plot_rounded_trace(
-        ax_d, t, active["vulnerable_force"] / 1000.0, label="Active", lw=2.5, color=COLOR_ACTIVE,
+        ax_d, active["t_vulnerable"], active["vulnerable_force"] / 1000.0, label="Active", lw=2.5, color=COLOR_ACTIVE,
         smooth_window=smooth_window, polyorder=polyorder, num_dense=num_dense
     )
     plot_rounded_trace(
-        ax_d, t, passive["vulnerable_force"] / 1000.0, label="Passive", lw=2.5, color=COLOR_PASSIVE,
+        ax_d, passive["t_vulnerable"], passive["vulnerable_force"] / 1000.0, label="Passive", lw=2.5, color=COLOR_PASSIVE,
         smooth_window=smooth_window, polyorder=polyorder, num_dense=num_dense
     )
     style_axis_like_paper(ax_d, ylabel="Vulnerable Part\nCollision (kN)")
@@ -256,7 +296,10 @@ def main() -> None:
     # 统一限制 y 轴主刻度数量为 3
     for ax in (ax_a, ax_b, ax_c, ax_d):
         ax.spines["left"].set_linewidth(AXIS_LW)
-        ax.yaxis.set_major_locator(MaxNLocator(nbins=3))
+        if ax is ax_b:
+            ax.yaxis.set_major_locator(LinearLocator(3))
+        else:
+            _set_three_ticks_with_zero(ax)
         ax.tick_params(axis="y", labelsize=FONT_SIZE_TICK, direction="in", width=AXIS_LW)
         for tick in ax.get_yticklabels():
             tick.set_fontname(tick_font)
@@ -273,7 +316,8 @@ def main() -> None:
                 txt.set_fontname(other_font)
                 txt.set_fontsize(FONT_SIZE_OTHER)
 
-    # c/d 固定为 kN 数值展示
+    # a/c/d 固定为 1 位小数展示
+    ax_a.yaxis.set_major_formatter(FormatStrFormatter("%.1f"))
     ax_c.yaxis.set_major_formatter(FormatStrFormatter("%.1f"))
     ax_d.yaxis.set_major_formatter(FormatStrFormatter("%.1f"))
 
