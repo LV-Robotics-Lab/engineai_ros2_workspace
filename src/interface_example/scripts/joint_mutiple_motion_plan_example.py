@@ -10,6 +10,7 @@ Supported request types:
 """
 
 import argparse
+import time
 from collections import deque
 from pathlib import Path
 
@@ -451,11 +452,20 @@ def main(args=None):
     client.get_logger().info(
         "Waiting for planner status message to get initial request_id..."
     )
+    deadline = time.monotonic() + 10.0
     try:
         while rclpy.ok() and (
-            client._current_state is None or client._current_request_id is None
+            client._current_state is None
+            or client._current_request_id is None
+            or client._request_publisher.get_subscription_count() == 0
         ):
+            if time.monotonic() > deadline:
+                client.get_logger().error("DDS discovery timeout (10s)")
+                client.destroy_node()
+                rclpy.shutdown()
+                return 1
             rclpy.spin_once(client, timeout_sec=0.1)
+            client.get_logger().info(f"waiting for DDS discovery: {time.monotonic() - deadline:.2f}s")
     except KeyboardInterrupt:
         client.get_logger().info("User interrupted")
         client.destroy_node()

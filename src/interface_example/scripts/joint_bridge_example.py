@@ -110,10 +110,10 @@ class JointTestExample(Node):
                 self.num_steps.extend([int(s) for s in steps_group])
 
             for kp_group in kp:
-                self.kp.extend(kp_group)
+                self.kp.extend(float(kp) for kp in kp_group)
 
             for kd_group in kd:
-                self.kd.extend(kd_group)
+                self.kd.extend(float(kd) for kd in kd_group)
 
             # Print loaded parameters for verification
             self.get_logger().info("Joint test parameters loaded:")
@@ -214,8 +214,8 @@ class JointTestExample(Node):
         joint_command.velocity = [0.0] * num_joints
         joint_command.feed_forward_torque = [0.0] * num_joints
         joint_command.torque = [0.0] * num_joints
-        joint_command.stiffness = [400.0] * num_joints
-        joint_command.damping = [5.0] * num_joints
+        joint_command.stiffness = self.kp
+        joint_command.damping = self.kd
 
         all_reached = True
         for i in range(num_joints):
