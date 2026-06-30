@@ -6,16 +6,21 @@ Upper Joint Interpolation Executor
 - JointTrajectoryPublisher: ROS2 node that publishes the trajectory back and forth at a fixed frequency
 """
 
+import argparse
 import sys
+from pathlib import Path
 from typing import List, Tuple
 
 import numpy as np
 import rclpy
+import yaml
 from rclpy.node import Node
 from std_msgs.msg import Header
 
-from interface_protocol.msg import MotionState
-from interface_protocol.msg import JointOverrideCommand  # type: ignore
+from interface_protocol.msg import (
+    JointOverrideCommand,  # type: ignore
+    MotionState,
+)
 
 
 class QuinticSplineInterpolator:
@@ -237,33 +242,55 @@ class JointOverridePublisher(Node):
 
 
 def main(args=None):
+    """Main function"""
+    default_config = (
+        Path(__file__).resolve().parent
+        / ".."
+        / "config"
+        / "pm01"
+        / "upper_joint_override.yaml"
+    ).resolve()
+
+    parser = argparse.ArgumentParser(
+        description="Upper joint override example - Load and execute upper joint override from configuration file"
+    )
+    parser.add_argument(
+        "-f",
+        "--config_file",
+        type=str,
+        default=str(default_config),
+        help="Full path to upper joint override configuration file (YAML format)",
+    )
+
+    # Only parse known arguments, ignore ROS2 arguments
+    parsed_args, unknown = parser.parse_known_args()
+    try:
+        print(f"Loading configuration file: {parsed_args.config_file}")
+        with open(parsed_args.config_file, "r") as f:
+            config = yaml.safe_load(f)
+    except Exception as e:
+        parser.error(f"Failed to load configuration file: {e}")
+
     rclpy.init(args=args)
 
     # 1) First, plan a trajectory
-    timer_freq = 100.0
-    start_pos = np.array([0.0, 0.0])
-
-    joint_indices = [14, 19]
-    end_pos = np.array([1.57, -1.57])
-    velocity = np.array([0.0, 0.0])
-    feed_forward_torque = np.array([0.0, 0.0])
-    torque = np.array([0.0, 0.0])
-    stiffness = np.array([20.0, 20.0])
-    damping = np.array([1.0, 1.0])
-
-    planner = JointTrajectoryPlanner(frequency=timer_freq)
-    trajectory = planner.plan(start_pos, end_pos, duration=5.0)
+    planner = JointTrajectoryPlanner(frequency=config["timer_freq"])
+    trajectory = planner.plan(
+        np.array(config["start_pos"]),
+        np.array(config["end_pos"]),
+        duration=config["duration"],
+    )
 
     # 2) Then, play it back and forth
     node = JointOverridePublisher(
-        freq=timer_freq,
+        freq=config["timer_freq"],
         trajectory=trajectory,
-        joint_indices=joint_indices,
-        velocity=velocity,
-        feed_forward_torque=feed_forward_torque,
-        torque=torque,
-        stiffness=stiffness,
-        damping=damping,
+        joint_indices=config["joint_indices"],
+        velocity=np.array(config["velocity"]),
+        feed_forward_torque=np.array(config["feed_forward_torque"]),
+        torque=np.array(config["torque"]),
+        stiffness=np.array(config["stiffness"]),
+        damping=np.array(config["damping"]),
     )
 
     try:

@@ -1,0 +1,19 @@
+# Timer frequency in Hz
+timer_freq: 100.0
+
+# Duration of the trajectory in seconds
+duration: 5.0
+
+# Joint indices to control
+joint_indices: [14, 19]
+
+# Start and end positions
+start_pos: [0.0, 0.0]
+end_pos: [1.57, -1.57]
+
+# Velocity, feed forward torque, torque, stiffness, and damping
+velocity: [0.0, 0.0]
+feed_forward_torque: [0.0, 0.0]
+torque: [0.0, 0.0]
+stiffness: [100.0, 100.0]
+damping: [1.0, 1.0]

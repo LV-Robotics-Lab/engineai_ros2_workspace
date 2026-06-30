@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Switch to Terrain Walking Gait Example - Switch to a specific terrain walking gait
+Switch to Target Motion Example - Switch to a specific motion state
 """
 
 import argparse
@@ -160,7 +160,6 @@ def main(args=None):
         "--target-motion",
         "-m",
         type=str,
-        default="rl_terrain",
         help="Target motion state to switch to",
     )
     parsed_args = parser.parse_args()

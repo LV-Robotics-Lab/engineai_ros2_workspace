@@ -1,0 +1,4 @@
+motion_plan:
+- joint_indices: [12, 13, 14, 15, 16, 17, 27, 28, 29, 30, 31, 41, 42]
+- motion: reset
+  request_type: RESET
