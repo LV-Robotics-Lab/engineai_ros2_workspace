@@ -3,13 +3,18 @@
 t800pro dexterous-hand example (joint_bridge mode)
 
 Publishes full-body JointCommand on /hardware/joint_command:
-  - Hand joints: linear interpolation to the target pose
+  - Selected hand joints: linear interpolation to the target pose
   - Remaining joints: hold the positions captured on entry
 
 Poses:
-  extend     both hands fully extended
-  loose_fist both hands in a loose fist
+  extend     selected hand(s) fully extended
+  loose_fist selected hand(s) in a loose fist
   both       loose_fist -> hold -> extend
+
+Hands:
+  both   left + right (default)
+  left   left hand only
+  right  right hand only
 
 Prerequisites:
   1. Robot or simulation is running
@@ -21,14 +26,24 @@ Usage:
   source scripts/setup_host_ros_env.bash
   source build/x86_64/_install/share/interface_protocol/local_setup.sh
 
-  # Minimal
+  # Both hands
   python3 loose_fist_example.py --pose extend
   python3 loose_fist_example.py --pose loose_fist
   python3 loose_fist_example.py --pose both
 
+  # Left hand only
+  python3 loose_fist_example.py --hand left --pose loose_fist
+  python3 loose_fist_example.py --hand left --pose extend
+  python3 loose_fist_example.py --hand left --pose both
+
+  # Right hand only
+  python3 loose_fist_example.py --hand right --pose loose_fist
+  python3 loose_fist_example.py --hand right --pose extend
+  python3 loose_fist_example.py --hand right --pose both
+
   # With parameters
-  python3 loose_fist_example.py --pose both --exec-time 3.0 --hold-time 2.5 --rate 500.0
-  python3 loose_fist_example.py --pose loose_fist --exec-time 2.0 --hold-time 1.0 --rate 200.0
+  python3 loose_fist_example.py --hand left --pose both --exec-time 3.0 --hold-time 2.5 --rate 500.0
+  python3 loose_fist_example.py --hand right --pose loose_fist --exec-time 2.0 --hold-time 1.0 --rate 200.0
 """
 
 import argparse
@@ -47,15 +62,17 @@ MOTION_TOPIC = "/motion/motion_state"
 REQUIRED_MOTION = "joint_bridge"
 
 NUM_JOINTS = 43  # t800pro: J00..J42
-HAND_JOINTS = list(range(20, 27)) + list(range(34, 41))  # left + right hand
+LEFT_HAND_JOINTS = list(range(20, 27))
+RIGHT_HAND_JOINTS = list(range(34, 41))
 
-POSES = {
-    "extend": [0.0] * 14,
-    # Loose fist: stay clear of hard limits; proximal bend > distal bend
-    "loose_fist": (
-        [-0.85, 0.62, 0.48, -0.80, -0.58, -0.80, -0.58]
-        + [0.85, 0.62, 0.48, 0.80, 0.58, 0.80, 0.58]
-    ),
+# Loose fist: stay clear of hard limits; proximal bend > distal bend
+LEFT_POSES = {
+    "extend": [0.0] * 7,
+    "loose_fist": [-0.85, 0.62, 0.48, -0.80, -0.58, -0.80, -0.58],
+}
+RIGHT_POSES = {
+    "extend": [0.0] * 7,
+    "loose_fist": [0.85, 0.62, 0.48, 0.80, 0.58, 0.80, 0.58],
 }
 
 STIFFNESS = [float(x) for x in (
@@ -90,6 +107,22 @@ QOS = QoSProfile(
 def lerp(a, b, t):
     t = max(0.0, min(1.0, t))
     return [ai + (bi - ai) * t for ai, bi in zip(a, b)]
+
+
+def hand_joints(hand):
+    if hand == "left":
+        return LEFT_HAND_JOINTS
+    if hand == "right":
+        return RIGHT_HAND_JOINTS
+    return LEFT_HAND_JOINTS + RIGHT_HAND_JOINTS
+
+
+def goal_hands(pose_name, hand):
+    if hand == "left":
+        return LEFT_POSES[pose_name]
+    if hand == "right":
+        return RIGHT_POSES[pose_name]
+    return LEFT_POSES[pose_name] + RIGHT_POSES[pose_name]
 
 
 class HandBridgeExample(Node):
@@ -158,30 +191,33 @@ class HandBridgeExample(Node):
             rclpy.spin_once(self, timeout_sec=0.0)
             time.sleep(self._dt)
 
-    def run_pose(self, pose_name, hold_positions, exec_time, hold_time):
-        start_hands = [hold_positions[i] for i in HAND_JOINTS]
-        goal_hands = POSES[pose_name]
-        self.get_logger().info("Running pose [%s] (%.1fs)..." % (pose_name, exec_time))
+    def run_pose(self, pose_name, hand, hold_positions, exec_time, hold_time):
+        joints = hand_joints(hand)
+        start_hands = [hold_positions[i] for i in joints]
+        goal = goal_hands(pose_name, hand)
+        self.get_logger().info(
+            "Running pose [%s] on hand [%s] (%.1fs)..." % (pose_name, hand, exec_time)
+        )
 
         t0 = time.time()
         while rclpy.ok():
             elapsed = time.time() - t0
             if elapsed >= exec_time:
                 break
-            hands = lerp(start_hands, goal_hands, elapsed / exec_time)
+            hands = lerp(start_hands, goal, elapsed / exec_time)
             cmd_pos = list(hold_positions)
-            for idx, value in zip(HAND_JOINTS, hands):
+            for idx, value in zip(joints, hands):
                 cmd_pos[idx] = value
             self._cmd_pub.publish(self._make_command(cmd_pos))
             rclpy.spin_once(self, timeout_sec=0.0)
             time.sleep(self._dt)
 
         final_pos = list(hold_positions)
-        for idx, value in zip(HAND_JOINTS, goal_hands):
+        for idx, value in zip(joints, goal):
             final_pos[idx] = value
         hold_positions[:] = final_pos
         self._publish_for(final_pos, hold_time)
-        self.get_logger().info("Pose [%s] done" % pose_name)
+        self.get_logger().info("Pose [%s] on hand [%s] done" % (pose_name, hand))
         return True
 
 
@@ -194,6 +230,12 @@ def parse_args():
         choices=["extend", "loose_fist", "both"],
         default="both",
         help="Target pose",
+    )
+    parser.add_argument(
+        "--hand",
+        choices=["both", "left", "right"],
+        default="both",
+        help="Which hand(s) to move; the other hand holds current position",
     )
     parser.add_argument(
         "--exec-time", type=float, default=3.0, help="Interpolation time per pose (s)"
@@ -220,7 +262,9 @@ def main():
         if hold_positions is None:
             return 1
         for pose_name in pose_sequence:
-            if not node.run_pose(pose_name, hold_positions, args.exec_time, args.hold_time):
+            if not node.run_pose(
+                pose_name, args.hand, hold_positions, args.exec_time, args.hold_time
+            ):
                 return 1
         return 0
     finally:
