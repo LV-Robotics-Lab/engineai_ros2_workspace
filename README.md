@@ -118,50 +118,34 @@ By default, a walking policy is loaded from `src/interface_example/config/pm01/r
 ##### Deploy: Run joint_test_example on your host
 
 1. Enter passive mode.
-
 2. Enter joint bridge mode
-   - Joint bridge mode allows control via joint commands.
-   - With the robot in passive mode, press the Joint Bridge button on the remote control.
-   - Verify the robot status:
-   ```bash
-   # in host
-   ros2 topic echo /motion/motion_state
-   ```
-   - Confirm that the motion state is `joint_bridge` before proceeding.
-
+  - Joint bridge mode allows control via joint commands.
+  - With the robot in passive mode, press the Joint Bridge button on the remote control.
+  - Verify the robot status:
+  - Confirm that the motion state is `joint_bridge` before proceeding.
 3. Run the joint test example:
-   ```bash
+  ```bash
    # in host
    python3 src/interface_example/scripts/joint_test_example.py
-   ```
+  ```
 
 ##### Deploy: Run rl_basic_example on your host
 
 1. Enter pd-stand mode
-   - Ensure the robot is on flat ground with enough space around it.
-   - Use the remote to enter pd-stand mode.
-   - Make sure the robot is stable and standing before proceeding.
-
+  - Ensure the robot is on flat ground with enough space around it.
+  - Use the remote to enter pd-stand mode.
+  - Make sure the robot is stable and standing before proceeding.
 2. Enter joint bridge mode
-   - With the robot in pd-stand mode, press the Joint Bridge button on the remote.
-   - Verify the robot status:
-   ```bash
-   # in host
-   ros2 topic echo /motion/motion_state
-   ```
-   - Confirm that the motion state is `joint_bridge` before proceeding.
-
+  - With the robot in pd-stand mode, press the Joint Bridge button on the remote.
+  - Verify the robot status:
+  - Confirm that the motion state is `joint_bridge` before proceeding.
 3. Run the RL example
-   - **SAFETY**: Keep everyone at a safe distance. Be ready to stop the robot quickly (emergency stop or passive mode) if it behaves unexpectedly.
-   - Launch the example:
-   ```bash
-   # in host
-   ros2 launch interface_example rl_basic_example.launch.py
-   ```
+  - **SAFETY**: Keep everyone at a safe distance. Be ready to stop the robot quickly (emergency stop or passive mode) if it behaves unexpectedly.
+  - Launch the example:
 
 > **NOTE**: If the robot falls in simulation, you may need to reset the simulator using the reset button.
 
-<img src="docs/images/sim2sim.gif" alt="Sim2Sim" width="480">
+
 
 ### Compile the Code on the Target Board
 
@@ -171,15 +155,15 @@ If you do not have a PC development environment, you can build and run on the ro
 
 ```bash
 # in host
-./scripts/sync_src.sh nezha
+./scripts/sync_src.sh orin
 ```
 
 #### Build the Workspace
 
-SSH into the Nezha board and go to the workspace directory:
+SSH into the Orin board and go to the workspace directory:
 
 ```bash
-# in nezha
+# in orin
 cd ~/source/engineai_workspace
 ./scripts/build_nodes.sh
 ```

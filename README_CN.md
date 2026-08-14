@@ -147,10 +147,10 @@ EngineAI 提供开源 RL 训练框架 [EngineAI Gym](https://github.com/engineai
 
 #### 构建工作空间
 
-首先通过 ssh 登录 Nezha 板子并进入工作空间目录：
+首先通过 ssh 登录 Orin 板子并进入工作空间目录：
 
 ```bash
-# in nezha
+# in Orin
 cd ~/source/engineai_workspace
 ./scripts/build_nodes.sh
 ```
